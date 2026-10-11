@@ -1,0 +1,39 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 构建产物
+*.app
+*.dmg
+*.o
+*.out
+Dreamanual NAS 助手
+!dist/
+!dist/*.dmg
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# 临时文件
+.temp/
+*.log
+
+# 图标换代的备份（AppIcon.icns.bak-YYYYMMDD）
+*.bak-*
+
+# 本地凭据与实测数据：本仓库公开，口令、本机地址、抓下来的原始返回一律不进
+*.pw
+pw.txt
+local-*.json
+out/
+
+# WorkBuddy 项目记忆与工作区（仓库公开，不发布内部工作记录）
+.workbuddy/
