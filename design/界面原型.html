@@ -5,28 +5,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dreamanual NAS 助手 · 界面原型</title>
 <!--
-  Dreamanual NAS 助手 · 界面原型（2026-10-12）
+  Dreamanual NAS 助手 · 界面原型（2026-10-12 · 第 2 稿）
 
-  用途：定样式与功能位置。看完这一份再写 SwiftUI 代码。
-  令牌来源：design/tokens.json（0.8.0）逐字抄进下面的 :root，与 design/dist/css/*.css 同源；
-           NAS 正式接入时把这段换成生成物 design/dist/css/dreamanual.nas.css。
+  用途：定样式与功能位置。这一稿按用户反馈重排：
+    主色换 Tailwind v4 sky（群晖天蓝，500=#00a6f4，深字方案，与密码管理 blue 分家）；
+    选中行改「浅底 + 主色字」；播放器对齐网易云布局（进度条贴顶拉满、悬浮拉高 + 气泡）；
+    曲库表头吸附 + 曲序/年份/多流派标签；播放队列占主区；沉浸模式；歌单与每日随机进内容区侧栏；
+    文件管理操作收「…」、去目录大小、拖拽移动、右键菜单；登录页 QC/直连分段互斥。
+  令牌来源：design/tokens.json（0.8.0）逐字抄进下面的 :root，强调色族换成 sky（v4 官方 oklch 经同一
+           OKLab→sRGB 管线换算：400 #00bcff / 500 #00a6f4 / 700 #0069a8 / 800 #00598a / 900 #024a70 /
+           950 #052f4a）；sky 族待落码时补进 tokens.json 并出 dreamanual.nas.css。
   规格来源：design/docs/design-system.md 第七节（尺度）、第八节（组件形态与状态）。
   窗口按 1× 画，1120×700。右侧「标注」勾上会圈出每个可讨论的点，说明列在窗口下方。
 -->
 <style>
-/* ============ 令牌（照 design/dist/css 逐字抄，仅换强调色族为 amber） ============ */
+/* ============ 令牌（照 design/dist/css 逐字抄，强调色族换 sky） ============ */
 :root{
   color-scheme:dark;
   --bg:#0a0a0a; --panel:#171717; --panel-2:#262626; --panel-3:#404040;
   --line:#262626; --line-2:#404040;
   --ink:#f5f5f5; --ink-2:#d4d4d4; --ink-3:#a1a1a1;
-  /* 强调色：amber。主按钮走深字方案（底亮字深），与投资监控同构 */
-  --accent:#fe9a00; --accent-2:#ffb900; --accent-soft:#461901; --accent-line:#973c00;
-  --accent-fill:#fe9a00; --accent-fill-2:#ffb900; --on-accent:#0a0a0a;
+  /* 强调色：sky（群晖天蓝）。主按钮走深字方案（底亮字深），与投资监控同构：
+     950 压 500 = 7.32:1，hover 提到 400 档 = 9.09:1；白字压 500 仅 2.71:1 不可用 */
+  --accent:#00a6f4; --accent-2:#00bcff; --accent-soft:#052f4a; --accent-line:#00598a;
+  --accent-hover:#024a70;
+  --accent-fill:#00a6f4; --accent-fill-2:#00bcff; --on-accent:#0a0a0a;
   --danger:#fb2c36; --danger-soft:#460809; --danger-line:#9f0712;
   --danger-ink:#ffa2a2; --danger-ink-strong:#ff6467; --danger-hover:#82181a;
   --ok:#00bc7d; --ok-soft:#002c22; --ok-line:#006045;
   --ok-ink:#5ee9b5; --ok-ink-strong:#00d492; --ok-hover:#004f3b;
+  /* warn 留 amber，与主色 sky 分族 —— 上一稿的同族碰撞不再存在 */
   --warn:#fe9a00; --warn-soft:#461901; --warn-line:#973c00;
   --warn-ink:#ffd230; --warn-ink-strong:#ffb900; --warn-hover:#7b3306;
   --mark-soft:#7b3306; --mark-line:#bb4d00; --mark-ink:#fee685;
@@ -93,15 +101,18 @@ input,select{font:inherit;color:inherit}
   display:grid;grid-template-columns:220px 1fr;grid-template-rows:1fr 68px;
   box-shadow:var(--shadow-modal);
 }
-.win[data-mode="connect"]{grid-template-columns:1fr;grid-template-rows:1fr}
-.win[data-mode="connect"] .sider,.win[data-mode="connect"] .player{display:none}
-.win[data-mode="connect"] .main{grid-area:1/1}
+/* 连接两态与沉浸模式独占整窗：无侧栏、无播放条，顶端不写产品名（红绿灯悬浮） */
+.win[data-mode="connect"],.win[data-mode="connect2"],.win[data-mode="immersive"]{
+  grid-template-columns:1fr;grid-template-rows:1fr}
+.win[data-mode="connect"] .sider,.win[data-mode="connect"] .player,
+.win[data-mode="connect2"] .sider,.win[data-mode="connect2"] .player,
+.win[data-mode="immersive"] .sider,.win[data-mode="immersive"] .player{display:none}
+.win[data-mode="connect"] .main,.win[data-mode="connect2"] .main,.win[data-mode="immersive"] .main{grid-area:1/1}
 .lights{position:absolute;top:12px;left:14px;display:flex;gap:var(--sp-8);z-index:6}
 .lights i{width:12px;height:12px;border-radius:50%;display:block}
 .lights i:nth-child(1){background:#ff5f57}
 .lights i:nth-child(2){background:#febc2e}
 .lights i:nth-child(3){background:#28c840}
-.win-title{position:absolute;top:11px;left:0;right:0;text-align:center;font-size:var(--fs-12);color:var(--ink-3);z-index:5;pointer-events:none}
 
 /* 侧栏 */
 .sider{
@@ -109,7 +120,7 @@ input,select{font:inherit;color:inherit}
   display:flex;flex-direction:column;min-width:0;padding-top:var(--layout-titlebar);
 }
 .brand{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-16) var(--sp-14) var(--sp-12);border-bottom:var(--lw-hairline) solid var(--line-2)}
-.brand .mark{width:26px;height:26px;border-radius:var(--r-8);background:linear-gradient(150deg,#ffb900,#e17100);display:grid;place-items:center;color:var(--on-accent);flex:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r-8);background:linear-gradient(150deg,#00bcff,#0084d1);display:grid;place-items:center;color:var(--on-accent);flex:none}
 .brand b{font-size:var(--fs-13);font-weight:600;letter-spacing:-.01em}
 .nav{padding:var(--sp-10) var(--sp-8) 0;display:flex;flex-direction:column;gap:var(--sp-2)}
 .nav-row{
@@ -117,11 +128,10 @@ input,select{font:inherit;color:inherit}
   font-size:var(--fs-13);color:var(--ink-2);transition:background var(--mo-fast),color var(--mo-fast);
 }
 .nav-row:hover{background:var(--panel-3);color:var(--ink)}
-.nav-row.on{background:var(--accent-fill);color:var(--on-accent);font-weight:600}
-.nav-row.on:hover{background:var(--accent-fill-2)}
-.nav-row.on.blur{background:var(--accent-soft);color:var(--accent-2)}
+.nav-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
+.nav-row.on:hover{background:var(--accent-hover)}
 .nav-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
-.nav-row.on .cnt{color:var(--on-accent);opacity:.7}
+.nav-row.on .cnt{color:var(--accent-2);opacity:.7}
 .nav-sep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-10) var(--sp-8) var(--sp-8)}
 .sider-foot{margin-top:auto;border-top:var(--lw-hairline) solid var(--line-2);padding:var(--sp-8) var(--sp-16) var(--sp-10)}
 .foot-row{display:flex;align-items:center;gap:var(--sp-6);font-size:var(--fs-11);color:var(--ink-3)}
@@ -211,90 +221,100 @@ input,select{font:inherit;color:inherit}
 }
 .pill.ok{color:var(--ok-ink-strong)} .pill.bad{color:var(--danger-ink-strong)}
 .pill.warn{color:var(--warn-ink-strong)} .pill.ac{color:var(--accent-2)}
-/* 分类标签字取分类自己的颜色（色板 400 档，压 panel-2 最差 5.5:1） */
+/* 分类标签：字取分类自己的颜色（色板 400 档，压 panel-2 最差 5.5:1） */
 .tag{
   display:inline-flex;align-items:center;height:18px;padding:var(--sp-2) var(--sp-8);border-radius:20px;
   background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);
-  font-size:var(--fs-11);font-weight:500;color:var(--accent-2);
+  font-size:var(--fs-11);font-weight:500;white-space:nowrap;
 }
+.tags{display:flex;align-items:center;gap:var(--sp-4);min-width:0;overflow:hidden}
 
 /* 表格 */
 .tbl{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}
 .tbl th{
+  position:sticky;top:0;z-index:2;background:var(--panel);
   text-align:left;font-size:var(--fs-11);font-weight:700;letter-spacing:.03em;color:var(--ink-3);
-  padding:0 var(--sp-10) var(--sp-8);border-bottom:var(--lw-hairline) solid var(--line);
+  padding:var(--sp-8) var(--sp-10);border-bottom:var(--lw-hairline) solid var(--line);
 }
 .tbl td{padding:var(--sp-8) var(--sp-10);font-size:var(--fs-13);color:var(--ink-2);border-bottom:var(--lw-hairline) solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbl tbody tr{transition:background var(--mo-fast)}
 .tbl tbody tr:hover td{background:var(--panel-2);color:var(--ink)}
 .tbl td.num{color:var(--ink-3);font-size:var(--fs-12);font-variant-numeric:tabular-nums}
 .tbl td.main-c{color:var(--ink);font-weight:500}
-.tbl tbody tr.on td{background:var(--accent-fill);color:var(--on-accent)}
-.tbl tbody tr.on td.main-c{color:var(--on-accent)}
-.tbl tbody tr.on td.dim{color:var(--on-accent);opacity:.62}
-.tbl tbody tr.on:hover td{background:var(--accent-fill-2)}
-.tbl-wrap{flex:1;min-height:0;overflow-y:auto}
+/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。secondary 列主色字降一档透明度 */
+.tbl tbody tr.on td{background:var(--accent-soft);color:var(--accent-2)}
+.tbl tbody tr.on td.main-c{color:var(--accent-2)}
+.tbl tbody tr.on td.dim{color:var(--accent-2);opacity:.72}
+.tbl tbody tr.on:hover td{background:var(--accent-hover)}
+/* 艺术家列是链接形态：悬停转主色 */
+.a-link{cursor:pointer}
+.a-link:hover{color:var(--accent-2);text-decoration:underline;text-underline-offset:2px}
+.tbl-wrap{flex:1;min-height:0;overflow-y:auto;position:relative}
 .load-more{
   display:flex;align-items:center;justify-content:center;gap:var(--sp-8);
   padding:var(--sp-12);font-size:var(--fs-12);color:var(--ink-3);cursor:pointer;
 }
 .load-more:hover{color:var(--ink-2)}
-
-/* 队列 */
-.queue{width:300px;flex:none;border-left:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
-.queue-head{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-14) var(--sp-16) var(--sp-10)}
-.queue-body{flex:1;min-height:0;overflow-y:auto;padding:0 var(--sp-8) var(--sp-12)}
-.now-card{margin:0 var(--sp-8) var(--sp-12);padding:var(--sp-12);border-radius:var(--r-10);background:var(--accent-soft)}
-.now-card .t{font-size:var(--fs-13);font-weight:600;color:var(--accent-2);margin-top:var(--sp-10);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.now-card .s{font-size:var(--fs-11);color:var(--accent-2);opacity:.75;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.q-lab{font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3);padding:var(--sp-8) var(--sp-10) var(--sp-6)}
-.q-row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-10);border-radius:var(--r-6);transition:background var(--mo-fast)}
-.q-row:hover{background:var(--panel-2)}
-.q-row .n{font-size:var(--fs-11);color:var(--ink-3);width:16px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
-.q-row .m{min-width:0}
-.q-row .m b{display:block;font-size:var(--fs-12);font-weight:500;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.q-row .m span{display:block;font-size:var(--fs-11);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.queue-foot{border-top:var(--lw-hairline) solid var(--line);padding:var(--sp-10) var(--sp-12);display:flex;gap:var(--sp-6)}
+/* 正在播放的均衡器（三根条） */
+.eq{display:inline-flex;align-items:flex-end;gap:2px;height:12px;flex:none}
+.eq i{width:3px;background:var(--accent-2);border-radius:1px}
+.eq i:nth-child(1){height:6px}.eq i:nth-child(2){height:12px}.eq i:nth-child(3){height:9px}
 
 /* 封面 */
-.cover{border-radius:var(--r-8);background:linear-gradient(150deg,#ffb900,#7b3306);display:grid;place-items:center;color:rgba(10,10,10,.8);flex:none}
+.cover{border-radius:var(--r-8);background:linear-gradient(150deg,#00bcff,#0069a8);display:grid;place-items:center;color:rgba(10,10,10,.75);flex:none}
 .cover.alt1{background:linear-gradient(150deg,#5ee9b5,#004f3b);color:rgba(255,255,255,.85)}
 .cover.alt2{background:linear-gradient(150deg,#8ec5ff,#162456);color:rgba(255,255,255,.85)}
 
-/* 播放条 */
+/* 听歌模块的内容区侧栏（歌单 / 每日随机） */
+.msider{width:200px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
+.mside-body{flex:1;overflow-y:auto;padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-2)}
+.mside-foot{border-top:var(--lw-hairline) solid var(--line);padding:var(--sp-10) var(--sp-12)}
+
+/* 播放条（通栏，网易云布局：进度条贴顶拉满整窗宽） */
 .player{
-  grid-area:2/1/3/3;display:grid;grid-template-columns:300px 1fr 260px;align-items:center;gap:var(--sp-16);
+  grid-area:2/1/3/3;position:relative;
+  display:grid;grid-template-columns:300px 1fr 200px;align-items:center;gap:var(--sp-16);
   padding:0 var(--sp-16);background:var(--panel);border-top:var(--lw-hairline) solid var(--line-2);
 }
+/* 进度条：贴播放条上沿、撑满窗宽；悬停拉高便于点击，气泡报「当前 / 总时长」（悬停态见组件板） */
+.p-line{position:absolute;top:-1px;left:0;right:0;height:4px;background:var(--panel-3);cursor:pointer;transition:height var(--mo-fast)}
+.p-line i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+.p-line em{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%);opacity:0;transition:opacity var(--mo-fast)}
+.p-line:hover{height:8px}
+.p-line:hover i{background:var(--accent-2)}
+.p-line:hover em{opacity:1}
+.p-line .tip{
+  position:absolute;bottom:14px;transform:translateX(-50%);white-space:nowrap;
+  background:var(--panel-3);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-6);
+  padding:var(--sp-2) var(--sp-8);font-size:var(--fs-11);color:var(--ink);font-variant-numeric:tabular-nums;
+  opacity:0;transition:opacity var(--mo-fast);pointer-events:none;
+}
+.p-line:hover .tip{opacity:1}
 .p-now{display:flex;align-items:center;gap:var(--sp-10);min-width:0}
 .p-now .m{min-width:0}
-.p-now .m b{display:block;font-size:var(--fs-13);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.p-now .m span{display:block;font-size:var(--fs-12);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.p-mid{display:flex;flex-direction:column;align-items:center;gap:var(--sp-6);min-width:0;width:100%}
-.p-ctl{display:flex;align-items:center;gap:var(--sp-6)}
+.p-now .m b{display:block;font-size:var(--fs-13);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.p-now .m b:hover{color:var(--accent-2)}
+.p-now .m span{display:block;font-size:var(--fs-12);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.p-now .m span:hover{color:var(--accent-2)}
+.p-acts{display:flex;align-items:center;gap:var(--sp-2);flex:none}
+.p-acts .icon-btn.liked{color:var(--accent-2)}
+.p-ctl{display:flex;align-items:center;justify-content:center;gap:var(--sp-10)}
 .btn-play{width:36px;height:36px;border-radius:50%;background:var(--accent-fill);color:var(--on-accent);display:grid;place-items:center;transition:var(--mo-fast)}
 .btn-play:hover{background:var(--accent-fill-2)}
-.p-prog{display:flex;align-items:center;gap:var(--sp-8);width:100%;max-width:440px}
-.p-time{font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums;flex:none}
-.track{flex:1;height:4px;border-radius:2px;background:var(--panel-3);position:relative;cursor:pointer}
-.track i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--accent)}
-.track:hover i{background:var(--accent-2)}
-.track em{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%);opacity:0;transition:opacity var(--mo-fast)}
-.track:hover em{opacity:1}
 .p-right{display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-8)}
 .vol{width:80px;height:4px;border-radius:2px;background:var(--panel-3);position:relative}
 .vol i{position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:2px;background:var(--ink-2)}
-.p-right .sep{width:var(--lw-hairline);height:20px;background:var(--line-2)}
 
 /* 连接页 */
 .connect{flex:1;display:grid;place-items:center}
 .connect-card{width:420px;background:var(--panel);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-16);padding:var(--sp-24);box-shadow:var(--shadow-card)}
-.connect-mark{width:48px;height:48px;border-radius:var(--r-12);background:linear-gradient(150deg,#ffb900,#e17100);display:grid;place-items:center;color:var(--on-accent);margin-bottom:var(--sp-16)}
-.connect-card h1{font-size:var(--fs-20);font-weight:600;letter-spacing:-.01em}
-.connect-card .sub{font-size:var(--fs-12);color:var(--ink-3);margin:var(--sp-4) 0 var(--sp-20)}
+.connect-mark{width:48px;height:48px;border-radius:var(--r-12);background:linear-gradient(150deg,#00bcff,#0084d1);display:grid;place-items:center;color:var(--on-accent);margin-bottom:var(--sp-16)}
 .connect-stat{display:flex;align-items:center;gap:var(--sp-8);margin-top:var(--sp-14);font-size:var(--fs-12);color:var(--ink-2)}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.addr-row{display:flex;gap:var(--sp-8)}
+.addr-row .inp:first-child{flex:1}
+.addr-row .inp.port{width:96px;text-align:right}
 
 /* 提示条 */
 .banner{
@@ -327,24 +347,43 @@ input,select{font:inherit;color:inherit}
 }
 .statusbar .right{margin-left:auto;display:flex;align-items:center;gap:var(--sp-8)}
 
-/* 目录树 */
+/* 目录树（文件管理） */
 .tree{width:240px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
 .tree-head{padding:var(--sp-14) var(--sp-16) var(--sp-8);font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
 .tree-body{flex:1;overflow-y:auto;padding:0 var(--sp-8) var(--sp-12);display:flex;flex-direction:column;gap:var(--sp-2)}
 .tree-row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);transition:var(--mo-fast)}
 .tree-row:hover{background:var(--panel-2);color:var(--ink)}
-.tree-row.on{background:var(--accent-fill);color:var(--on-accent);font-weight:500}
+.tree-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
 .tree-row .ic{color:var(--ink-3)}
-.tree-row.on .ic{color:var(--on-accent)}
+.tree-row.on .ic{color:var(--accent-2)}
 .tree-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3)}
-.tree-row.on .cnt{color:var(--on-accent);opacity:.7}
 .tree-row.ind{padding-left:var(--sp-20)}
+/* 拖拽悬停目标行：主色虚线描边 */
+.tree-row.drop{outline:var(--lw-base) dashed var(--accent-2);outline-offset:-1px;background:var(--accent-soft);color:var(--accent-2)}
 
 /* 面包屑 */
 .crumb{display:flex;align-items:center;gap:var(--sp-4);font-size:var(--fs-13);color:var(--ink-3);padding:0 var(--sp-24) var(--sp-10)}
 .crumb b{color:var(--ink);font-weight:500}
 
-/* 关机页 */
+/* 菜单（右键菜单 / 溢出下拉，两处同一形态） */
+.menu{
+  position:absolute;z-index:25;min-width:160px;padding:var(--sp-4);
+  background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8);
+  box-shadow:var(--shadow-card);display:flex;flex-direction:column;
+}
+.menu .mi{
+  display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);
+  border-radius:var(--r-6);font-size:var(--fs-12);color:var(--ink-2);cursor:pointer;white-space:nowrap;
+}
+.menu .mi:hover{background:var(--panel-3);color:var(--ink)}
+.menu .mi .ic{color:var(--ink-3)}
+.menu .mi:hover .ic{color:var(--ink-2)}
+.menu .mi.danger{color:var(--danger-ink)}
+.menu .mi.danger .ic{color:var(--danger-ink)}
+.menu .mi.danger:hover{background:var(--danger-soft)}
+.menu .msep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-4) var(--sp-6)}
+
+/* 系统状态 */
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-12)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-12)}
 .stat{background:var(--panel-2);border-radius:var(--r-12);border:var(--lw-hairline) solid var(--line-2);padding:var(--sp-14)}
@@ -375,7 +414,7 @@ input,select{font:inherit;color:inherit}
   border-radius:var(--r-10);background:var(--toast-bg);color:var(--toast-ink);
   font-size:var(--fs-12);font-weight:500;box-shadow:var(--shadow-toast);
 }
-/* 窗口内实测位置 */
+/* 窗口内实测位置：抬到播放条之上（已确认） */
 .toast-live{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);z-index:40;display:inline-flex;align-items:center;gap:var(--sp-8);padding:var(--sp-8) var(--sp-16);border-radius:var(--r-10);background:var(--toast-bg);color:var(--toast-ink);font-size:var(--fs-12);font-weight:500;box-shadow:var(--shadow-toast)}
 
 /* 空态 */
@@ -392,6 +431,20 @@ input,select{font:inherit;color:inherit}
 .modal-head h2{font-size:var(--fs-15);font-weight:600}
 .modal-body{padding:var(--sp-20) var(--sp-20) var(--sp-6);overflow-y:auto}
 .modal-foot{padding:var(--sp-14) var(--sp-20) var(--sp-16);border-top:var(--lw-hairline) solid var(--line);display:flex;justify-content:flex-end;gap:var(--sp-8)}
+
+/* 沉浸模式 */
+.imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative}
+.imm-close{position:absolute;top:38px;right:var(--sp-24)}
+.imm-cover{width:280px;height:280px;border-radius:var(--r-12);box-shadow:var(--shadow-modal)}
+.imm-info{width:380px;min-width:0}
+.imm-title{font-size:var(--fs-28);font-weight:700;letter-spacing:-.02em;cursor:pointer}
+.imm-title:hover{color:var(--accent-2)}
+.imm-artist{font-size:var(--fs-15);color:var(--accent-2);margin-top:var(--sp-6);cursor:pointer}
+.imm-artist:hover{text-decoration:underline;text-underline-offset:3px}
+.imm-meta{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-8)}
+.imm-lyrics{margin-top:var(--sp-24);height:280px;overflow:hidden;display:flex;flex-direction:column;gap:var(--sp-10);font-size:var(--fs-13);color:var(--ink-3)}
+.imm-lyrics .on{color:var(--accent-2);font-size:var(--fs-14);font-weight:600}
+.imm-lyrics .na{display:flex;flex-direction:column;align-items:center;gap:var(--sp-8);padding:var(--sp-24)}
 
 /* 组件板（页面级） */
 .board{width:1120px;display:none;grid-template-columns:1fr 1fr;gap:var(--sp-16)}
@@ -429,7 +482,7 @@ body.anno [data-note]::before{
 <div class="pvbar">
   <div class="t">
     <b>Dreamanual NAS 助手 · 界面原型</b>
-    <span>令牌对齐 design/tokens.json 0.8.0　窗口 1120×700　强调色 amber</span>
+    <span>令牌对齐 design/tokens.json 0.8.0　窗口 1120×700　强调色 sky（群晖天蓝 · 深字方案）</span>
   </div>
   <nav class="tabs" id="tabs"></nav>
   <label class="chk"><input type="checkbox" id="annoChk"> 标注</label>
@@ -438,49 +491,44 @@ body.anno [data-note]::before{
 <!-- ============ 窗口 ============ -->
 <div class="win" id="win" data-mode="music">
   <div class="lights"><i></i><i></i><i></i></div>
-  <div class="win-title">Dreamanual NAS 助手</div>
 
   <!-- 侧栏 -->
-  <aside class="sider" data-note="侧栏 220：三个模块固定在上，设置单列一组，底部常驻连接状态。窗口无标题栏、红绿灯悬浮，所以顶部留白取自布局令牌 30px。">
+  <aside class="sider" data-note="侧栏 220：三个模块固定在上，设置单列一组，底部常驻连接状态。窗口最顶端不写产品名（红绿灯悬浮），全名「Dreamanual NAS 助手」写在侧栏品牌行。">
     <div class="brand">
       <div class="mark"><i data-ic="server" data-sz="14"></i></div>
-      <b>NAS 助手</b>
+      <b>Dreamanual NAS 助手</b>
     </div>
     <nav class="nav">
-      <div class="nav-row on" data-go="music" data-note="选中态：实心为主（accent-fill + 深字），窗口失焦降为 accent-soft 底 + accent-2 字 —— 失焦形态见「组件与状态」板。">
+      <div class="nav-row on" data-go="music" data-note="选中态按拍板改为：浅底（accent-soft）+ 主色字（accent-2），全产品统一。">
         <i data-ic="headphones" data-sz="16"></i>听歌<span class="cnt">12331</span>
       </div>
       <div class="nav-row" data-go="files"><i data-ic="folder" data-sz="16"></i>文件管理<span class="cnt">8</span></div>
-      <div class="nav-row" data-go="power"><i data-ic="power" data-sz="16"></i>关机与计划</div>
+      <div class="nav-row" data-go="status"><i data-ic="gauge" data-sz="16"></i>系统状态</div>
       <div class="nav-sep"></div>
       <div class="nav-row" data-go="settings"><i data-ic="settings" data-sz="16"></i>设置</div>
     </nav>
     <div class="sider-foot">
-      <div class="foot-row"><span class="dot-ok"></span>中继 cn4 · 16 ms</div>
-      <div class="foot-row">DS723+ · DSM 7.4.1</div>
+      <div class="foot-row"><span class="dot-ok"></span>已连接 · 中继 16 ms</div>
+      <div class="foot-row">DSM 7.4.1</div>
     </div>
   </aside>
 
   <!-- 主区 -->
   <main class="main">
 
-    <!-- ===== 连接 ===== -->
+    <!-- ===== 连接 · QuickConnect ===== -->
     <section class="screen" data-screen="connect">
       <div class="page">
         <div class="connect">
-          <div class="connect-card" data-note="首次启动只有一个输入框是必填的：QuickConnect ID。口令存钥匙串，不落配置文件、不落日志。">
+          <div class="connect-card" data-note="QuickConnect 与直连地址互斥，分段切换（直连形态见下一屏）。必填只有 QuickConnect ID；口令只进 macOS 钥匙串，不落配置、不落日志。">
             <div class="connect-mark"><i data-ic="server" data-sz="24"></i></div>
-            <h1>连接到 NAS</h1>
-            <div class="sub">填 QuickConnect ID 即可。外网自动走中继，不需要额外的网络配置。</div>
+            <div class="seg" style="margin-bottom:var(--sp-16)">
+              <button class="on">QuickConnect</button>
+              <button>直连地址</button>
+            </div>
             <div class="field">
               <label>QuickConnect ID</label>
               <input class="inp" value="my-nas" spellcheck="false">
-              <div class="hint">每次启动重新解析端点（中继地址与端口都是解析接口给的，不写死）。</div>
-            </div>
-            <div class="field">
-              <label>直连地址（可选）</label>
-              <input class="inp" placeholder="留空则走中继" spellcheck="false">
-              <div class="hint">局域网或 Tailscale 地址。填了会覆盖默认路由，用于中继不畅的场合。</div>
             </div>
             <div class="field">
               <label>账号</label>
@@ -489,10 +537,10 @@ body.anno [data-note]::before{
             <div class="field">
               <label>口令</label>
               <input class="inp" type="password" value="............">
-              <div class="hint">存入 macOS 钥匙串，对话框与日志里都不出现。</div>
+              <div class="hint">存入 macOS 钥匙串</div>
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
-            <div class="connect-stat" data-note="解析端点会有一次往返，登录一次往返 —— 两段都要有可见状态，不做「按下去转圈到出结果」。">
+            <div class="connect-stat" data-note="两段都要有可见状态：解析端点一次往返、登录一次往返，不做「按下去转圈到出结果」。">
               <i data-ic="loader" data-sz="14" class="spin"></i>正在解析 QuickConnect 端点…
             </div>
           </div>
@@ -500,67 +548,178 @@ body.anno [data-note]::before{
       </div>
     </section>
 
-    <!-- ===== 听歌 ===== -->
+    <!-- ===== 连接 · 直连 ===== -->
+    <section class="screen" data-screen="connect2">
+      <div class="page">
+        <div class="connect">
+          <div class="connect-card" data-note="直连形态：地址与端口分开填，端口默认 5001（HTTP）／5001（HTTPS 按开关）。用于局域网、Tailscale 或中继不畅的场合。">
+            <div class="connect-mark"><i data-ic="server" data-sz="24"></i></div>
+            <div class="seg" style="margin-bottom:var(--sp-16)">
+              <button>QuickConnect</button>
+              <button class="on">直连地址</button>
+            </div>
+            <div class="field">
+              <label>地址</label>
+              <div class="addr-row">
+                <input class="inp" placeholder="主机名或 IP" spellcheck="false">
+                <input class="inp port" value="5001" inputmode="numeric">
+              </div>
+            </div>
+            <div class="field">
+              <label>账号</label>
+              <input class="inp" value="wuyifa001" spellcheck="false">
+            </div>
+            <div class="field">
+              <label>口令</label>
+              <input class="inp" type="password" value="............">
+              <div class="hint">存入 macOS 钥匙串</div>
+            </div>
+            <button class="btn btn-pri" style="width:100%">连接</button>
+            <div class="connect-stat">
+              <i data-ic="loader" data-sz="14" class="spin"></i>正在握手…
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 听歌 · 曲库 ===== -->
     <section class="screen on" data-screen="music">
       <div class="page">
-        <div class="page-head">
-          <div>
-            <div class="page-title">曲库</div>
-            <div class="page-sub">12331 首 · 3800 艺术家 · 5756 专辑 · 97 流派</div>
-          </div>
-          <div class="page-acts">
-            <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="16"></i></button>
-            <button class="icon-btn" title="更多"><i data-ic="more-horizontal" data-sz="16" data-fill="1"></i></button>
-          </div>
-        </div>
-        <div class="toolbar" data-note="四个浏览维度做成分段控件而不是四层目录：曲库 12331 首，一次请求就带回流派，不需要为每行再发请求。">
-          <div class="seg">
-            <button class="on">全部曲目</button>
-            <button>艺术家</button>
-            <button>专辑</button>
-            <button>流派</button>
-          </div>
-          <div class="searchbox">
-            <i data-ic="search" data-sz="14"></i>
-            <input class="inp" placeholder="搜索标题、艺术家、专辑">
-          </div>
-          <div class="right">
-            <button class="select">排序：标题<i data-ic="chevrons-up-down" data-sz="12"></i></button>
-            <button class="select">全部流派<i data-ic="chevron-down" data-sz="12"></i></button>
-          </div>
-        </div>
         <div class="body">
-          <div class="tbl-wrap">
-            <table class="tbl">
-              <colgroup>
-                <col style="width:44px"><col><col style="width:150px"><col style="width:150px"><col style="width:80px"><col style="width:64px">
-              </colgroup>
-              <thead>
-                <tr><th></th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
-              </thead>
-              <tbody id="tracks"></tbody>
-            </table>
-            <div class="load-more" data-note="列表分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
-              <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
+          <aside class="msider" data-note="听歌模块的内容区侧栏：每日随机（AudioStation 的 100 首）、全部曲目、歌单。点歌单或每日随机，主区换成同一张表，只是数据源不同。">
+            <div class="tree-head">资料库</div>
+            <div class="mside-body">
+              <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
+              <div class="tree-row on"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
+              <div class="tree-head" style="padding-top:var(--sp-14)">我的歌单</div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
+            </div>
+            <div class="mside-foot">
+              <button class="btn btn-sec btn-xs" style="width:100%"><i data-ic="plus" data-sz="12"></i>新建歌单</button>
+            </div>
+          </aside>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div class="page-head" style="padding-bottom:var(--sp-8)">
+              <div>
+                <div class="page-title">全部曲目</div>
+                <div class="page-sub">12331 首 · 3800 艺术家 · 5756 专辑 · 97 流派</div>
+              </div>
+              <div class="page-acts">
+                <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="16"></i></button>
+                <button class="icon-btn" title="更多"><i data-ic="more-horizontal" data-sz="16" data-fill="1"></i></button>
+              </div>
+            </div>
+            <div class="toolbar" data-note="四个浏览维度做成分段控件而不是四层目录：曲库一次请求就带回流派，不需要为每行再发请求。">
+              <div class="seg">
+                <button class="on">全部曲目</button>
+                <button>艺术家</button>
+                <button>专辑</button>
+                <button>流派</button>
+              </div>
+              <div class="searchbox">
+                <i data-ic="search" data-sz="14"></i>
+                <input class="inp" placeholder="搜索标题、艺术家、专辑">
+              </div>
+              <div class="right">
+                <button class="select">排序：标题<i data-ic="chevrons-up-down" data-sz="12"></i></button>
+                <button class="select">全部流派<i data-ic="chevron-down" data-sz="12"></i></button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。ID3 列给全：曲序 / 标题 / 艺术家 / 专辑 / 流派 / 年份 / 时长。流派按「; 」拆成多标签，用英文原名（子流派没有可靠中文译名）。">
+                <colgroup>
+                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:56px"><col style="width:52px">
+                </colgroup>
+                <thead>
+                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th>年份</th><th style="text-align:right">时长</th></tr>
+                </thead>
+                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 显示在文件管理，样态见组件板）。艺术家列是链接形态，点击 = 曲库筛选该歌手。"></tbody>
+              </table>
+              <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
+                <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
+              </div>
             </div>
           </div>
-          <div class="queue">
-            <div class="queue-head">
-              <div class="card-title" style="font-size:var(--fs-13)">播放队列</div>
-              <span class="pill">23 首</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 播放队列（占主区） ===== -->
+    <section class="screen" data-screen="queue">
+      <div class="page">
+        <div class="body">
+          <aside class="msider">
+            <div class="tree-head">资料库</div>
+            <div class="mside-body">
+              <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
+              <div class="tree-row" data-go="music"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
+              <div class="tree-head" style="padding-top:var(--sp-14)">我的歌单</div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
             </div>
-            <div class="queue-body">
-              <div class="now-card" data-note="「正在播放」用另一种形态：accent-soft 底 + accent-2 字。它与表里的「选中行」是两件事，不共用一种底。">
-                <div class="cover" style="width:44px;height:44px"><i data-ic="music" data-sz="20"></i></div>
-                <div class="t">夜航</div>
-                <div class="s">林间电台 · 潮汐</div>
+            <div class="mside-foot">
+              <button class="btn btn-sec btn-xs" style="width:100%"><i data-ic="plus" data-sz="12"></i>新建歌单</button>
+            </div>
+          </aside>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;position:relative">
+            <div class="page-head" style="padding-bottom:var(--sp-8)">
+              <div>
+                <div class="page-title">播放队列</div>
+                <div class="page-sub">23 首 · 来自「深夜开车」</div>
               </div>
-              <div class="q-lab">接下来</div>
-              <div id="queue"></div>
+              <div class="page-acts">
+                <button class="btn btn-sec btn-xs"><i data-ic="shuffle" data-sz="12"></i>随机播放</button>
+                <button class="btn btn-sec btn-xs"><i data-ic="trash-2" data-sz="12"></i>清空</button>
+              </div>
             </div>
-            <div class="queue-foot">
-              <button class="btn btn-sec btn-xs"><i data-ic="list-music" data-sz="12"></i>清空队列</button>
-              <button class="btn btn-sec btn-xs"><i data-ic="shuffle" data-sz="12"></i>随机播放</button>
+            <div class="tbl-wrap">
+              <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（能看到流派等信息）。正在播放行 = 浅底 + 主色字 + 均衡器。">
+                <colgroup>
+                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:52px">
+                </colgroup>
+                <thead>
+                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
+                </thead>
+                <tbody id="qtbl"></tbody>
+              </table>
+            </div>
+            <!-- 右键菜单样态（画出来，不做交互） -->
+            <div class="menu" style="top:172px;right:60px" data-note="右键菜单样态，全部列表通用（队列 / 曲库 / 文件）。这一份是队列行的。">
+              <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
+              <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
+              <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+              <div class="msep"></div>
+              <div class="mi"><i data-ic="disc" data-sz="12"></i>查看专辑</div>
+              <div class="mi"><i data-ic="folder-open" data-sz="12"></i>显示在文件管理</div>
+              <div class="msep"></div>
+              <div class="mi danger"><i data-ic="x" data-sz="12"></i>移出队列</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 沉浸模式 ===== -->
+    <section class="screen" data-screen="immersive">
+      <div class="page">
+        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出）。封面大图 + 完整 ID3 + 歌词；点歌手名回曲库并筛选该歌手。">
+          <button class="icon-btn imm-close"><i data-ic="x" data-sz="18"></i></button>
+          <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
+          <div class="imm-info">
+            <div class="imm-title">夜航</div>
+            <div class="imm-artist">林间电台</div>
+            <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12 · FLAC 961 kbps</div>
+            <div class="imm-lyrics" data-note="歌词区：NAS 歌词接口在、但曲库里没有歌词文件 —— 无歌词时这块显示空态（图标 + 「暂无歌词」），不留白板。">
+              <span>夜航</span>
+              <span>灯熄了 路还长</span>
+              <span class="on">仪表盘的光落在手上</span>
+              <span>电台里放着老歌</span>
+              <span>像谁在副驾轻轻唱</span>
+              <span>…</span>
             </div>
           </div>
         </div>
@@ -571,7 +730,7 @@ body.anno [data-note]::before{
     <section class="screen" data-screen="files">
       <div class="page">
         <div class="body" style="overflow:hidden">
-          <div class="tree" data-note="共享夹是导航的第一层（实测 8 个，全部可写）。可写性读 perm.acl.write，不靠试写探测 —— 试写会真建出文件。">
+          <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
             <div class="tree-head">共享文件夹</div>
             <div class="tree-body" id="tree"></div>
           </div>
@@ -582,17 +741,13 @@ body.anno [data-note]::before{
                 <div class="crumb" style="padding:var(--sp-4) 0 0"><span>music</span><i data-ic="chevron-right" data-sz="12"></i><span>华语</span><i data-ic="chevron-right" data-sz="12"></i><b>2024</b></div>
               </div>
             </div>
-            <div class="toolbar">
-              <button class="btn btn-sec btn-xs" data-note="写操作整排在这里。不可写的目录整排置灰并给出理由，不做「点了才报错」。">
-                <i data-ic="folder-plus" data-sz="12"></i>新建文件夹
-              </button>
-              <button class="btn btn-pri btn-xs"><i data-ic="upload" data-sz="12"></i>上传</button>
+            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。上传是次要按钮 —— 上传不是这个 app 的主功能。目录大小入口已按反馈去掉。">
+              <button class="btn btn-sec btn-xs"><i data-ic="folder-plus" data-sz="12"></i>新建文件夹</button>
+              <button class="btn btn-sec btn-xs"><i data-ic="upload" data-sz="12"></i>上传</button>
               <button class="btn btn-sec btn-xs"><i data-ic="download" data-sz="12"></i>下载</button>
               <button class="btn btn-sec btn-xs"><i data-ic="copy" data-sz="12"></i>复制</button>
-              <button class="btn btn-sec btn-xs"><i data-ic="pencil" data-sz="12"></i>改名</button>
-              <button class="btn btn-danger btn-xs"><i data-ic="trash-2" data-sz="12"></i>删除</button>
+              <button class="icon-btn" title="更多操作" style="width:var(--ctl-28);height:var(--ctl-28)"><i data-ic="more-horizontal" data-sz="14" data-fill="1"></i></button>
               <div class="right">
-                <button class="btn btn-sec btn-xs"><i data-ic="hard-drive" data-sz="12"></i>目录大小</button>
                 <div class="searchbox" style="width:200px">
                   <i data-ic="search" data-sz="14"></i>
                   <input class="inp" placeholder="搜索文件">
@@ -612,8 +767,17 @@ body.anno [data-note]::before{
               <table class="tbl">
                 <colgroup><col><col style="width:110px"><col style="width:150px"><col style="width:90px"></colgroup>
                 <thead><tr><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th></tr></thead>
-                <tbody id="files"></tbody>
+                <tbody id="files" data-note="列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。行支持右键菜单（图中样态）。"></tbody>
               </table>
+            </div>
+            <!-- 文件右键菜单样态 -->
+            <div class="menu" style="bottom:84px;left:430px" data-note="文件右键菜单样态：播放（音频时）/ 下载 / 复制 / 改名 / 删除。">
+              <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
+              <div class="mi"><i data-ic="download" data-sz="12"></i>下载</div>
+              <div class="mi"><i data-ic="copy" data-sz="12"></i>复制</div>
+              <div class="msep"></div>
+              <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
+              <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
             </div>
             <div class="statusbar">
               <span>已选中 1 项 · 12.4 MB</span>
@@ -627,16 +791,16 @@ body.anno [data-note]::before{
       </div>
     </section>
 
-    <!-- ===== 关机与计划 ===== -->
-    <section class="screen" data-screen="power">
+    <!-- ===== 系统状态 ===== -->
+    <section class="screen" data-screen="status">
       <div class="page">
         <div class="page-head">
           <div>
-            <div class="page-title">关机与计划</div>
-            <div class="page-sub">DS723+ · DSM 7.4.1-90080 · 开机 27 天 4 小时</div>
+            <div class="page-title">系统状态</div>
+            <div class="page-sub">DSM 7.4.1 · 开机 27 天 4 小时</div>
           </div>
           <div class="page-acts">
-            <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继 cn4</span>
+            <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继</span>
             <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="16"></i></button>
           </div>
         </div>
@@ -660,10 +824,10 @@ body.anno [data-note]::before{
             </div>
           </div>
           <div class="grid2">
-            <div class="card list" data-note="关机是危险动作：写明「关机后无法远程唤醒」，并把「靠 NAS 自己的开机计划」这条唯一出路写在按钮上方，不放在帮助文档里。">
+            <div class="card list" data-note="关机与重启都要二次确认：确认框里列出影响（正在进行的上传会中断、关机后无法远程唤醒）。关机后唯一出路是 NAS 侧的开机计划 —— 这条写在电源卡上，不放在帮助文档里。">
               <div style="padding:var(--sp-14) var(--sp-14) var(--sp-10)">
                 <div class="card-head" style="margin-bottom:var(--sp-6)"><div class="card-title" style="font-size:var(--fs-13)">电源</div></div>
-                <div class="hint">关机后无法远程唤醒：QuickConnect 解析不给 MAC 地址，唤醒接口只能唤醒别的设备。要它自己开机，先设好下面的开机计划。</div>
+                <div class="hint">关机后无法远程唤醒：要它自己开机，先设好右边的开机计划。</div>
               </div>
               <div class="srow" style="border-top:var(--lw-hairline) solid var(--line)">
                 <div class="k">立刻关机</div>
@@ -674,7 +838,7 @@ body.anno [data-note]::before{
                 <div class="v"><button class="btn btn-sec btn-xs"><i data-ic="refresh-cw" data-sz="12"></i>重启…</button></div>
               </div>
             </div>
-            <div class="card list" data-note="计划表由 NAS 侧保存（PowerSchedule.save），客户端只做读写；每条 = 星期 + 时间 + 开关，改完一次性写回。">
+            <div class="card list" data-note="计划表由 NAS 侧保存，客户端只做读写；每条 = 星期 + 时间 + 开关，改完一次性写回。">
               <div style="padding:var(--sp-14) var(--sp-14) var(--sp-6);display:flex;align-items:center;justify-content:space-between">
                 <div class="card-title" style="font-size:var(--fs-13)">开关机计划</div>
                 <button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>添加</button>
@@ -706,7 +870,7 @@ body.anno [data-note]::before{
               <div class="v"><input class="inp" value="my-nas" style="width:180px;height:var(--ctl-32);background:var(--panel-3);text-align:right" spellcheck="false"></div>
             </div>
             <div class="srow">
-              <div class="k">直连地址<small>留空走中继</small></div>
+              <div class="k">直连地址<small>留空走 QuickConnect</small></div>
               <div class="v"><input class="inp" placeholder="未设置" style="width:180px;height:var(--ctl-32);background:var(--panel-3);text-align:right"></div>
             </div>
             <div class="srow">
@@ -719,7 +883,7 @@ body.anno [data-note]::before{
             </div>
             <div class="srow">
               <div class="k">当前端点</div>
-              <div class="v mono" style="font-size:var(--fs-12);color:var(--ink-3)">中继 cn4 · 16 ms</div>
+              <div class="v mono" style="font-size:var(--fs-12);color:var(--ink-3)">中继 · 16 ms</div>
             </div>
           </div>
 
@@ -762,7 +926,7 @@ body.anno [data-note]::before{
     </section>
 
     <!-- ===== 弹窗（叠在听歌页上） ===== -->
-    <div class="mask hidden" data-screen="modal" data-note="弹窗 470 宽、三段结构（head / body / foot），底 panel、描边 line、圆角 16、阴影 modal。改的是 NAS 上的真实文件，所以按钮写「保存到 NAS」。">
+    <div class="mask hidden" data-screen="modal" data-note="弹窗 470 宽、三段结构（head / body / foot），底 panel、描边 line、圆角 16、阴影 modal。改的是 NAS 上的真实文件，所以按钮写「保存到 NAS」。流派多值用「; 」分隔写回。">
       <div class="modal">
         <div class="modal-head">
           <h2>编辑标签 · 夜航</h2>
@@ -775,14 +939,14 @@ body.anno [data-note]::before{
             <div class="field"><label>专辑</label><input class="inp" value="潮汐" spellcheck="false"></div>
           </div>
           <div class="grid2">
-            <div class="field"><label>流派</label><input class="inp" value="氛围" spellcheck="false"></div>
+            <div class="field"><label>流派（多个用 ; 分隔）</label><input class="inp" value="Ambient; Instrumental" spellcheck="false"></div>
             <div class="field"><label>年份</label><input class="inp" value="2024" spellcheck="false"></div>
           </div>
           <div class="grid2">
             <div class="field"><label>音轨号</label><input class="inp" value="3" spellcheck="false"></div>
             <div class="field"><label>碟号</label><input class="inp" value="1" spellcheck="false"></div>
           </div>
-          <div class="hint" style="margin-top:var(--sp-4)">格式 MP3 · 320 kbps · 44.1 kHz · 8.4 MB。标签直接写回 <code style="font-size:var(--fs-11)">/music/华语/2024/夜航.mp3</code>。</div>
+          <div class="hint" style="margin-top:var(--sp-4)">格式 MP3 · 320 kbps · 44.1 kHz · 8.4 MB。标签直接写回 NAS 上的文件。</div>
         </div>
         <div class="modal-foot">
           <button class="btn btn-sec">取消</button>
@@ -792,37 +956,38 @@ body.anno [data-note]::before{
     </div>
   </main>
 
-  <!-- 播放条（通栏，切模块不中断） -->
-  <div class="player" data-note="播放条通栏挂在窗口底部，不属于任何一个模块 —— 切到文件管理或关机页，播放与进度都不中断。">
+  <!-- 播放条（通栏，网易云布局） -->
+  <div class="player" data-note="播放条通栏挂在窗口底部，不属于任何模块 —— 切到文件管理或系统状态，播放与进度不中断。进度条贴上沿拉满整窗宽；悬停拉高到 8px、拇指浮出、气泡显示「当前 / 总时长」（悬停态见组件板）。">
+    <div class="p-line" data-note="交互：拖动跳转；悬停即出气泡（不用按住）。">
+      <i style="width:36%"></i><em style="left:36%"></em>
+      <span class="tip" style="left:36%">1:32 / 4:12</span>
+    </div>
     <div class="p-now">
       <div class="cover" style="width:44px;height:44px"><i data-ic="music" data-sz="20"></i></div>
-      <div class="m"><b>夜航</b><span>林间电台 · 潮汐</span></div>
-      <button class="icon-btn" title="在文件管理中显示"><i data-ic="folder-open" data-sz="16"></i></button>
+      <div class="m" data-note="点封面或歌名 → 沉浸模式；点歌手名 → 曲库筛选该歌手。">
+        <b>夜航</b>
+        <span>林间电台</span>
+      </div>
+      <div class="p-acts" data-note="红心（喜欢，点亮为主色）与添加到歌单 —— 对应 AudioStation 的歌单能力。">
+        <button class="icon-btn liked" title="喜欢"><i data-ic="heart" data-sz="16" data-fill="1"></i></button>
+        <button class="icon-btn" title="添加到歌单"><i data-ic="list-plus" data-sz="16"></i></button>
+      </div>
     </div>
-    <div class="p-mid">
-      <div class="p-ctl">
-        <button class="icon-btn" title="随机"><i data-ic="shuffle" data-sz="16"></i></button>
-        <button class="icon-btn" title="上一首"><i data-ic="skip-back" data-sz="18" data-fill="1"></i></button>
-        <button class="btn-play" title="暂停"><i data-ic="pause" data-sz="16" data-fill="1"></i></button>
-        <button class="icon-btn" title="下一首"><i data-ic="skip-forward" data-sz="18" data-fill="1"></i></button>
-        <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="16"></i></button>
-      </div>
-      <div class="p-prog">
-        <span class="p-time">1:32</span>
-        <div class="track"><i style="width:36%"></i><em style="left:36%"></em></div>
-        <span class="p-time">4:12</span>
-      </div>
+    <div class="p-ctl">
+      <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="16"></i></button>
+      <button class="icon-btn" title="上一首"><i data-ic="skip-back" data-sz="18" data-fill="1"></i></button>
+      <button class="btn-play" title="暂停"><i data-ic="pause" data-sz="16" data-fill="1"></i></button>
+      <button class="icon-btn" title="下一首"><i data-ic="skip-forward" data-sz="18" data-fill="1"></i></button>
+      <button class="icon-btn" title="播放队列" data-note="点队列按钮，主内容区从曲库直接切成播放队列（见「播放队列」屏）。"><i data-ic="list-music" data-sz="16"></i></button>
     </div>
     <div class="p-right">
-      <button class="icon-btn" title="队列"><i data-ic="list-music" data-sz="16"></i></button>
-      <span class="sep"></span>
       <button class="icon-btn" title="音量"><i data-ic="volume-2" data-sz="16"></i></button>
       <span class="vol"><i></i></span>
     </div>
   </div>
 
-  <!-- 窗口内实测 Toast（仅弹窗页展示） -->
-  <div class="toast-live hidden" data-toast-live data-note="Toast 底部居中。产品线规格是「距窗口底 24px」，这个 app 底部有一条常驻播放条，所以抬到播放条之上 16px —— 端差异要跟不跟，等你定。">
+  <!-- 窗口内实测 Toast -->
+  <div class="toast-live hidden" data-toast-live data-note="Toast 底部居中，抬到播放条之上 16px（已确认）。">
     <i data-ic="circle-check" data-sz="16"></i>标签已写回 NAS
   </div>
 </div>
@@ -836,29 +1001,63 @@ body.anno [data-note]::before{
     <div class="b-row"><span class="b-lab">紧凑</span><button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>新建文件夹</button><button class="btn btn-sec btn-xs" disabled>新建文件夹</button></div>
     <div class="b-row"><span class="b-lab">危险</span><button class="btn btn-danger"><i data-ic="power" data-sz="14"></i>关机…</button><button class="btn btn-danger" disabled>关机…</button></div>
     <div class="b-row"><span class="b-lab">图标</span><button class="icon-btn"><i data-ic="refresh-cw" data-sz="16"></i></button><button class="icon-btn" disabled><i data-ic="trash-2" data-sz="16"></i></button></div>
-    <div class="b-note">禁用一律「原样整体压暗 0.5」，不换色 —— 主按钮禁用后仍看得出是主按钮。危险按钮在主按钮右侧永远隔着间距，不并排成一对。</div>
+    <div class="b-note">强调色 sky-500（#00a6f4，v4 原值）：深字方案，950 压 500 = 7.32:1，hover 提到 400 档 9.09:1；白字压 500 仅 2.71:1，不可用。禁用一律「原样整体压暗 0.5」，不换色。</div>
   </div>
 
   <div class="card">
-    <div class="card-title">输入框与选择器</div>
+    <div class="card-title">输入框、分段与选择器</div>
     <div class="b-row"><span class="b-lab">默认</span><input class="inp" placeholder="搜索标题、艺术家、专辑" style="width:260px"></div>
     <div class="b-row"><span class="b-lab">聚焦</span><input class="inp focus" value="my-nas" style="width:260px"></div>
-    <div class="b-row"><span class="b-lab">禁用</span><input class="inp" value="不可写目录" disabled style="width:260px;opacity:.5"></div>
+    <div class="b-row"><span class="b-lab">分段</span>
+      <div class="seg"><button class="on">QuickConnect</button><button>直连地址</button></div>
+      <span class="hint" style="margin-left:var(--sp-4)">互斥切换，登录页专用</span>
+    </div>
     <div class="b-row"><span class="b-lab">下拉</span><button class="select">排序：标题<i data-ic="chevrons-up-down" data-sz="12"></i></button><button class="select" style="height:var(--ctl-38);padding:0 var(--sp-12)">全部流派<i data-ic="chevron-down" data-sz="12"></i></button></div>
     <div class="b-row"><span class="b-lab">开关</span><span class="sw on light"><i></i></span><span class="sw"><i></i></span><span class="slider"><i></i><em></em></span></div>
     <div class="b-note">输入框底色按所在层级取相邻一档：主区上取 panel-2，卡片里取 panel-3。聚焦只转描边色（accent-2），底色不动。</div>
   </div>
 
   <div class="card">
-    <div class="card-title">选中与悬停（四态）</div>
+    <div class="card-title">选中与悬停（浅底 + 主色字）</div>
     <div style="display:flex;flex-direction:column;gap:var(--sp-2)">
-      <div class="nav-row" style="border-radius:var(--r-8);background:transparent">常态 · 未选中</div>
+      <div class="nav-row" style="border-radius:var(--r-8)">常态 · 未选中</div>
       <div class="nav-row" style="border-radius:var(--r-8);background:var(--panel-3);color:var(--ink)">悬停 · panel-3 底 + ink 字</div>
-      <div class="nav-row on" style="border-radius:var(--r-8)">选中 · accent-fill 实心 + 深字</div>
-      <div class="nav-row on blur" style="border-radius:var(--r-8)">选中但窗口失焦 · accent-soft + accent-2</div>
-      <div class="nav-row" style="border-radius:var(--r-8);background:var(--accent-soft);color:var(--accent-2)">正在播放 · accent-soft + accent-2（另一种语义）</div>
+      <div class="nav-row on" style="border-radius:var(--r-8)">选中 · accent-soft 底 + accent-2 字（6.37:1）</div>
+      <div class="nav-row on" style="border-radius:var(--r-8)">正在播放 · 同选中底色，另加均衡器 <span class="eq" style="margin-left:var(--sp-6)"><i></i><i></i><i></i></span></div>
     </div>
-    <div class="b-note">前四态是同一套（侧栏行、表行、分段控件共用）。第五条是「正在播放」，与「选中」不是一件事，单独一种形态。</div>
+    <div class="b-note">选中行按拍板改「浅底 + 主色字」，侧栏行、表行、树行共用。选中与正在播放共用一种底色，靠均衡器区分 —— 不再引入第二套底色。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">进度条（播放器）两态</div>
+    <div style="position:relative;padding:var(--sp-20) 0 var(--sp-8)">
+      <div class="p-line" style="position:relative;top:0;height:4px"><i style="width:36%"></i></div>
+      <div class="b-lab" style="margin-top:var(--sp-10)">常态 4px</div>
+    </div>
+    <div style="position:relative;padding:var(--sp-20) 0 var(--sp-8)">
+      <div class="p-line hover-demo" style="position:relative;top:0;height:8px"><i style="width:36%;background:var(--accent-2)"></i><em style="left:36%;opacity:1"></em><span class="tip" style="left:36%;opacity:1">1:32 / 4:12</span></div>
+      <div class="b-lab" style="margin-top:var(--sp-14)">悬停 8px + 拇指 + 气泡</div>
+    </div>
+    <div class="b-note">进度条贴播放条上沿、撑满整窗宽（网易云布局）。悬停即拉高便于点击，气泡显示「当前时点 / 总时长」，不用按住。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">右键菜单与溢出下拉（同一形态）</div>
+    <div style="display:flex;gap:var(--sp-24);align-items:flex-start">
+      <div class="menu" style="position:relative">
+        <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
+        <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
+        <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+        <div class="msep"></div>
+        <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+      </div>
+      <div class="menu" style="position:relative">
+        <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
+        <div class="mi"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+      </div>
+      <button class="icon-btn" style="margin-top:var(--sp-4)"><i data-ic="more-horizontal" data-sz="16" data-fill="1"></i></button>
+    </div>
+    <div class="b-note">左：列表右键菜单（曲库 / 队列 / 文件通用）；中：文件管理工具条放不下时收进「…」的第二层；右：「…」按钮本体。菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。</div>
   </div>
 
   <div class="card">
@@ -866,30 +1065,32 @@ body.anno [data-note]::before{
     <div class="b-row">
       <span class="pill ok"><i data-ic="check" data-sz="10"></i>可写</span>
       <span class="pill"><i data-ic="lock" data-sz="10"></i>只读</span>
-      <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继 cn4</span>
+      <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继</span>
       <span class="pill bad"><i data-ic="circle-x" data-sz="10"></i>上传失败</span>
       <span class="pill warn"><i data-ic="triangle-alert" data-sz="10"></i>重试中</span>
       <span class="pill">23 首</span>
     </div>
     <div class="b-row" style="margin-top:var(--sp-14)">
-      <span class="tag" style="color:#ffb900">氛围</span><span class="tag" style="color:#ff6467">后摇</span><span class="tag" style="color:#fdc700">爵士</span><span class="tag" style="color:#51a2ff">电子</span>
-      <span class="tag" style="color:var(--ink-2)">更新于 3 分钟前</span>
+      <span class="tags">
+        <span class="tag" style="color:#00bcff">Ambient</span><span class="tag" style="color:#00d492">Instrumental</span>
+      </span>
+      <span class="tags">
+        <span class="tag" style="color:#ff6467">Rock</span><span class="tag" style="color:#51a2ff">Electronic</span>
+      </span>
+      <span class="tag" style="color:#05df72">Folk</span>
+      <span class="tag" style="color:#fdc700">Jazz</span>
     </div>
-    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档，amber 留给真异常。标签是胶囊，字取分类自己的色。</div>
+    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签用英文原名，多值按「; 」拆成多个胶囊，字取各分类 400 档色。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。</div>
   </div>
 
   <div class="card">
     <div class="card-title">提示条（两档）</div>
     <div class="banner" style="border-radius:var(--r-6)"><i data-ic="triangle-alert" data-sz="16"></i><div><div class="t">当前目录不可写，上传与改名已停用</div></div></div>
-    <div class="banner-card info" style="margin:var(--sp-12) 0 0">
-      <i data-ic="info" data-sz="16"></i>
-      <div><div class="t">外网走 QuickConnect 中继</div><div class="d">同一个请求中继 0.15 秒、点对点隧道 2.5 秒。填了直连地址会覆盖默认路由。</div></div>
-    </div>
     <div class="banner-card bad" style="margin:var(--sp-12) 0 0">
       <i data-ic="triangle-alert" data-sz="16"></i>
       <div><div class="t">上传中断</div><div class="d">连接被重置，已传的 18.4 MB 不会保留。<code>Upload</code> 没有断点续传。</div></div>
     </div>
-    <div class="b-note">通栏横幅贴容器左右边、直角，用于与当前页强相关的常驻提示；卡片式四周留边，用于与内容并列的块级提示。</div>
+    <div class="b-note">通栏横幅贴容器左右边、直角，用于与当前页强相关的常驻提示；卡片式四周留边，用于与内容并列的块级提示。废话提示一律不上 —— 提示条只在有可操作后果时出现。</div>
   </div>
 
   <div class="card">
@@ -899,7 +1100,7 @@ body.anno [data-note]::before{
       <span class="toast"><i data-ic="circle-x" data-sz="16"></i>改名失败：目标已存在</span>
       <span class="toast"><i data-ic="info" data-sz="16"></i>已复制 3 个文件</span>
     </div>
-    <div class="b-note">三态由图标形状承载，图标与字同取 toast-ink —— 族色压这块浅实色底只有 2.0–2.9:1，不够承载图形。默认 2 秒；带路径或原因的长消息按需延长。</div>
+    <div class="b-note">三态由图标形状承载，图标与字同取 toast-ink —— 族色压这块浅实色底只有 2.0–2.9:1，不够承载图形。默认 2 秒；窗口内实测位置抬到播放条之上 16px（已确认）。</div>
   </div>
 
   <div class="card">
@@ -907,33 +1108,27 @@ body.anno [data-note]::before{
     <div style="background:var(--panel-2);border-radius:var(--r-10);height:180px;display:flex">
       <div class="empty-lg">
         <i data-ic="music" data-sz="44"></i>
-        <b>这个流派下还没有歌</b>
-        <span>换一个流派，或到「全部曲目」里找</span>
+        <b>这个歌单还是空的</b>
+        <span>从曲库里右键「添加到歌单」</span>
       </div>
     </div>
-    <div class="empty">队列是空的 · 双击任意曲目开始播放</div>
+    <div class="empty">暂无歌词 · 该曲目没有内嵌或同名 LRC</div>
     <div class="b-note">三件套（图标 44 + 标题 15 + 说明 12）只用在独占一整块内容区的地方；嵌在栏或卡片内的空列表走单行。</div>
   </div>
 
   <div class="card">
-    <div class="card-title">进度 · 重试 · 扫描</div>
+    <div class="card-title">进度 · 重试</div>
     <div class="up-row" style="margin:0 0 var(--sp-12)">
       <i data-ic="upload" data-sz="16"></i>
       <div class="m"><b>正在上传 潮汐.flac</b><span>0.31 MB/s · 已传 18.4 MB / 49.2 MB · 剩余约 1 分 40 秒</span><div class="prog"><i style="width:37%"></i></div></div>
       <button class="btn btn-sec btn-xs">取消</button>
     </div>
-    <div class="up-row" style="margin:0 0 var(--sp-12);background:transparent;border:var(--lw-hairline) solid var(--line)">
+    <div class="up-row" style="margin:0;background:transparent;border:var(--lw-hairline) solid var(--line)">
       <i data-ic="loader" data-sz="16" class="spin"></i>
       <div class="m"><b>正在搜索…</b><span>服务端第一次返回空结果，正在重试（第 2 次 / 上限 8 次）</span></div>
       <button class="btn btn-sec btn-xs">停止</button>
     </div>
-    <div class="b-row"><span class="b-lab">目录大小</span>
-      <div style="flex:1">
-        <div style="display:flex;justify-content:space-between;font-size:var(--fs-11);color:var(--ink-3);margin-bottom:var(--sp-4)"><span>正在统计 华语/2024</span><span>412 个文件</span></div>
-        <div class="prog"><i style="width:64%"></i></div>
-      </div>
-    </div>
-    <div class="b-note">搜索的「重试中」是一等状态，不是错误 —— 服务端会随机返回假空（应答里连 total 都没有），重试平均 3 次、4 秒。目录大小走异步任务后轮询。</div>
+    <div class="b-note">搜索的「重试中」是一等状态，不是错误 —— 服务端会随机返回假空（应答里连 total 都没有），重试平均 3 次、4 秒。</div>
   </div>
 
   <div class="card">
@@ -965,9 +1160,11 @@ const ICONS={
   'folder-open':'<path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/>',
   'folder-plus':'<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   power:'<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  gauge:'<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
   settings:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   music:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  disc:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>',
   play:'<polygon points="6 3 20 12 6 21 6 3"/>',
   pause:'<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
   'skip-back':'<polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/>',
@@ -975,6 +1172,9 @@ const ICONS={
   shuffle:'<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/>',
   repeat:'<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   'list-music':'<path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/>',
+  'list-plus':'<path d="M11 12H3"/><path d="M16 6H3"/><path d="M16 18H3"/><path d="m19 10v4"/><path d="m17 12h4"/>',
+  sparkles:'<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
+  heart:'<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
   'volume-2':'<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>',
   upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
   download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
@@ -1003,68 +1203,85 @@ const ICONS={
   'hard-drive':'<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>'
 };
 
-/* ---------- 曲目与文件（占位数据，数量与字段照实测） ---------- */
+/* ---------- 占位数据（数量与字段照实测；流派为英文原名，多值） ---------- */
 const TRACKS=[
-  ['夜航','林间电台','潮汐','氛围','4:12'],
-  ['潮汐','林间电台','潮汐','氛围','5:03'],
-  ['雨后的城市','南方小城','夏日信件','民谣','3:48'],
-  ['光年','电子羊','银翼','电子','6:21'],
-  ['候鸟','海边的房间','迁徙','后摇','7:02'],
-  ['午后的阳台','月台少年','十一月','爵士','4:35'],
-  ['沉默的海','无声合唱团','深水','后摇','8:14'],
-  ['旧胶片','南方小城','夏日信件','民谣','3:29'],
-  ['星尘','电子羊','银翼','电子','5:47'],
-  ['逆风','林间电台','潮汐','氛围','4:56'],
-  ['长夜将尽','无声合唱团','深水','后摇','6:38'],
-  ['白日梦','月台少年','十一月','爵士','5:12'],
-  ['海边集市','南方小城','夏日信件','民谣','4:02'],
-  ['归途','海边的房间','迁徙','后摇','5:31']
+  [3,'夜航','林间电台','潮汐',['Ambient'],2024,'4:12'],
+  [1,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],2024,'5:03'],
+  [2,'雨后的城市','南方小城','夏日信件',['Folk'],2023,'3:48'],
+  [4,'光年','电子羊','银翼',['Electronic'],2022,'6:21'],
+  [1,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],2024,'7:02'],
+  [5,'午后的阳台','月台少年','十一月',['Jazz','Pop'],2021,'4:35'],
+  [2,'沉默的海','无声合唱团','深水',['Post-Rock'],2023,'8:14'],
+  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],2023,'3:29'],
+  [8,'星尘','电子羊','银翼',['Electronic','Ambient'],2022,'5:47'],
+  [6,'逆风','林间电台','潮汐',['Ambient'],2024,'4:56'],
+  [3,'长夜将尽','无声合唱团','深水',['Post-Rock'],2023,'6:38'],
+  [9,'白日梦','月台少年','十一月',['Jazz'],2021,'5:12'],
+  [10,'海边集市','南方小城','夏日信件',['Folk'],2023,'4:02'],
+  [4,'归途','海边的房间','迁徙',['Post-Rock','Ambient'],2024,'5:31']
 ];
-const QUEUE=[['潮汐','林间电台'],['雨后的城市','南方小城'],['光年','电子羊'],['候鸟','海边的房间'],['午后的阳台','月台少年'],['沉默的海','无声合唱团'],['旧胶片','南方小城']];
-const FOLDERS=[['music','12.4 GB',8],['photo','286 GB',0],['video','1.2 TB',0],['homes','48 GB',0],['backup','620 GB',0],['docker','22 GB',0],['downloads','8.6 GB',0],['web','180 MB',0]];
+const QPLAY=[
+  [1,'夜航','林间电台','潮汐',['Ambient'],'4:12',1],
+  [2,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],'5:03',0],
+  [3,'雨后的城市','南方小城','夏日信件',['Folk'],'3:48',0],
+  [4,'光年','电子羊','银翼',['Electronic'],'6:21',0],
+  [5,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],'7:02',0],
+  [6,'午后的阳台','月台少年','十一月',['Jazz','Pop'],'4:35',0],
+  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],'3:29',0]
+];
+const FOLDERS=[['music','',1],['photo','',0],['video','',0],['homes','',0],['backup','',0],['docker','',0],['downloads','',0],['web','',0]];
 const FILES=[
-  ['华语','','2026-10-11 22:04','可写',1,0],
-  ['2024','','2026-09-30 18:12','可写',1,0],
-  ['夜航.mp3','12.4 MB','2026-10-08 21:33','可写',0,1],
-  ['潮汐.flac','49.2 MB','2026-10-08 21:30','可写',0,0],
-  ['cover.jpg','245 KB','2026-09-12 10:02','可写',0,0],
-  ['playlist.m3u','1.2 KB','2026-09-12 10:02','可写',0,0],
-  ['notes.txt','840 B','2026-08-21 09:41','可写',0,0],
-  ['备份','','2026-08-01 14:20','只读',1,0]
+  ['华语','','2026-10-11 22:04','可写',1],
+  ['2024','','2026-09-30 18:12','可写',1],
+  ['夜航.mp3','12.4 MB','2026-10-08 21:33','可写',0],
+  ['潮汐.flac','49.2 MB','2026-10-08 21:30','可写',0],
+  ['cover.jpg','245 KB','2026-09-12 10:02','可写',0],
+  ['playlist.m3u','1.2 KB','2026-09-12 10:02','可写',0],
+  ['notes.txt','840 B','2026-08-21 09:41','可写',0],
+  ['备份','','2026-08-01 14:20','只读',1]
 ];
 
-/* ---------- 渲染列表 ---------- */
+/* ---------- 渲染 ---------- */
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const esc = s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-const GENRE_COLOR={'氛围':'#ffb900','民谣':'#00d492','电子':'#51a2ff','后摇':'#ff6467','爵士':'#fdc700'};
+/* 分类标签色：色板 400 档（v4 原值） */
+const GENRE_COLOR={'Ambient':'#00bcff','Electronic':'#51a2ff','Folk':'#05df72','Rock':'#ff6467','Post-Rock':'#ffa2a2','Jazz':'#fdc700','Instrumental':'#00d492','Pop':'#ffb900'};
+const tagHtml=(g,on)=>`<span class="tag" style="color:${GENRE_COLOR[g]||'var(--ink-2)'}${on?';background:rgba(10,10,10,.28);border-color:transparent':''}">${esc(g)}</span>`;
 
 $('#tracks').innerHTML = TRACKS.map((t,i)=>{
   const on = i===0;
-  const cls = (base)=> on ? `${base} dim` : base;
-  const gStyle = on
-    ? 'background:rgba(10,10,10,.12);border-color:transparent;color:var(--on-accent)'
-    : `color:${GENRE_COLOR[t[3]]||'var(--ink-2)'}`;
+  const cls = (b)=> on ? `${b} dim` : b;
   return `<tr${on?' class="on"':''}>`+
-    `<td class="num">${i+1}</td>`+
-    `<td class="main-c">${esc(t[0])}</td>`+
-    `<td class="${cls('')}">${esc(t[1])}</td>`+
-    `<td class="${cls('')}">${esc(t[2])}</td>`+
-    `<td class="${cls('')}"><span class="tag" style="${gStyle}">${esc(t[3])}</span></td>`+
-    `<td class="${cls('num')}" style="text-align:right">${t[4]}</td></tr>`;
+    `<td class="${cls('num')}">${t[0]}</td>`+
+    `<td class="main-c">${esc(t[1])}</td>`+
+    `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
+    `<td class="${cls('')}">${esc(t[3])}</td>`+
+    `<td class="${cls('')}"><span class="tags">${t[4].map(g=>tagHtml(g,on)).join('')}</span></td>`+
+    `<td class="${cls('num')}">${t[5]}</td>`+
+    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
 }).join('');
 
-$('#queue').innerHTML = QUEUE.map((q,i)=>
-  `<div class="q-row"><span class="n">${i+1}</span><div class="m"><b>${esc(q[0])}</b><span>${esc(q[1])}</span></div></div>`
-).join('');
+$('#qtbl').innerHTML = QPLAY.map((q,i)=>{
+  const on = !!q[6];
+  const num = on ? '<span class="eq"><i></i><i></i><i></i></span>' : String(q[0]);
+  return `<tr${on?' class="on"':''}>`+
+    `<td class="num" style="display:flex;align-items:center;min-height:29px">${num}</td>`+
+    `<td class="main-c">${esc(q[1])}</td>`+
+    `<td class="${on?'dim':''} a-link">${esc(q[2])}</td>`+
+    `<td class="${on?'dim':''}">${esc(q[3])}</td>`+
+    `<td class="${on?'dim':''}"><span class="tags">${q[4].map(g=>tagHtml(g,on)).join('')}</span></td>`+
+    `<td class="${on?'dim':'num'}" style="text-align:right">${q[5]}</td></tr>`;
+}).join('');
 
 $('#tree').innerHTML = FOLDERS.map((f,i)=>{
   const on = i===0;
   return `<div class="tree-row${on?' on':''}"><i data-ic="folder" data-sz="14"></i>${esc(f[0])}`+
-         `<span class="cnt">${f[2]?'RW':''}</span></div>`;
-}).join('') + '<div class="tree-row ind"><i data-ic="folder-open" data-sz="14"></i>华语</div>'+
- '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>欧美</div>'+
+         (f[2]?'<span class="cnt">RW</span>':'')+'</div>';
+}).join('') +
+ '<div class="tree-row ind"><i data-ic="folder-open" data-sz="14"></i>华语</div>'+
+ `<div class="tree-row ind drop" data-note="拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。"><i data-ic="folder" data-sz="14"></i>欧美</div>`+
  '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>古典</div>';
 
 $('#files').innerHTML = FILES.map((f,i)=>{
@@ -1087,7 +1304,7 @@ $$('[data-ic]').forEach(el=>{
 });
 
 /* ---------- 页面切换 ---------- */
-const TABS=[['connect','连接'],['music','听歌 · 曲库'],['files','文件管理'],['power','关机与计划'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
+const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
 $('#tabs').innerHTML = TABS.map(([k,l])=>`<button class="tab" data-tab="${k}">${l}</button>`).join('');
 
 const win = $('#win');
