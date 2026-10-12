@@ -265,6 +265,52 @@ struct FormLabel: View {
     }
 }
 
+/// 分段控件：容器 `panel-2` 底 + `line-2` 发丝描边 + r8，内边距 2；
+/// 段内按钮高 28 / r6 / 字号 12，选中段实心 `accent-fill` + `on-accent` 字。
+/// 与原型 `.seg` 同一规格（连接页 QC / 直连互斥切换用）。
+struct DmSegmented<Item: Hashable>: View {
+    let items: [Item]
+    let label: (Item) -> String
+    @Binding var selection: Item
+
+    init(_ items: [Item], selection: Binding<Item>, label: @escaping (Item) -> String) {
+        self.items = items
+        self._selection = selection
+        self.label = label
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s2) {
+            ForEach(items, id: \.self) { item in
+                let isSelected = item == selection
+                Button {
+                    selection = item
+                } label: {
+                    Text(label(item))
+                        .font(.system(size: DmText.t12, weight: isSelected ? .medium : .regular))
+                        .foregroundColor(isSelected ? Color.dmOnAccent : Color.dmInk2)
+                        .padding(.horizontal, DmSpace.s12)
+                        .frame(height: DmControl.h28)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(isSelected ? Color.dmAccentFill : Color.clear)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(DmSpace.s2)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+        )
+    }
+}
+
 /// 通用开关：形态基准 42×24（三端统一）。关态轨道 `line-2`、开态 `accent-fill`；
 /// 滑块直径 20 白色、行程 18。NAS 是深字方案，开态滑块仍取白色 —— 白滑块压
 /// sky-500 是 2.71:1，只作图形看，非文本门槛 3:1 略有不及；下一批按像素实测

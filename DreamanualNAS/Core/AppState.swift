@@ -56,7 +56,6 @@ final class AppState {
     var qcID: String { didSet { defaults.set(qcID, forKey: Keys.qcID) } }
     var directAddress: String { didSet { defaults.set(directAddress, forKey: Keys.direct) } }
     var username: String { didSet { defaults.set(username, forKey: Keys.username) } }
-    var rememberPassword: Bool { didSet { defaults.set(rememberPassword, forKey: Keys.remember) } }
 
     // MARK: - 运行状态
 
@@ -74,16 +73,13 @@ final class AppState {
         static let qcID = "nas.qcID"
         static let direct = "nas.directAddress"
         static let username = "nas.username"
-        static let remember = "nas.rememberPassword"
     }
 
     init() {
         qcID = defaults.string(forKey: Keys.qcID) ?? ""
         directAddress = defaults.string(forKey: Keys.direct) ?? ""
         username = defaults.string(forKey: Keys.username) ?? ""
-        rememberPassword = defaults.bool(forKey: Keys.remember)
     }
-
     var isConnected: Bool { phase == .connected }
     var hasSavedPassword: Bool {
         guard !username.isEmpty else { return false }
@@ -96,7 +92,7 @@ final class AppState {
 
     // MARK: - 连接
 
-    /// 启动时自动连一次（只有在「记住了口令」且钥匙串里真有那条凭据时才动）。
+    /// 启动时自动连一次（钥匙串里真有那条凭据才动）。
     func restoreAndAutoConnect() async {
         guard isConnected == false, phase.isBusy == false, hasSavedPassword else { return }
         let account = KeychainStore.accountKey(endpointID: endpointKey, username: username)
@@ -140,14 +136,11 @@ final class AppState {
             lastConnectedAt = Date()
             phase = .connected
 
-            if rememberPassword {
-                KeychainStore.save(
-                    password: password,
-                    account: KeychainStore.accountKey(endpointID: endpointKey, username: username)
-                )
-            } else {
-                KeychainStore.delete(account: KeychainStore.accountKey(endpointID: endpointKey, username: username))
-            }
+            // 连上即存：口令只进钥匙串，下次启动自动重连。
+            KeychainStore.save(
+                password: password,
+                account: KeychainStore.accountKey(endpointID: endpointKey, username: username)
+            )
         } catch {
             phase = .failed(error.localizedDescription)
             sessionManager = nil

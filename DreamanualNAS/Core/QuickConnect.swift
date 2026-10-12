@@ -78,7 +78,8 @@ struct QuickConnectResolver {
         else {
             throw QuickConnectError.badResponse(String(data: data.prefix(200), encoding: .utf8) ?? "")
         }
-        if let errno = first["errno"] as? Int {
+        // 🔴 成功应答里也带 `errno: 0` —— 不能「见 errno 就当失败」，只判非零。
+        if let errno = first["errno"] as? Int, errno != 0 {
             let info = (first["errinfo"] as? String) ?? ""
             if errno == 4 { throw QuickConnectError.aliasNotFound }
             throw QuickConnectError.serverError(errno: errno, info: info)
