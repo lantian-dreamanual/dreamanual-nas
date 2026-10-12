@@ -101,12 +101,13 @@ input,select{font:inherit;color:inherit}
   display:grid;grid-template-columns:220px 1fr;grid-template-rows:1fr 68px;
   box-shadow:var(--shadow-modal);
 }
-/* 连接两态与沉浸模式独占整窗：无侧栏、无播放条，顶端不写产品名（红绿灯悬浮） */
-.win[data-mode="connect"],.win[data-mode="connect2"],.win[data-mode="immersive"]{
-  grid-template-columns:1fr;grid-template-rows:1fr}
+/* 连接两态独占整窗（无侧栏无播放条）；沉浸模式只收掉侧栏 —— 播放条原样保留，
+   与曲库状态是同一个组件、同一种样式 */
+.win[data-mode="connect"],.win[data-mode="connect2"]{grid-template-columns:1fr;grid-template-rows:1fr}
+.win[data-mode="immersive"]{grid-template-columns:1fr;grid-template-rows:1fr 68px}
 .win[data-mode="connect"] .sider,.win[data-mode="connect"] .player,
 .win[data-mode="connect2"] .sider,.win[data-mode="connect2"] .player,
-.win[data-mode="immersive"] .sider,.win[data-mode="immersive"] .player{display:none}
+.win[data-mode="immersive"] .sider{display:none}
 .win[data-mode="connect"] .main,.win[data-mode="connect2"] .main,.win[data-mode="immersive"] .main{grid-area:1/1}
 .lights{position:absolute;top:12px;left:14px;display:flex;gap:var(--sp-8);z-index:6}
 .lights i{width:12px;height:12px;border-radius:50%;display:block}
@@ -243,14 +244,19 @@ input,select{font:inherit;color:inherit}
 .tbl tbody tr:hover td{background:var(--panel-2);color:var(--ink)}
 .tbl td.num{color:var(--ink-3);font-size:var(--fs-12);font-variant-numeric:tabular-nums}
 .tbl td.main-c{color:var(--ink);font-weight:500}
-/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。secondary 列主色字降一档透明度 */
+/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。次要列的降档只进文字色（带 alpha），
+   不能给 td 整格加 opacity —— opacity 连背景一起降，行会从主列处断成两截 */
 .tbl tbody tr.on td{background:var(--accent-soft);color:var(--accent-2)}
 .tbl tbody tr.on td.main-c{color:var(--accent-2)}
-.tbl tbody tr.on td.dim{color:var(--accent-2);opacity:.72}
+.tbl tbody tr.on td.dim{color:rgba(0,188,255,.72)}
 .tbl tbody tr.on:hover td{background:var(--accent-hover)}
-/* 艺术家列是链接形态：悬停转主色 */
+/* 艺术家 / 专辑列是链接形态：悬停只转主色，不下划线（dreamanual 系约定） */
 .a-link{cursor:pointer}
-.a-link:hover{color:var(--accent-2);text-decoration:underline;text-underline-offset:2px}
+.a-link:hover{color:var(--accent-2)}
+/* 表头即排序：点表头切换正序 / 倒序（同访达），当前列亮箭头 */
+.tbl th.sortable{cursor:pointer}
+.tbl th .ic{display:inline-block;vertical-align:-1px;color:var(--accent-2);margin-left:2px}
+.tbl td.cov{padding-top:var(--sp-6);padding-bottom:var(--sp-6)}
 .tbl-wrap{flex:1;min-height:0;overflow-y:auto;position:relative}
 .load-more{
   display:flex;align-items:center;justify-content:center;gap:var(--sp-8);
@@ -440,16 +446,12 @@ input,select{font:inherit;color:inherit}
 /* 沉浸模式 */
 .imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative}
 .imm-close{position:absolute;top:38px;right:var(--sp-24)}
-.imm-left{width:280px;display:flex;flex-direction:column;align-items:center;gap:var(--sp-10);flex:none}
-.imm-cover{width:280px;height:280px;border-radius:var(--r-12);box-shadow:var(--shadow-modal)}
-.imm-line{position:relative;top:0;width:280px;height:4px}
-.imm-time{font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
-.imm-ctl{display:flex;align-items:center;gap:var(--sp-10);margin-top:var(--sp-4)}
+.imm-cover{width:280px;height:280px;border-radius:var(--r-12);box-shadow:var(--shadow-modal);flex:none}
 .imm-info{width:380px;min-width:0}
 .imm-title{font-size:var(--fs-28);font-weight:700;letter-spacing:-.02em;cursor:pointer}
 .imm-title:hover{color:var(--accent-2)}
 .imm-artist{font-size:var(--fs-15);color:var(--accent-2);margin-top:var(--sp-6);cursor:pointer}
-.imm-artist:hover{text-decoration:underline;text-underline-offset:3px}
+.imm-artist:hover{color:var(--accent-2)}
 .imm-meta{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-8)}
 .imm-lyrics{margin-top:var(--sp-24);height:250px;overflow:hidden;display:flex;flex-direction:column;gap:var(--sp-10);font-size:var(--fs-13);color:var(--ink-3)}
 .imm-lyrics .on{color:var(--accent-2);font-size:var(--fs-14);font-weight:600}
@@ -529,7 +531,7 @@ body.anno [data-note]::before{
     <section class="screen" data-screen="connect">
       <div class="page">
         <div class="connect">
-          <div class="connect-card" data-note="QuickConnect 与直连地址互斥，分段切换（直连形态见下一屏）。必填只有 QuickConnect ID；口令只进 macOS 钥匙串，不落配置、不落日志。">
+          <div class="connect-card" data-note="QuickConnect 与直连地址互斥，分段切换（直连形态见下一屏）。必填只有 QuickConnect ID。口令的存放说明不写在登录页 —— 用户此刻只关心能不能连上，这句话放设置页的口令行。">
             <div class="connect-mark"><i data-ic="server" data-sz="24"></i></div>
             <div class="seg" style="margin-bottom:var(--sp-16)">
               <button class="on">QuickConnect</button>
@@ -546,7 +548,6 @@ body.anno [data-note]::before{
             <div class="field">
               <label>口令</label>
               <input class="inp" type="password" value="............">
-              <div class="hint">存入 macOS 钥匙串</div>
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat" data-note="两段都要有可见状态：解析端点一次往返、登录一次往返，不做「按下去转圈到出结果」。">
@@ -581,7 +582,6 @@ body.anno [data-note]::before{
             <div class="field">
               <label>口令</label>
               <input class="inp" type="password" value="............">
-              <div class="hint">存入 macOS 钥匙串</div>
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat">
@@ -616,12 +616,11 @@ body.anno [data-note]::before{
                 <div class="page-title">全部曲目</div>
                 <div class="page-sub">12331 首 · 3800 艺术家 · 5756 专辑 · 97 流派</div>
               </div>
-              <div class="page-acts">
-                <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="16"></i></button>
-                <button class="icon-btn" title="更多"><i data-ic="more-horizontal" data-sz="16" data-fill="1"></i></button>
+              <div class="page-acts" data-note="这里只有「刷新」一个动作：重拉曲库快照（NAS 侧文件变动后手动刷）。原 third 点菜单没落到具体功能，删了 —— 没有明确条目的「更多」按钮是噪音。">
+                <button class="icon-btn" title="重新载入曲库"><i data-ic="refresh-cw" data-sz="16"></i></button>
               </div>
             </div>
-            <div class="toolbar" data-note="四个浏览维度做成分段控件而不是四层目录：曲库一次请求就带回流派，不需要为每行再发请求。">
+            <div class="toolbar" data-note="四个浏览维度做成分段控件而不是四层目录：曲库一次请求就带回流派，不需要为每行再发请求。排序收进表头（见下），流派筛选交给「流派」维度与搜索，不单独出组件。">
               <div class="seg">
                 <button class="on">全部曲目</button>
                 <button>艺术家</button>
@@ -632,20 +631,16 @@ body.anno [data-note]::before{
                 <i data-ic="search" data-sz="14"></i>
                 <input class="inp" placeholder="搜索标题、艺术家、专辑">
               </div>
-              <div class="right">
-                <button class="select">排序：标题<i data-ic="chevrons-up-down" data-sz="12"></i></button>
-                <button class="select">全部流派<i data-ic="chevron-down" data-sz="12"></i></button>
-              </div>
             </div>
             <div class="tbl-wrap">
-              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。ID3 列给全：曲序 / 标题 / 艺术家 / 专辑 / 流派 / 年份 / 时长。流派按「; 」拆成多标签，用英文原名（子流派没有可靠中文译名）。">
+              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。排序做在表头里（同访达）：点表头切换正序 / 倒序，当前列亮箭头，再点别的列换排序键。ID3 列给全：封面 / 曲序 / 标题 / 艺术家 / 专辑 / 流派 / 年份 / 时长；流派按「; 」拆多标签、用英文原名。">
                 <colgroup>
-                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:56px"><col style="width:52px">
+                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th>年份</th><th style="text-align:right">时长</th></tr>
+                  <tr><th class="num">#</th><th></th><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th></tr>
                 </thead>
-                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 显示在文件管理，样态见组件板）。艺术家列是链接形态，点击 = 曲库筛选该歌手。"></tbody>
+                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 显示在文件管理，样态见组件板）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
               </table>
               <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
                 <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
@@ -686,23 +681,22 @@ body.anno [data-note]::before{
               </div>
             </div>
             <div class="tbl-wrap">
-              <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（能看到流派等信息）。正在播放行 = 浅底 + 主色字 + 均衡器。">
+              <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（封面 / 流派等信息都在）。正在播放行 = 浅底 + 主色字 + 均衡器。表头不参与排序 —— 这里的顺序就是播放顺序。">
                 <colgroup>
-                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:52px">
+                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
+                  <tr><th class="num">#</th><th></th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
                 </thead>
                 <tbody id="qtbl"></tbody>
               </table>
             </div>
             <!-- 右键菜单样态（画出来，不做交互） -->
-            <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。「查看专辑」= 主区切到那张专辑的页面（封面 + 曲目表，见「专辑视图」屏）。">
+            <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。专辑、艺人的跳转走列表里的链接列，不占菜单项。">
               <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
               <div class="msep"></div>
-              <div class="mi"><i data-ic="disc" data-sz="12"></i>查看专辑</div>
               <div class="mi"><i data-ic="folder-open" data-sz="12"></i>显示在文件管理</div>
               <div class="msep"></div>
               <div class="mi danger"><i data-ic="x" data-sz="12"></i>移出队列</div>
@@ -712,8 +706,8 @@ body.anno [data-note]::before{
       </div>
     </section>
 
-    <!-- ===== 专辑视图（右键「查看专辑」的落点） ===== -->
-    <section class="screen" data-screen="album">
+    <!-- ===== 曲库 · 已筛选（点艺人 / 专辑名回到这里，不另立版式） ===== -->
+    <section class="screen" data-screen="filtered">
       <div class="page">
         <div class="body">
           <aside class="msider">
@@ -731,28 +725,37 @@ body.anno [data-note]::before{
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column">
-            <div style="display:flex;align-items:center;gap:var(--sp-16);padding:var(--sp-20) var(--sp-24) var(--sp-14)" data-note="「查看专辑」落到这里：封面 + 专辑级信息 + 该专辑的完整曲目表。表列与曲库完全一致，不另立一套样式。">
-              <div class="cover" style="width:96px;height:96px"><i data-ic="music" data-sz="32"></i></div>
-              <div style="min-width:0">
-                <div style="font-size:var(--fs-20);font-weight:600;letter-spacing:-.01em">潮汐</div>
-                <div style="font-size:var(--fs-13);color:var(--accent-2);margin-top:var(--sp-4)">林间电台</div>
-                <div style="font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-4)">专辑 · 2024 · 8 首 · 38 分钟</div>
-                <div class="tags" style="margin-top:var(--sp-8)"><span class="tag">Ambient</span><span class="tag">Instrumental</span></div>
+            <div class="page-head" style="padding-bottom:var(--sp-8)">
+              <div>
+                <div class="page-title">林间电台</div>
+                <div class="page-sub">艺术家 · 从曲库筛出 3 首</div>
               </div>
-              <div style="margin-left:auto;display:flex;gap:var(--sp-6);flex:none">
+              <div class="page-acts" data-note="点专辑名或艺人名 → 回到曲库页并代入筛选条件：维度分段落在对应项上、页头亮条件名、一键清除。不新增「专辑页 / 艺人页」两种版式 —— 那会把产品做复杂。">
+                <button class="btn btn-sec btn-xs"><i data-ic="x" data-sz="12"></i>清除筛选</button>
                 <button class="btn btn-sec btn-xs"><i data-ic="play" data-sz="12" data-fill="1"></i>播放全部</button>
-                <button class="btn btn-sec btn-xs"><i data-ic="list-plus" data-sz="12"></i>加入队列</button>
+              </div>
+            </div>
+            <div class="toolbar">
+              <div class="seg">
+                <button>全部曲目</button>
+                <button class="on">艺术家</button>
+                <button>专辑</button>
+                <button>流派</button>
+              </div>
+              <div class="searchbox">
+                <i data-ic="search" data-sz="14"></i>
+                <input class="inp" placeholder="搜索标题、艺术家、专辑">
               </div>
             </div>
             <div class="tbl-wrap">
               <table class="tbl">
                 <colgroup>
-                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:56px"><col style="width:52px">
+                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th>年份</th><th style="text-align:right">时长</th></tr>
+                  <tr><th class="num">#</th><th></th><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th></tr>
                 </thead>
-                <tbody id="atbl"></tbody>
+                <tbody id="ftbl"></tbody>
               </table>
             </div>
           </div>
@@ -763,20 +766,9 @@ body.anno [data-note]::before{
     <!-- ===== 沉浸模式 ===== -->
     <section class="screen" data-screen="immersive">
       <div class="page">
-        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出）。左列封面 + 进度 + 播放控制，右列 ID3 与歌词；点歌手名回曲库并筛选该歌手。">
+        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出），只收掉侧栏 —— 底部播放条原样保留，控制、进度、气泡与曲库状态是同一套。左封面右歌词；点歌手名回曲库并筛选该歌手。">
           <button class="icon-btn imm-close"><i data-ic="x" data-sz="18"></i></button>
-          <div class="imm-left" data-note="沉浸模式也带全套播放控制：进度条（悬停样态同播放条）+ 循环 / 上一首 / 播放 / 下一首 / 队列。不放音质、码率这类信息。">
-            <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
-            <div class="p-line imm-line"><i style="width:36%"></i><em style="left:36%"></em><span class="tip" style="left:36%">1:32 / 4:12</span></div>
-            <div class="imm-time">1:32 / 4:12</div>
-            <div class="imm-ctl">
-              <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="16"></i></button>
-              <button class="icon-btn" title="上一首"><i data-ic="skip-back" data-sz="18" data-fill="1"></i></button>
-              <button class="btn-play" title="暂停"><i data-ic="pause" data-sz="16" data-fill="1"></i></button>
-              <button class="icon-btn" title="下一首"><i data-ic="skip-forward" data-sz="18" data-fill="1"></i></button>
-              <button class="icon-btn" title="播放队列"><i data-ic="list-music" data-sz="16"></i></button>
-            </div>
-          </div>
+          <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
           <div class="imm-info">
             <div class="imm-title">夜航</div>
             <div class="imm-artist">林间电台</div>
@@ -809,7 +801,7 @@ body.anno [data-note]::before{
                 <div class="crumb" style="padding:var(--sp-4) 0 0"><span>music</span><i data-ic="chevron-right" data-sz="12"></i><span>华语</span><i data-ic="chevron-right" data-sz="12"></i><b>2024</b></div>
               </div>
             </div>
-            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。不做「复制 / 粘贴 / 剪切」三件套 —— 改「复制到…」「移动到…」两个入口，各自弹目录选择，省掉剪贴板状态（现在粘到哪、粘没粘过，都不用记）。上传是次要按钮。目录大小入口已去掉。">
+            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。不做「复制 / 粘贴 / 剪切」三件套 —— 改「复制到…」「移动到…」两个入口，各自弹目录选择，省掉剪贴板状态（现在粘到哪、粘没粘过，都不用记）。上传是次要按钮。目录大小入口已去掉。支持多选：Cmd 点加选、Shift 点范围选、Cmd+A 全选，操作按选中集合生效。">
               <button class="btn btn-sec btn-xs"><i data-ic="folder-plus" data-sz="12"></i>新建文件夹</button>
               <button class="btn btn-sec btn-xs"><i data-ic="upload" data-sz="12"></i>上传</button>
               <button class="btn btn-sec btn-xs"><i data-ic="download" data-sz="12"></i>下载</button>
@@ -836,21 +828,19 @@ body.anno [data-note]::before{
               <table class="tbl">
                 <colgroup><col><col style="width:110px"><col style="width:150px"><col style="width:90px"></colgroup>
                 <thead><tr><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th></tr></thead>
-                <tbody id="files" data-note="列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。行支持右键菜单（图中样态）。"></tbody>
+                <tbody id="files" data-note="多选样态：Cmd 点加选三行（浅底 + 主色字同单选）。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。"></tbody>
               </table>
             </div>
-            <!-- 目录行右键菜单样态（不含播放项） -->
-            <div class="menu" style="top:300px;left:520px" data-note="目录行的右键菜单：打开 / 下载 / 复制到… / 移动到… / 改名 / 删除。音频文件的菜单才多一条「播放」，且点它直接切到听歌模块。">
-              <div class="mi"><i data-ic="folder-open" data-sz="12"></i>打开</div>
-              <div class="mi"><i data-ic="download" data-sz="12"></i>下载</div>
+            <!-- 多选右键菜单样态 -->
+            <div class="menu" style="top:330px;left:560px" data-note="多选后的右键菜单：项带数量。音频文件单独右键时才多一条「播放」，且点它直接切到听歌模块。">
+              <div class="mi"><i data-ic="download" data-sz="12"></i>下载（3 个文件）</div>
               <div class="mi"><i data-ic="copy" data-sz="12"></i>复制到…</div>
               <div class="mi"><i data-ic="folder-input" data-sz="12"></i>移动到…</div>
               <div class="msep"></div>
-              <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
-              <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+              <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除（3 个）</div>
             </div>
             <div class="statusbar">
-              <span>已选中 1 项 · 目录</span>
+              <span>已选中 3 项 · 61.8 MB</span>
               <div class="right">
                 <span class="pill ok"><i data-ic="check" data-sz="10"></i>可写</span>
                 <span>8 个共享夹</span>
@@ -1123,7 +1113,6 @@ body.anno [data-note]::before{
           <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
-          <div class="mi"><i data-ic="disc" data-sz="12"></i>查看专辑</div>
         </div>
         <div class="b-lab" style="margin-top:var(--sp-8);width:auto">歌曲行</div>
       </div>
@@ -1282,6 +1271,7 @@ const ICONS={
   wifi:'<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
   loader:'<path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/>',
   'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+  'chevron-up':'<path d="m18 15-6-6-6 6"/>',
   'chevron-down':'<path d="m6 9 6 6 6-6"/>',
   'chevrons-up-down':'<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
   'more-horizontal':'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
@@ -1329,16 +1319,6 @@ const FILES=[
   ['notes.txt','840 B','2026-08-21 09:41','可写','text'],
   ['备份','','2026-08-01 14:20','只读','dir']
 ];
-const ALBUM=[
-  [1,'潮汐',['Ambient','Instrumental'],'5:03'],
-  [2,'逆风',['Ambient'],'4:56'],
-  [3,'夜航',['Ambient'],'4:12'],
-  [4,'灯塔',['Ambient','Electronic'],'5:28'],
-  [5,'暗涌',['Ambient'],'6:04'],
-  [6,'退潮',['Instrumental'],'3:47'],
-  [7,'潮间带',['Ambient','Instrumental'],'4:31'],
-  [8,'远海',['Ambient'],'4:09']
-];
 
 /* ---------- 渲染 ---------- */
 const $ = (s,r=document)=>r.querySelector(s);
@@ -1347,15 +1327,19 @@ const esc = s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 
 /* 流派标签统一无彩色：一格里能放好几个，带色会花 */
 const tagHtml=(g)=>`<span class="tag">${esc(g)}</span>`;
+/* 封面小图：按专辑给底色占位（正式实现读封面缩略图） */
+const ALTBG={'潮汐':'','夏日信件':' alt1','银翼':' alt2','迁徙':' alt1','十一月':' alt2','深水':''};
+const coverCell=(album,on)=>`<td class="cov"><span class="cover${ALTBG[album]||''}" style="width:28px;height:28px;${on?'box-shadow:0 0 0 1px rgba(0,188,255,.35) inset':''}"><i data-ic="music" data-sz="12"></i></span></td>`;
 
 $('#tracks').innerHTML = TRACKS.map((t,i)=>{
   const on = i===0;
   const cls = (b)=> on ? `${b} dim` : b;
   return `<tr${on?' class="on"':''}>`+
     `<td class="${cls('num')}">${t[0]}</td>`+
+    coverCell(t[3],on)+
     `<td class="main-c">${esc(t[1])}</td>`+
     `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
-    `<td class="${cls('')}">${esc(t[3])}</td>`+
+    `<td class="${cls('')} a-link">${esc(t[3])}</td>`+
     `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
     `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
@@ -1367,24 +1351,27 @@ $('#qtbl').innerHTML = QPLAY.map((q)=>{
   const num = on ? '<span class="eq"><i></i><i></i><i></i></span>' : String(q[0]);
   return `<tr${on?' class="on"':''}>`+
     `<td class="num">${num}</td>`+
+    coverCell(q[3],on)+
     `<td class="main-c">${esc(q[1])}</td>`+
     `<td class="${on?'dim':''} a-link">${esc(q[2])}</td>`+
-    `<td class="${on?'dim':''}">${esc(q[3])}</td>`+
+    `<td class="${on?'dim':''} a-link">${esc(q[3])}</td>`+
     `<td class="${on?'dim':''}"><span class="tags">${q[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${on?'dim':'num'}" style="text-align:right">${q[5]}</td></tr>`;
 }).join('');
 
-$('#atbl').innerHTML = ALBUM.map((a)=>{
-  const on = a[0]===3;
+/* 点艺人 / 专辑名回到曲库代入筛选 —— 这是筛后形态（艺术家维度，选中「林间电台」） */
+$('#ftbl').innerHTML = TRACKS.filter(t=>t[2]==='林间电台').map((t,i)=>{
+  const on = i===0;
   const cls = (b)=> on ? `${b} dim` : b;
   return `<tr${on?' class="on"':''}>`+
-    `<td class="num">${a[0]}</td>`+
-    `<td class="main-c">${esc(a[1])}</td>`+
-    `<td class="${cls('')} a-link">林间电台</td>`+
-    `<td class="${cls('')}">潮汐</td>`+
-    `<td class="${cls('')}"><span class="tags">${a[2].map(tagHtml).join('')}</span></td>`+
-    `<td class="${cls('num')}">2024</td>`+
-    `<td class="${cls('num')}" style="text-align:right">${a[3]}</td></tr>`;
+    `<td class="${cls('num')}">${t[0]}</td>`+
+    coverCell(t[3],on)+
+    `<td class="main-c">${esc(t[1])}</td>`+
+    `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
+    `<td class="${cls('')} a-link">${esc(t[3])}</td>`+
+    `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
+    `<td class="${cls('num')}">${t[5]}</td>`+
+    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
 }).join('');
 
 $('#tree').innerHTML = FOLDERS.map((f,i)=>{
@@ -1396,10 +1383,11 @@ $('#tree').innerHTML = FOLDERS.map((f,i)=>{
  `<div class="tree-row ind drop" data-note="拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。"><i data-ic="folder" data-sz="14"></i>欧美</div>`+
  '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>古典</div>';
 
-/* 图标只按文件类型给，列表里没有任何播放状态 */
+/* 图标只按文件类型给，列表里没有任何播放状态；多选：Cmd 点加选、Shift 范围选 */
 const FILE_ICON={dir:'folder',audio:'music',image:'image',text:'file-text',list:'list-music'};
-$('#files').innerHTML = FILES.map((f,i)=>{
-  const on = i===1;                       // 选中的是目录行，不是音频行
+const SEL=new Set([2,3,4]);
+$('#files').innerHTML = FILES.map((f)=>{
+  const on = SEL.has(FILES.indexOf(f));
   const perm = f[3]==='可写' ? '<span class="pill ok" style="height:16px">可写</span>' : '<span class="pill" style="height:16px">只读</span>';
   const c = (extra)=> on ? `${extra} dim` : extra;
   return `<tr${on?' class="on"':''}>`+
@@ -1417,7 +1405,7 @@ $$('[data-ic]').forEach(el=>{
 });
 
 /* ---------- 页面切换 ---------- */
-const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['album','专辑视图'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
+const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['filtered','曲库 · 已筛选'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
 $('#tabs').innerHTML = TABS.map(([k,l])=>`<button class="tab" data-tab="${k}">${l}</button>`).join('');
 
 const win = $('#win');
