@@ -158,40 +158,32 @@ private struct MainAreaView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 页头：字号 17 / semibold / 字距 -0.01em，内边距 20/24/12（原型 `.page-head`）。
-            Text(state.module.title)
-                .font(.system(size: DmText.t17, weight: .semibold))
-                .kerning(-0.17)
-                .foregroundColor(Color.dmInk)
-                .padding(.top, DmSpace.s20)
-                .padding(.horizontal, DmSpace.s24)
-                .padding(.bottom, DmSpace.s12)
+        Group {
+            if state.module == .music {
+                LibraryView()
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    DmPageHead(state.module.title)
 
-            switch state.module {
-            case .music:
-                ModulePlaceholder(
-                    icon: "headphones",
-                    title: "曲库",
-                    note: "12331 首在 NAS 上，列表分页懒加载（一页 1000 首约 1.1 秒）",
-                    next: ["列表与四维浏览（艺术家 / 专辑 / 流派）", "取流与播放（stream.cgi，支持 Range）", "歌词（内嵌直读 + 在线搜索兜底）"]
-                )
-            case .files:
-                ModulePlaceholder(
-                    icon: "folder",
-                    title: "文件管理",
-                    note: "8 个共享夹；目录树按名称正序，逐级懒加载",
-                    next: ["目录树与文件列表", "搜索（带重试，服务端会随机假空）", "写操作（选目标弹窗 + 同名冲突处理）"]
-                )
-            case .status:
-                ModulePlaceholder(
-                    icon: "gauge",
-                    title: "系统状态",
-                    note: "关机与重启、读写开关机计划",
-                    next: ["状态卡片（CPU / 内存 / 存储 / 温度）", "关机与重启", "开关机计划"]
-                )
-            case .settings:
-                SettingsPane()
+                    switch state.module {
+                    case .files:
+                        ModulePlaceholder(
+                            icon: "folder",
+                            title: "文件管理",
+                            note: "8 个共享夹；目录树按名称正序，逐级懒加载",
+                            next: ["目录树与文件列表", "搜索（带重试，服务端会随机假空）", "写操作（选目标弹窗 + 同名冲突处理）"]
+                        )
+                    case .status:
+                        ModulePlaceholder(
+                            icon: "gauge",
+                            title: "系统状态",
+                            note: "关机与重启、读写开关机计划",
+                            next: ["状态卡片（CPU / 内存 / 存储 / 温度）", "关机与重启", "开关机计划"]
+                        )
+                    default:
+                        SettingsPane()
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

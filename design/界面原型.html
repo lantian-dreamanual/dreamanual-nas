@@ -182,9 +182,13 @@ input,select{font:inherit;color:inherit}
 .btn-danger:hover{background:var(--danger-hover)}
 .btn-xs{height:var(--ctl-28);padding:0 var(--sp-10);border-radius:var(--r-6);font-size:var(--fs-12)}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
+/* 图标按钮 = 方形版紧凑按钮：28×28 / r-6 / 图形 12 / 常态 ink-2（design-system.md
+   第八节「图标按钮」）。基准是投资监控的 IconButton —— 落码照那一版复刻，别照
+   这一稿之前的画法。密集行里的小档（侧栏小节头的 +、表头字段配置）另见各自的
+   覆盖，那两处待那一屏落地时并档 */
 .icon-btn{
-  width:var(--ctl-32);height:var(--ctl-32);border-radius:var(--r-8);display:grid;place-items:center;
-  color:var(--ink-3);transition:background var(--mo-fast),color var(--mo-fast);flex:none;
+  width:var(--ctl-28);height:var(--ctl-28);border-radius:var(--r-6);display:grid;place-items:center;
+  color:var(--ink-2);transition:background var(--mo-fast),color var(--mo-fast);flex:none;
 }
 .icon-btn:hover{background:var(--panel-3);color:var(--ink)}
 .icon-btn[disabled]{opacity:.4;cursor:not-allowed}
@@ -753,7 +757,7 @@ body.anno [data-note]::before{
                 <div class="page-sub">12331 首 · 3800 艺术家 · 5756 专辑 · 97 流派</div>
               </div>
               <div class="page-acts" data-note="这里只有「刷新」一个动作：重拉曲库快照（NAS 侧文件变动后手动刷）。原 third 点菜单没落到具体功能，删了 —— 没有明确条目的「更多」按钮是噪音。">
-                <button class="icon-btn" title="重新载入曲库"><i data-ic="refresh-cw" data-sz="16"></i></button>
+                <button class="icon-btn" title="重新载入曲库"><i data-ic="refresh-cw" data-sz="12"></i></button>
               </div>
             </div>
             <div class="toolbar" data-note="四个浏览维度做成分段控件而不是四层目录：曲库一次请求就带回流派，不需要为每行再发请求。排序收进表头（见下），流派筛选交给「流派」维度与搜索，不单独出组件。">
@@ -1019,7 +1023,7 @@ body.anno [data-note]::before{
           </div>
           <div class="page-acts">
             <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继</span>
-            <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="16"></i></button>
+            <button class="icon-btn" title="刷新"><i data-ic="refresh-cw" data-sz="12"></i></button>
           </div>
         </div>
         <div class="body scroll">
@@ -1162,7 +1166,7 @@ body.anno [data-note]::before{
       <div class="modal">
         <div class="modal-head">
           <h2>编辑标签 · 夜航</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="field"><label>标题</label><input class="inp" value="夜航" spellcheck="false"></div>
@@ -1192,7 +1196,7 @@ body.anno [data-note]::before{
       <div class="modal">
         <div class="modal-head">
           <h2>移动到…</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="mv-search" data-note="输入即筛选：浏览树切换为平铺结果，每行带相对共享夹的完整路径。数据两路：已加载层级客户端过滤兜底；全库搜走 FileStation.Search（filetype=folder，假空要重试，见硬约束）。回车 = 选中第一个结果。">
@@ -1246,7 +1250,7 @@ body.anno [data-note]::before{
       <div class="modal" data-dlg="conflict" data-note="同名冲突必须先由客户端判：上传 overwrite=false 撞名回「成功」但内容不变（静默跳过），所以上传前要 List 比对文件名；Rename 撞名服务端会拦（1200 + errors[414]）。CopyMove 撞名的返回码**还没实测**，落码前补一条探针 —— 三种处理的界面与返回码无关，先按用户的选择走。">
         <div class="modal-head">
           <h2>已有同名项目</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="cmp">
@@ -1278,7 +1282,7 @@ body.anno [data-note]::before{
       <div class="modal hidden" data-dlg="newfolder" data-note="单输入框弹窗，与「重命名」同构，只有标题与按钮换字。新建在当前所在目录，路径写在标题下面，不让用户猜。">
         <div class="modal-head">
           <h2>新建文件夹</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
@@ -1297,7 +1301,7 @@ body.anno [data-note]::before{
       <div class="modal hidden" data-dlg="rename" data-note="与「新建文件夹」同构。输入框预选主干、不含扩展名（macOS 惯例）—— 改名时最常见的手误就是把 .mp3 删掉。">
         <div class="modal-head">
           <h2>重命名</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
@@ -1315,7 +1319,7 @@ body.anno [data-note]::before{
       <div class="modal hidden" data-dlg="delete" data-note="删除不进回收站（实测），确认文案必须写明不可恢复。多选时列清单，文件夹要标出「含 N 项」，因为删的是整棵子树。">
         <div class="modal-head">
           <h2>删除 3 个项目？</h2>
-          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+          <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
         </div>
         <div class="modal-body">
           <div class="banner-d" data-note="这一条是硬约束（见产品定义第七节）：删除不进回收站，写不清楚就是一次不可逆的误操作。">
@@ -1350,18 +1354,18 @@ body.anno [data-note]::before{
       </div>
       <div class="p-acts" data-note="评分（星）= Audio Station 的评分字段（setrating 0–5），点亮 = 5 星、再点清零；与「添加到歌单」并排。不用红心：Audio Station 没有红心，自造只能存本机，与 NAS 数据脱节。">
         <button class="icon-btn rated" title="评分 5 星"><i data-ic="star" data-sz="16" data-fill="1"></i></button>
-        <button class="icon-btn" title="添加到歌单"><i data-ic="list-plus" data-sz="16"></i></button>
+        <button class="icon-btn" title="添加到歌单"><i data-ic="list-plus" data-sz="12"></i></button>
       </div>
     </div>
     <div class="p-ctl">
-      <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="16"></i></button>
+      <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="12"></i></button>
       <button class="icon-btn" title="上一首"><i data-ic="skip-back" data-sz="18" data-fill="1"></i></button>
       <button class="btn-play" title="暂停"><i data-ic="pause" data-sz="16" data-fill="1"></i></button>
       <button class="icon-btn" title="下一首"><i data-ic="skip-forward" data-sz="18" data-fill="1"></i></button>
-      <button class="icon-btn" title="播放队列" data-note="点队列按钮，主内容区从曲库直接切成播放队列（见「播放队列」屏）。"><i data-ic="list-music" data-sz="16"></i></button>
+      <button class="icon-btn" title="播放队列" data-note="点队列按钮，主内容区从曲库直接切成播放队列（见「播放队列」屏）。"><i data-ic="list-music" data-sz="12"></i></button>
     </div>
     <div class="p-right">
-      <button class="icon-btn" title="音量"><i data-ic="volume-2" data-sz="16"></i></button>
+      <button class="icon-btn" title="音量"><i data-ic="volume-2" data-sz="12"></i></button>
       <span class="vol"><i></i></span>
     </div>
   </div>
@@ -1380,7 +1384,7 @@ body.anno [data-note]::before{
     <div class="b-row"><span class="b-lab">次</span><button class="btn btn-sec">取消</button><button class="btn btn-sec" disabled>取消</button></div>
     <div class="b-row"><span class="b-lab">紧凑</span><button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>新建文件夹</button><button class="btn btn-sec btn-xs" disabled>新建文件夹</button></div>
     <div class="b-row"><span class="b-lab">危险</span><button class="btn btn-danger"><i data-ic="power" data-sz="14"></i>关机…</button><button class="btn btn-danger" disabled>关机…</button></div>
-    <div class="b-row"><span class="b-lab">图标</span><button class="icon-btn"><i data-ic="refresh-cw" data-sz="16"></i></button><button class="icon-btn" disabled><i data-ic="trash-2" data-sz="16"></i></button></div>
+    <div class="b-row"><span class="b-lab">图标</span><button class="icon-btn"><i data-ic="refresh-cw" data-sz="12"></i></button><button class="icon-btn" disabled><i data-ic="trash-2" data-sz="12"></i></button></div>
     <div class="b-note">强调色 sky-500（#00a6f4，v4 原值）：深字方案，950 压 500 = 7.32:1，hover 提到 400 档 9.09:1；白字压 500 仅 2.71:1，不可用。禁用一律「原样整体压暗 0.5」，不换色。</div>
   </div>
 
@@ -1626,7 +1630,7 @@ body.anno [data-note]::before{
       <div style="display:flex;align-items:center;gap:var(--sp-16)">
         <span class="b-lab" style="width:96px">播放条 · 单星</span>
         <button class="icon-btn rated" title="评分 5 星"><i data-ic="star" data-sz="16" data-fill="1"></i></button>
-        <button class="icon-btn" title="评分 5 星"><i data-ic="star" data-sz="16"></i></button>
+        <button class="icon-btn" title="评分 5 星"><i data-ic="star" data-sz="12"></i></button>
         <span style="color:var(--ink-3);font-size:var(--fs-12)">点亮 = 5 星，再点清零</span>
       </div>
     </div>

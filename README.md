@@ -2,10 +2,11 @@
 
 连接群晖（Synology）NAS 的 macOS 桌面客户端。以听自己的曲库为主轴，兼顾文件管理与开关机。
 
-> **当前状态：源码骨架已起（2026-10-12）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
+> **当前状态：曲库浏览已通（2026-10-12）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
 > 功能范围已定（见 [产品定义](docs/产品定义.md)），整体界面出了 HTML 原型（[界面原型](design/界面原型.html)）。
 > 地基已通：QuickConnect 端点解析、双会话（FileStation + AudioStation）、钥匙串口令、保活重登、
-> 外壳（侧栏 + 主区 + 底部播放条）。曲库 / 文件 / 系统状态三个模块还没接数据。
+> 外壳（侧栏 + 主区 + 底部播放条）。**曲库页已接数据**：四维浏览 / 搜索 / 筛选 / 分页懒加载，
+> 真机 12328 首完整渲染。播放与队列、歌单与每日随机、文件管理、系统状态还没接。
 
 ## 功能
 
@@ -37,15 +38,17 @@ nas/
 │   ├── DreamanualNASApp.swift   入口：固定深色 + 窗口
 │   ├── DesignSystem/
 │   │   ├── DreamanualTheme.nas.swift   生成物副本（勿手改，门禁对账 design/dist）
-│   │   └── DesignSystem.swift          组件层：选中态（浅底形态）/ 按钮 / 输入框 / LucideIcon
+│   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / LucideIcon
 │   ├── Core/
 │   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
 │   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码
 │   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
 │   │   ├── KeychainStore.swift    口令只进系统钥匙串
+│   │   ├── AudioLibrary.swift     曲库只读数据层（四维 / 搜索 / 筛选 / 分页）
 │   │   └── AppState.swift         连接状态机 + 模块切换
 │   └── Features/
 │       ├── ConnectView.swift      连接页
+│       ├── LibraryView.swift      曲库页（四维浏览 + 搜索 + 筛选）
 │       ├── RootView.swift         外壳（侧栏 + 主区）
 │       └── PlayerBarView.swift    底部常驻播放条（空态）
 ├── scripts/

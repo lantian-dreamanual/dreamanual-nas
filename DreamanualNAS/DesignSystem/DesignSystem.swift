@@ -71,6 +71,42 @@ enum SelectState {
     }
 }
 
+/// 列表行的选中档 —— **浅底轨**（design-system.md 第八节「选中与悬停」的取档表）。
+///
+/// 数据表行、目录树行、弹窗结果行走这一档：选中 `accent-soft` 底 + `accent-2` 字，
+/// 次要格 `accent`。与侧栏行的实心主色底 + 白字（`SelectState`）**分轨** ——
+/// 侧栏总共三四行、选中行表达「你在哪个模块」；列表行一屏几十上百行，
+/// 多选时还会成片连成色带。落点先例是密码管理 `.item.on`。
+///
+/// 这一类行**不做失焦降级**：`accent-soft` 本身就是深字端的失焦目标档，
+/// 选中与失焦是同一个样（取档的已知项，不当漂移处理）。
+enum ListRowState {
+    /// 底：选中 `accent-soft`；悬停 `panel-2` —— 列表挂在 `panel` 上，
+    /// 悬停抬一档，与侧栏行悬停取 `panel-3` 是同一条「所在面相邻一档」。
+    static func background(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        if isSelected { return Color.dmAccentSoft }
+        return hovered ? Color.dmPanel2 : Color.clear
+    }
+
+    /// 正文格（艺术家、专辑）。
+    static func foreground(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        if isSelected { return Color.dmAccent2 }
+        return hovered ? Color.dmInk : Color.dmInk2
+    }
+
+    /// 标题格：常态就压 `ink` —— 它是这一行的主键，比别的格重一档。
+    static func primaryForeground(isSelected: Bool = false) -> Color {
+        isSelected ? Color.dmAccent2 : Color.dmInk
+    }
+
+    /// 次要格（流派、年份、时长、曲序）：常态 `ink-3`；选中时也压在主色底上，
+    /// 取比正文低一档的 `accent`，与 `accent-2` 拉开层次。
+    static func secondaryForeground(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        if isSelected { return Color.dmAccent }
+        return hovered ? Color.dmInk : Color.dmInk3
+    }
+}
+
 // ============ 图标 ============
 
 /// Lucide 图标（全产品线统一）。SVG 由 `design/spike/icons.mjs` 栅格化后放进
@@ -472,5 +508,139 @@ struct DmToggleStyle: ToggleStyle {
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.5)
         .animation(.easeInOut(duration: DmMotion.fast), value: configuration.isOn)
+    }
+}
+
+/// 图标按钮：28×28 方形 / 圆角 `r-6` / 图形 12 / 悬停 `panel-3` 底 + `ink` 字，
+/// 禁用原样整体压暗 0.5。**逐字复刻投资监控 `IconButton`** —— 那不是它的私有件，
+/// 是产品线里这个组件的落点，页头动作、面板角落都该用它，别的端不必另立形态。
+struct IconButton: View {
+    let iconName: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            LucideIcon(iconName, size: DmIcon.i12)
+                .foregroundColor(isHovered && isEnabled ? Color.dmInk : Color.dmInk2)
+                .frame(width: DmControl.h28, height: DmControl.h28)
+                .background(
+                    RoundedRectangle(cornerRadius: DmRadius.r6)
+                        .fill(isHovered && isEnabled ? Color.dmPanel3 : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.5)
+        .onHover { isHovered = $0 }
+    }
+}
+
+/// 搜索框：高钉控件档 32、圆角 `r-8`、底按所在面取相邻一档、`line-2` 1px 描边；
+/// 左侧放大镜 14（`ink-3`），横向内边距 12、图标与输入之间 8；聚焦只转描边
+/// （`accent-2`）、底色不动；有内容时右侧出清除钮。宽度由调用点给
+/// （曲库 280、文件管理 200）。
+///
+/// 形态照原型 `.searchbox`。产品线里这是第一个搜索框 —— 另四端都没有这个场景，
+/// 没有可复刻的落点，规格先落在本端。
+struct DmSearchField: View {
+    @Binding private var text: String
+    private let placeholder: String
+    private let surface: DmSurface
+    private let onSubmit: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    init(
+        text: Binding<String>,
+        placeholder: String,
+        surface: DmSurface = .panel,
+        onSubmit: @escaping () -> Void = {}
+    ) {
+        self._text = text
+        self.placeholder = placeholder
+        self.surface = surface
+        self.onSubmit = onSubmit
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon("search", size: DmIcon.i14)
+                .foregroundColor(Color.dmInk3)
+
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmInk)
+                .focused($isFocused)
+                .onSubmit(onSubmit)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    onSubmit()
+                } label: {
+                    LucideIcon("circle-x", size: DmIcon.i14)
+                        .foregroundColor(Color.dmInk3)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, DmSpace.s12)
+        .frame(height: DmControl.h32)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(surface.controlFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(isFocused ? Color.dmAccent2 : Color.dmLine2, lineWidth: DmLine.base)
+        )
+    }
+}
+
+/// 页头：标题 17/semibold/字距 -0.01em，副行 12/`ink-3`（题头与副行间距 4），
+/// 右侧动作区右对齐（两块之间 16）；内边距 20/24/12。
+///
+/// 规格抄原型 `.page-head` / `.page-title` / `.page-sub`。四个模块都用它 ——
+/// 页头是页面模板的一部分，不是各页各画一条。
+struct DmPageHead<Trailing: View>: View {
+    private let title: String
+    private let subtitle: String?
+    private let trailing: Trailing
+
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DmSpace.s16) {
+            VStack(alignment: .leading, spacing: DmSpace.s4) {
+                Text(title)
+                    .font(.system(size: DmText.t17, weight: .semibold))
+                    .kerning(-0.17)
+                    .foregroundColor(Color.dmInk)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: DmText.t12))
+                        .foregroundColor(Color.dmInk3)
+                }
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: DmSpace.s6) {
+                trailing
+            }
+        }
+        .padding(.top, DmSpace.s20)
+        .padding(.horizontal, DmSpace.s24)
+        .padding(.bottom, DmSpace.s12)
+    }
+}
+
+extension DmPageHead where Trailing == EmptyView {
+    init(_ title: String, subtitle: String? = nil) {
+        self.init(title, subtitle: subtitle) { EmptyView() }
     }
 }

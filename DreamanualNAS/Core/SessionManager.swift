@@ -43,27 +43,52 @@ actor SessionManager {
     // MARK: - 调用
 
     /// 调一个接口；会话失效时自动重登一次并重放。
+    ///
+    /// - Parameter path: 覆盖请求路径用。**Audio Station 的接口不在 `entry.cgi`
+    ///   上**（拿它打回 `code=102`），每条认自己的专路径，所以不传时按接口名去
+    ///   `query.cgi` 的接口地图里查。地图是路径的唯一权威来源 —— 猜 cgi 名是
+    ///   踩过的坑：猜错时服务端回 HTML 错误页，解包失败被当成「方法不存在」，
+    ///   得看原始应答的 `Content-Type` 才判得出来。
     func call(
         kind: Kind,
         api: String,
         version: Int,
         method: String,
-        params: [String: String] = [:]
+        params: [String: String] = [:],
+        path: String? = nil
     ) async throws -> Any {
         var fields = params
         fields["api"] = api
         fields["version"] = String(version)
         fields["method"] = method
 
+        let target = try await entryPath(for: api, overriding: path)
         let creds = try await credentials(for: kind)
         do {
-            return try await client.post(path: "entry.cgi", params: fields, credentials: creds)
+            return try await client.post(path: target, params: fields, credentials: creds)
         } catch let error as SynologyError where error.isSessionInvalid {
             // 会话过期：丢掉重登，重放这一条请求。
             sessions[kind] = nil
             let refreshed = try await credentials(for: kind)
-            return try await client.post(path: "entry.cgi", params: fields, credentials: refreshed)
+            return try await client.post(path: target, params: fields, credentials: refreshed)
         }
+    }
+
+    /// 这一条请求该走哪条路径。文件与系统类的接口都在 `entry.cgi` 上，地图里
+    /// 查不到（或地图本身拉不下来）时退回去。
+    private func entryPath(for api: String, overriding path: String?) async throws -> String {
+        if let path { return Self.relativePath(path) }
+        if let info = try? await client.apiInfo(for: api) { return Self.relativePath(info.path) }
+        return "entry.cgi"
+    }
+
+    /// 接口地图里的 `path` 写法不统一 —— 有的给 `entry.cgi`，有的给
+    /// `/webapi/AudioStation/song.cgi`。`client.baseURL` 本身已经带 `/webapi/`
+    /// 前缀，直接拼会把前缀叠成两层、服务端回 HTML 404，所以统一裁成相对路径。
+    static func relativePath(_ path: String) -> String {
+        if path.hasPrefix("/webapi/") { return String(path.dropFirst("/webapi/".count)) }
+        if path.hasPrefix("/") { return String(path.dropFirst()) }
+        return path
     }
 
     func credentials(for kind: Kind) async throws -> SynologyCredentials {
