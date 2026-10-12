@@ -514,6 +514,12 @@ input,select{font:inherit;color:inherit}
 .pick-list{display:flex;flex-direction:column;gap:var(--sp-2);max-height:180px;overflow-y:auto;border:var(--lw-hairline) solid var(--line);border-radius:var(--r-8);padding:var(--sp-4)}
 .pick-list .row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);font-size:var(--fs-13);color:var(--ink-2);border-radius:var(--r-6)}
 .pick-list .row .sz{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3)}
+/* 底栏左侧的作用域开关（同名冲突「应用于全部」） */
+.foot-cb{display:flex;align-items:center;gap:var(--sp-8);margin-right:auto;font-size:var(--fs-13);color:var(--ink-2);cursor:pointer;user-select:none}
+.foot-cb:hover{color:var(--ink)}
+.foot-cb .cb .ic{display:none}
+.foot-cb .cb.on{background:var(--accent-fill);border-color:var(--accent-fill)}
+.foot-cb .cb.on .ic{display:grid}
 .demo-seg{position:absolute;left:var(--sp-16);top:var(--sp-16);display:flex;gap:var(--sp-4);padding:var(--sp-4);background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8);box-shadow:var(--shadow-card);z-index:40}
 .demo-seg button{padding:var(--sp-6) var(--sp-10);border-radius:var(--r-6);font-size:var(--fs-11);color:var(--ink-3);transition:var(--mo-fast)}
 .demo-seg button:hover{color:var(--ink)}
@@ -1157,8 +1163,7 @@ body.anno [data-note]::before{
           </div>
           <div class="mv-path" data-note="目标路径随选中实时显示。默认定位到当前所在目录（此处来源是 music › 华语 › 2024）；「最近使用目标」是后续增强，v1 不做。">
             <span>目标</span><b id="mvPath">music › 华语 › 纯音乐</b>
-          </div>
-          <div class="mv-list" id="mvBrowse" data-note="树逐级懒加载：展开才拉子层（FileStation.List，sort_by=filename + asc，服务端排序）。选目标必须看到全部层级名，所以整层滚动展示、不设「还有 N 个」截断 —— 这与资料库树（浏览用，截断 + 指向右侧列表）是两个场景两种取舍。">
+          </div>          <div class="mv-list" id="mvBrowse" data-note="树逐级懒加载：展开才拉子层（FileStation.List，sort_by=filename + asc，服务端排序）。选目标必须看到全部层级名，所以整层滚动展示、不设「还有 N 个」截断 —— 这与资料库树（浏览用，截断 + 指向右侧列表）是两个场景两种取舍。">
             <div class="tree-row mv-pick" data-p="backup"><i data-ic="folder" data-sz="14"></i>backup<span class="tgl"></span></div>
             <div class="tree-row mv-pick" data-p="docker"><i data-ic="folder" data-sz="14"></i>docker<span class="tgl"></span></div>
             <div class="tree-row mv-pick" data-p="downloads"><i data-ic="folder" data-sz="14"></i>downloads<span class="tgl"></span></div>
@@ -1222,12 +1227,11 @@ body.anno [data-note]::before{
             <span class="radio"></span>
             <span><span class="t">跳过</span><span class="d">这一项不动，其余继续</span></span>
           </div>
-          <label class="opt" style="margin-top:var(--sp-10)" data-note="批量（多选上传、多选移动）时才出现；单选场景不给这个开关，少一个要读的控件。">
-            <span class="cb"><i data-ic="check" data-sz="10"></i></span>
-            <span><span class="t">应用于全部 3 项</span><span class="d">同类冲突不再逐项询问</span></span>
-          </label>
         </div>
         <div class="modal-foot">
+          <label class="foot-cb" data-note="「应用于全部」放在底栏最左侧，与三个处理选项分开 —— 它是作用域开关，不是第四种处理。批量（多选上传、多选移动）才出现；单选场景不给，少一个要读的控件。">
+            <span class="cb"><i data-ic="check" data-sz="10"></i></span>应用于全部 3 项
+          </label>
           <button class="btn btn-sec">取消</button>
           <button class="btn btn-pri">应用</button>
         </div>
@@ -1240,13 +1244,11 @@ body.anno [data-note]::before{
         </div>
         <div class="modal-body">
           <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
-          <div class="field">
+          <div class="field" style="margin-top:var(--sp-10)" data-note="非法字符前端先拦（服务端 418 = 名称非法）；名称已存在时服务端回 1200 + errors[414]，翻成「该名称已存在」—— 实现细节不进界面，界面上只留非法字符这一条用户用得上的提示。">
             <label>名称</label>
             <input class="inp" value="新建文件夹" spellcheck="false">
           </div>
-          <div class="hint" data-note="非法字符前端先拦（服务端回 418 = 名称非法）：/ \ : * ? &quot; &lt; &gt; |；名称已存在时服务端回 1200 + errors[414]，翻成「该名称已存在」。">
-            不能包含 \ / : * ? " &lt; &gt; | 这些字符。名称已存在时服务端会拒绝，界面翻成一句人话。
-          </div>
+          <div class="hint">不能包含 \ / : * ? " &lt; &gt; | 这些字符。</div>
         </div>
         <div class="modal-foot">
           <button class="btn btn-sec">取消</button>
@@ -1261,11 +1263,10 @@ body.anno [data-note]::before{
         </div>
         <div class="modal-body">
           <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
-          <div class="field">
+          <div class="field" style="margin-top:var(--sp-10)" data-note="扩展名不进选中范围（预选主干）。撞名由服务端拦（1200 + errors[414]），界面翻成「该名称已存在」—— 这些是实现细节，不进界面文案。">
             <label>名称</label>
             <input class="inp" value="夜航.mp3" spellcheck="false">
           </div>
-          <div class="hint">扩展名不在选中范围。撞名由服务端拦（1200 + errors[414]），界面提示「该名称已存在」。</div>
         </div>
         <div class="modal-foot">
           <button class="btn btn-sec">取消</button>
@@ -1895,6 +1896,10 @@ $$('.opt').forEach(o=>o.onclick=e=>{
   if(e.target.closest('.cb')) return;         // 「应用于全部」是复选框，不参与单选
   o.closest('.modal')?.querySelectorAll('.opt').forEach(x=>{ if(!x.querySelector('.cb')) x.classList.remove('on'); });
   o.classList.add('on');
+});
+$$('.foot-cb').forEach(l=>l.onclick=e=>{
+  e.preventDefault();
+  l.querySelector('.cb')?.classList.toggle('on');
 });
 
 /* ---------- 标注 ---------- */
