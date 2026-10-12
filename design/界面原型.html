@@ -265,6 +265,14 @@ input,select{font:inherit;color:inherit}
 .cb.on,.cb.ind{background:var(--accent-fill);border-color:transparent}
 .cb.hov{border-color:var(--ink-2)}
 .cb.dis{border-color:var(--line);background:var(--panel);color:var(--ink-3)}
+/* 评分（星级）：5 颗 10px 星。空星中性描边、实心星主色。未评分的行整格留空，悬停该行才出空星 */
+.rate{display:inline-flex;gap:2px;align-items:center;color:var(--ink-3)}
+.rate .ic.f{color:var(--accent-2);fill:currentColor}
+.rate.ghost{visibility:hidden}
+.tbl tbody tr:hover .rate.ghost{visibility:visible}
+.tbl td.rcell{text-align:right}
+.tbl tbody tr.on .rate{color:var(--accent)}
+.tbl tbody tr.on .rate .ic.f{color:var(--accent-2)}
 .tbl td.cbc,.tbl th.cbc{width:32px;padding-right:0}
 .tbl tbody tr.on .cb{border-color:var(--accent-line)}
 .tbl-wrap{flex:1;min-height:0;overflow-y:auto;position:relative}
@@ -318,7 +326,7 @@ input,select{font:inherit;color:inherit}
 .p-now .m span{display:block;font-size:var(--fs-12);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .p-now .m span:hover{color:var(--accent-2)}
 .p-acts{display:flex;align-items:center;gap:var(--sp-2);flex:none}
-.p-acts .icon-btn.liked{color:var(--accent-2)}
+.p-acts .icon-btn.rated{color:var(--accent-2)}
 .p-ctl{display:flex;align-items:center;justify-content:center;gap:var(--sp-10)}
 .btn-play{width:36px;height:36px;border-radius:50%;background:var(--accent-fill);color:var(--on-accent);display:grid;place-items:center;transition:var(--mo-fast)}
 .btn-play:hover{background:var(--accent-fill-2)}
@@ -402,6 +410,9 @@ input,select{font:inherit;color:inherit}
 .menu .mi:hover{background:var(--panel-3);color:var(--ink)}
 .menu .mi .ic{color:var(--ink-3)}
 .menu .mi:hover .ic{color:var(--ink-2)}
+.menu .mi .rate{margin-left:auto}
+.menu .mi .rate .ic{color:var(--ink-3)}
+.menu .mi .rate .ic.f{color:var(--accent-2)}
 .menu .mi.danger{color:var(--danger-ink)}
 .menu .mi.danger .ic{color:var(--danger-ink)}
 .menu .mi.danger:hover{background:var(--danger-soft)}
@@ -612,7 +623,7 @@ body.anno [data-note]::before{
     <section class="screen on" data-screen="music">
       <div class="page">
         <div class="body">
-          <aside class="msider" data-note="听歌模块的内容区侧栏：每日随机（AudioStation 的 100 首）、全部曲目、歌单。点歌单或每日随机，主区换成同一张表，只是数据源不同。">
+          <aside class="msider" data-note="听歌模块的内容区侧栏：每日随机（AudioStation 的 100 首）、全部曲目、歌单。点歌单或每日随机，主区换成同一张表，只是数据源不同。「评分 ≥ 4 星」是 NAS 侧的智能播放列表（Playlist.createsmart，按评分规则自动收歌），评分动作的消费入口 —— 它在 Audio Station 里也能看到、能改规则，不是本机自造的收藏。">
             <div class="tree-head">资料库</div>
             <div class="mside-body">
               <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
@@ -624,6 +635,7 @@ body.anno [data-note]::before{
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
+              <div class="tree-row"><i data-ic="star" data-sz="14"></i>评分 ≥ 4 星<span class="cnt">486</span></div>
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column">
@@ -649,14 +661,14 @@ body.anno [data-note]::before{
               </div>
             </div>
             <div class="tbl-wrap">
-              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。列序：标题（内嵌封面缩略图）/ 艺术家 / 专辑 / 流派 / 年份 / 时长 / 曲序 —— 曲序是 ID3 原值，放最后，不跟行首位置混淆。流派按「; 」拆多标签、用英文原名。">
+              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。列序：标题（内嵌封面缩略图）/ 艺术家 / 专辑 / 流派 / 年份 / 时长 / 曲序 / 评分 —— 曲序是 ID3 原值，放最后，不跟行首位置混淆。流派按「; 」拆多标签、用英文原名。评分放最右：左边是「库的信息」，右边是「我的标记」，一条线分开；未评分的行整格留空（不铺一列空星），鼠标悬停该行才浮出可点的空星，已评分的常显实心星。点第 n 颗 = n 星；已是 1 星再点第 1 颗 = 清除。数据即 Audio Station 的评分字段（setrating 0–5），消费入口是智能播放列表（评分 ≥ 4 星），会像普通歌单一样出现在「我的歌单」里。">
                 <colgroup>
-                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px">
+                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px">
                 </colgroup>
                 <thead data-note="表头两个动作：① 点表头切换正序 / 倒序（同访达），当前列亮箭头；② 拖动表头改列序（拖动样态见组件板）。列序与列宽按用户偏好持久化。">
-                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th></tr>
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th></tr>
                 </thead>
-                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 定位文件位置，样态见组件板）。播放范围：双击 = 当前列表整体成为队列、从这首起播；想只听一首，清空队列再对它「下一首播放」（不设「只播这一首」菜单项）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
+                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 评分 / 定位文件位置，样态见组件板）。评分用星不用红心 —— Audio Station 没有红心，评分是它的一等字段，跨端一致。播放范围：双击 = 当前列表整体成为队列、从这首起播；想只听一首，清空队列再对它「下一首播放」（不设「只播这一首」菜单项）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
               </table>
               <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
                 <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
@@ -683,6 +695,7 @@ body.anno [data-note]::before{
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
+              <div class="tree-row"><i data-ic="star" data-sz="14"></i>评分 ≥ 4 星<span class="cnt">486</span></div>
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;position:relative">
@@ -699,10 +712,10 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（封面 / 流派等信息都在）。首列是播放顺序（不是 ID3 曲序，所以留在最前），正在播放行 = 浅底 + 主色字 + 均衡器。表头不参与排序 —— 这里的顺序就是播放顺序。">
                 <colgroup>
-                  <col style="width:36px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px">
+                  <col style="width:36px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px"><col style="width:68px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">顺序</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
+                  <tr><th class="num">顺序</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th><th style="text-align:right">评分</th></tr>
                 </thead>
                 <tbody id="qtbl"></tbody>
               </table>
@@ -712,6 +725,7 @@ body.anno [data-note]::before{
               <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
               <div class="mi"><i data-ic="list-start" data-sz="12"></i>下一首播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+              <div class="mi"><i data-ic="star" data-sz="12"></i>评分<span class="rate"><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i></span></div>
               <div class="msep"></div>
               <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
               <div class="msep"></div>
@@ -738,6 +752,7 @@ body.anno [data-note]::before{
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
+              <div class="tree-row"><i data-ic="star" data-sz="14"></i>评分 ≥ 4 星<span class="cnt">486</span></div>
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column">
@@ -766,10 +781,10 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl">
                 <colgroup>
-                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px">
+                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px">
                 </colgroup>
                 <thead>
-                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th></tr>
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th></tr>
                 </thead>
                 <tbody id="ftbl"></tbody>
               </table>
@@ -1060,8 +1075,8 @@ body.anno [data-note]::before{
         <b>夜航</b>
         <span>林间电台</span>
       </div>
-      <div class="p-acts" data-note="红心（喜欢，点亮为主色）与添加到歌单 —— 对应 AudioStation 的歌单能力。">
-        <button class="icon-btn liked" title="喜欢"><i data-ic="heart" data-sz="16" data-fill="1"></i></button>
+      <div class="p-acts" data-note="评分（星）= Audio Station 的评分字段（setrating 0–5），点亮 = 5 星、再点清零；与「添加到歌单」并排。不用红心：Audio Station 没有红心，自造只能存本机，与 NAS 数据脱节。">
+        <button class="icon-btn rated" title="评分 5 星"><i data-ic="star" data-sz="16" data-fill="1"></i></button>
         <button class="icon-btn" title="添加到歌单"><i data-ic="list-plus" data-sz="16"></i></button>
       </div>
     </div>
@@ -1268,6 +1283,35 @@ body.anno [data-note]::before{
   </div>
 
   <div class="card">
+    <div class="card-title">评分（星级）</div>
+    <div style="display:flex;flex-direction:column;gap:var(--sp-12)">
+      <div style="display:flex;align-items:center;gap:var(--sp-16)">
+        <span class="b-lab" style="width:96px">未评分 · 常态</span>
+        <span style="color:var(--ink-3);font-size:var(--fs-12)">整格留空（不铺空星）</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--sp-16)">
+        <span class="b-lab" style="width:96px">未评分 · 悬停</span>
+        <span class="rate"><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--sp-16)">
+        <span class="b-lab" style="width:96px">已评分 · 3 星</span>
+        <span class="rate"><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--sp-16)">
+        <span class="b-lab" style="width:96px">已评分 · 5 星</span>
+        <span class="rate"><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--sp-16)">
+        <span class="b-lab" style="width:96px">播放条 · 单星</span>
+        <button class="icon-btn rated" title="评分 5 星"><i data-ic="star" data-sz="16" data-fill="1"></i></button>
+        <button class="icon-btn" title="评分 5 星"><i data-ic="star" data-sz="16"></i></button>
+        <span style="color:var(--ink-3);font-size:var(--fs-12)">点亮 = 5 星，再点清零</span>
+      </div>
+    </div>
+    <div class="b-note">列表里 5 颗 = 一列 68px，星 10px、间距 2。空星中性描边、实心星主色；悬停到第 n 颗时左侧同亮做预览。播放条只放一颗星（放不下 5 颗）：点亮即 5 星、再点清零，跟列表共用同一个字段。全库评分数 486（≥4 星）。</div>
+  </div>
+
+  <div class="card">
     <div class="card-title">列表与卡片</div>
     <div class="card list" style="background:var(--panel-2)">
       <div class="srow"><div class="k">列表卡片</div><div class="v">行自带内边距，卡片不加</div></div>
@@ -1315,6 +1359,7 @@ const ICONS={
   'list-start':'<path d="M16 12H3"/><path d="M16 18H3"/><path d="M10 6H3"/><path d="M21 18V8a2 2 0 0 0-2-2h-5"/><path d="m16 8-2-2 2-2"/>',
   sparkles:'<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
   heart:'<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  star:'<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
   'volume-2':'<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>',
   upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
   download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
@@ -1348,31 +1393,31 @@ const ICONS={
   'hard-drive':'<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>'
 };
 
-/* ---------- 占位数据（数量与字段照实测；流派为英文原名，多值） ---------- */
+/* ---------- 占位数据（数量与字段照实测；流派为英文原名，多值；末位 = 评分 0–5） ---------- */
 const TRACKS=[
-  [3,'夜航','林间电台','潮汐',['Ambient'],2024,'4:12'],
-  [1,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],2024,'5:03'],
-  [2,'雨后的城市','南方小城','夏日信件',['Folk'],2023,'3:48'],
-  [4,'光年','电子羊','银翼',['Electronic'],2022,'6:21'],
-  [1,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],2024,'7:02'],
-  [5,'午后的阳台','月台少年','十一月',['Jazz','Pop'],2021,'4:35'],
-  [2,'沉默的海','无声合唱团','深水',['Post-Rock'],2023,'8:14'],
-  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],2023,'3:29'],
-  [8,'星尘','电子羊','银翼',['Electronic','Ambient'],2022,'5:47'],
-  [6,'逆风','林间电台','潮汐',['Ambient'],2024,'4:56'],
-  [3,'长夜将尽','无声合唱团','深水',['Post-Rock'],2023,'6:38'],
-  [9,'白日梦','月台少年','十一月',['Jazz'],2021,'5:12'],
-  [10,'海边集市','南方小城','夏日信件',['Folk'],2023,'4:02'],
-  [4,'归途','海边的房间','迁徙',['Post-Rock','Ambient'],2024,'5:31']
+  [3,'夜航','林间电台','潮汐',['Ambient'],2024,'4:12',5],
+  [1,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],2024,'5:03',3],
+  [2,'雨后的城市','南方小城','夏日信件',['Folk'],2023,'3:48',0],
+  [4,'光年','电子羊','银翼',['Electronic'],2022,'6:21',4],
+  [1,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],2024,'7:02',5],
+  [5,'午后的阳台','月台少年','十一月',['Jazz','Pop'],2021,'4:35',0],
+  [2,'沉默的海','无声合唱团','深水',['Post-Rock'],2023,'8:14',3],
+  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],2023,'3:29',4],
+  [8,'星尘','电子羊','银翼',['Electronic','Ambient'],2022,'5:47',0],
+  [6,'逆风','林间电台','潮汐',['Ambient'],2024,'4:56',0],
+  [3,'长夜将尽','无声合唱团','深水',['Post-Rock'],2023,'6:38',5],
+  [9,'白日梦','月台少年','十一月',['Jazz'],2021,'5:12',0],
+  [10,'海边集市','南方小城','夏日信件',['Folk'],2023,'4:02',0],
+  [4,'归途','海边的房间','迁徙',['Post-Rock','Ambient'],2024,'5:31',4]
 ];
 const QPLAY=[
-  [1,'夜航','林间电台','潮汐',['Ambient'],'4:12',1],
-  [2,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],'5:03',0],
-  [3,'雨后的城市','南方小城','夏日信件',['Folk'],'3:48',0],
-  [4,'光年','电子羊','银翼',['Electronic'],'6:21',0],
-  [5,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],'7:02',0],
-  [6,'午后的阳台','月台少年','十一月',['Jazz','Pop'],'4:35',0],
-  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],'3:29',0]
+  [1,'夜航','林间电台','潮汐',['Ambient'],'4:12',1,5],
+  [2,'潮汐','林间电台','潮汐',['Ambient','Instrumental'],'5:03',0,3],
+  [3,'雨后的城市','南方小城','夏日信件',['Folk'],'3:48',0,0],
+  [4,'光年','电子羊','银翼',['Electronic'],'6:21',0,4],
+  [5,'候鸟','海边的房间','迁徙',['Post-Rock','Instrumental'],'7:02',0,5],
+  [6,'午后的阳台','月台少年','十一月',['Jazz','Pop'],'4:35',0,0],
+  [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],'3:29',0,4]
 ];
 const FOLDERS=[['music','',1],['photo','',0],['video','',0],['homes','',0],['backup','',0],['docker','',0],['downloads','',0],['web','',0]];
 /* [名称, 大小, 修改时间, 权限, 类型] —— 类型只决定图标，列表里没有播放状态列 */
@@ -1397,6 +1442,8 @@ const tagHtml=(g)=>`<span class="tag">${esc(g)}</span>`;
 /* 封面缩略图按专辑给底色占位（正式实现读封面缩略图），内嵌在标题列里 */
 const ALTBG={'潮汐':'','夏日信件':' alt1','银翼':' alt2','迁徙':' alt1','十一月':' alt2','深水':''};
 const titleCell=(t)=>`<td class="main-c tc"><span class="t-title"><span class="cover${ALTBG[t[3]]||''}" style="width:28px;height:28px"><i data-ic="music" data-sz="12"></i></span><span class="tt">${esc(t[1])}</span></span></td>`;
+/* 评分格：5 颗 10px 星，实心星取主色。0 分整格留空，悬停该行才浮出可点空星 */
+const rateCell=(n)=>`<td class="rcell"><span class="rate${n?'':' ghost'}">${[1,2,3,4,5].map(i=>`<i data-ic="star" data-sz="10"${i<=n?' class="f"':''}></i>`).join('')}</span></td>`;
 
 $('#tracks').innerHTML = TRACKS.map((t,i)=>{
   const on = i===0;
@@ -1408,7 +1455,8 @@ $('#tracks').innerHTML = TRACKS.map((t,i)=>{
     `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
     `<td class="${cls('num')}" style="text-align:right">${t[6]}</td>`+
-    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td></tr>`;
+    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td>`+
+    rateCell(t[7]||0)+`</tr>`;
 }).join('');
 
 $('#qtbl').innerHTML = QPLAY.map((q)=>{
@@ -1422,7 +1470,8 @@ $('#qtbl').innerHTML = QPLAY.map((q)=>{
     `<td class="${on?'dim':''} a-link">${esc(q[2])}</td>`+
     `<td class="${on?'dim':''} a-link">${esc(q[3])}</td>`+
     `<td class="${on?'dim':''}"><span class="tags">${q[4].map(tagHtml).join('')}</span></td>`+
-    `<td class="${on?'dim':'num'}" style="text-align:right">${q[5]}</td></tr>`;
+    `<td class="${on?'dim':'num'}" style="text-align:right">${q[5]}</td>`+
+    rateCell(q[7]||0)+`</tr>`;
 }).join('');
 
 /* 点艺人 / 专辑名回到曲库代入筛选 —— 这是筛后形态（艺术家维度，选中「林间电台」） */
@@ -1436,7 +1485,8 @@ $('#ftbl').innerHTML = TRACKS.filter(t=>t[2]==='林间电台').map((t,i)=>{
     `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
     `<td class="${cls('num')}" style="text-align:right">${t[6]}</td>`+
-    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td></tr>`;
+    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td>`+
+    rateCell(t[7]||0)+`</tr>`;
 }).join('');
 
 $('#tree').innerHTML = FOLDERS.map((f,i)=>{
@@ -1467,7 +1517,8 @@ $('#files').innerHTML = FILES.map((f,i)=>{
 $$('[data-ic]').forEach(el=>{
   const sz = el.dataset.sz || 16;
   const filled = el.dataset.fill ? ' fill="currentColor" stroke="currentColor"' : ' fill="none" stroke="currentColor"';
-  el.outerHTML = `<svg class="ic" width="${sz}" height="${sz}" viewBox="0 0 24 24"${filled} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[el.dataset.ic]||''}</svg>`;
+  const cls = el.className ? ' '+el.className : '';
+  el.outerHTML = `<svg class="ic${cls}" width="${sz}" height="${sz}" viewBox="0 0 24 24"${filled} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[el.dataset.ic]||''}</svg>`;
 });
 
 /* ---------- 页面切换 ---------- */
