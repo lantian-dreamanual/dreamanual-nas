@@ -436,15 +436,18 @@ input,select{font:inherit;color:inherit}
 .crumb{display:flex;align-items:center;gap:var(--sp-4);font-size:var(--fs-13);color:var(--ink-3);padding:0 var(--sp-24) var(--sp-10)}
 .crumb b{color:var(--ink);font-weight:500}
 
-/* 菜单（右键菜单 / 溢出下拉，两处同一形态） */
+/* 菜单（右键菜单 / 溢出下拉，两处同一形态）。规格照两端先例取：视频下载
+   `DmDropdownOverlay.menuCard`、密码管理 `.ctxmenu` 都是 r-10 + shadow-modal；
+   危险项的字色按 §三「族 500 压中性底、-ink 压本族深底」—— 常态压 panel-2 取
+   `--danger`，悬停底转本族 `-hover` 后再转 `--danger-ink`（密码管理同款） */
 .menu{
   position:absolute;z-index:25;min-width:160px;padding:var(--sp-4);
-  background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8);
-  box-shadow:var(--shadow-card);display:flex;flex-direction:column;
+  background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-10);
+  box-shadow:var(--shadow-modal);display:flex;flex-direction:column;
 }
 .menu .mi{
   display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);
-  border-radius:var(--r-6);font-size:var(--fs-12);color:var(--ink-2);cursor:pointer;white-space:nowrap;
+  border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);cursor:pointer;white-space:nowrap;
 }
 .menu .mi:hover{background:var(--panel-3);color:var(--ink)}
 .menu .mi .ic{color:var(--ink-3)}
@@ -452,9 +455,10 @@ input,select{font:inherit;color:inherit}
 .menu .mi .rate{margin-left:auto}
 .menu .mi .rate .ic{color:var(--ink-3)}
 .menu .mi .rate .ic.f{color:var(--accent-2)}
-.menu .mi.danger{color:var(--danger-ink)}
-.menu .mi.danger .ic{color:var(--danger-ink)}
-.menu .mi.danger:hover{background:var(--danger-soft)}
+.menu .mi.danger{color:var(--danger)}
+.menu .mi.danger .ic{color:var(--danger)}
+.menu .mi.danger:hover{background:var(--danger-hover);color:var(--danger-ink)}
+.menu .mi.danger:hover .ic{color:var(--danger-ink)}
 .menu .msep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-4) var(--sp-6)}
 /* 表格字段配置：表头最右的竖三点，下拉里逐字段勾选（多选框贴右，与设置页的右侧状态控件同侧） */
 .tbl th.th-cfg{padding:0 var(--sp-6) 0 0;text-align:right}
@@ -476,11 +480,13 @@ input,select{font:inherit;color:inherit}
 .sched-row .t{font-variant-numeric:tabular-nums;font-weight:500}
 .sched-row .right{margin-left:auto;display:flex;align-items:center;gap:var(--sp-10)}
 
-/* 开关与滑块 */
+/* 开关与滑块（开关照第八节「开关」表：42×24 / 关 line-2 / 开 accent-fill / 滑块 20
+   / 行程 18）。滑块按非文本 3:1 判分道 —— 白字端两端态都白，本端是深字方案，
+   开态滑块转 on-accent（深）：白滑块压 sky-500 只有 2.71:1 够不到门槛，深色 7.32:1 */
 .sw{width:42px;height:24px;border-radius:12px;background:var(--line-2);position:relative;flex:none;cursor:pointer;transition:background var(--mo-fast)}
-.sw i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform var(--mo-fast)}
+.sw i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform var(--mo-fast),background var(--mo-fast)}
 .sw.on{background:var(--accent-fill)}
-.sw.on i{transform:translateX(18px)}
+.sw.on i{background:var(--on-accent);transform:translateX(18px)}
 .slider{width:120px;height:4px;border-radius:2px;background:var(--panel-3);position:relative;flex:none}
 .slider i{position:absolute;left:0;top:0;bottom:0;width:70%;border-radius:2px;background:var(--accent)}
 .slider em{position:absolute;top:50%;left:70%;width:14px;height:14px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%)}

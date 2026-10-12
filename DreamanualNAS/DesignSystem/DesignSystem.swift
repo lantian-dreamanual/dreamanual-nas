@@ -442,10 +442,13 @@ struct DmSegmented<Item: Hashable>: View {
     }
 }
 
-/// 通用开关：形态基准 42×24（三端统一）。关态轨道 `line-2`、开态 `accent-fill`；
-/// 滑块直径 20 白色、行程 18。NAS 是深字方案，开态滑块仍取白色 —— 白滑块压
-/// sky-500 是 2.71:1，只作图形看，非文本门槛 3:1 略有不及；下一批按像素实测
-/// 核定（若不够，滑块改 `neutral.950`）。
+/// 通用开关：形态基准 42×24（三端统一，第八节「开关」）。关态轨道 `line-2`、
+/// 开态 `accent-fill`；滑块直径 20、行程 18。
+///
+/// 滑块取色按非文本 3:1 判，白字端与深字端分道：**白字端两端态都白**（白压
+/// red-600 4.83:1 / blue-600 5.17:1）；**深字端开态取 `on-accent`、关态白色**
+/// —— 白滑块压 sky-500 只有 2.71:1 够不到门槛，同档的深色滑块 7.32:1。
+/// 与投资监控 `DmToggleStyle` 逐字同构（那边是另一处深字端）。
 struct DmToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -457,7 +460,7 @@ struct DmToggleStyle: ToggleStyle {
                 .overlay(
                     GeometryReader { geo in
                         Circle()
-                            .fill(Color.dmPanel)
+                            .fill(configuration.isOn ? Color.dmOnAccent : Color.white)
                             .frame(width: 20, height: 20)
                             .offset(
                                 x: configuration.isOn ? geo.size.width - 22 : 2,
