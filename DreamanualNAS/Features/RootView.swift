@@ -34,6 +34,7 @@ private struct SidebarView: View {
         WindowActiveReader { windowActive in
             VStack(alignment: .leading, spacing: 0) {
                 brand
+
                 VStack(spacing: DmSpace.s2) {
                     ForEach(AppState.Module.allCases) { module in
                         NavRow(
@@ -47,38 +48,51 @@ private struct SidebarView: View {
                     }
                 }
                 .padding(.horizontal, DmSpace.s8)
+                .padding(.top, DmSpace.s10)
+
                 Spacer(minLength: 0)
                 connectionFooter
             }
+            // 整块下移 `DmLayout.titlebar` 给悬浮的红绿灯让位，底色仍铺到窗口最上沿
+            // —— 与视频下载 `SidebarView`、密码管理 `.sider` 同构。
+            .padding(.top, DmLayout.titlebar)
             .frame(width: 220)
-            .background(Color.dmPanel)
+            // 侧栏比主内容区浅一档（Finder 式层级，第一节「侧栏单独一支」）。
+            .background(Color.dmPanel2)
         }
     }
 
-    /// 品牌区顶部让出 DmLayout.titlebar —— 标题栏隐藏后红绿灯悬浮在这里。
+    /// 品牌区：标记 26·`r-8`、名称 13/semibold、内边距 16/14/12、底部 `line-2` 分隔。
+    /// 规格抄密码管理 `.brand` ↔ 视频下载 `brandHeader`。
     private var brand: some View {
         HStack(spacing: DmSpace.s8) {
-            LucideIcon("server", size: DmIcon.i16)
-                .foregroundColor(Color.dmAccent)
+            DmBrandMark(size: 26)
             Text("Dreamanual NAS 助手")
                 .font(.system(size: DmText.t13, weight: .semibold))
+                .kerning(-0.13)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .foregroundColor(Color.dmInk)
             Spacer(minLength: 0)
         }
-        .padding(.top, DmLayout.titlebar)
-        .padding(.horizontal, DmSpace.s16)
-        .padding(.bottom, DmSpace.s14)
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.top, DmSpace.s16)
+        .padding(.bottom, DmSpace.s12)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.dmLine2).frame(height: DmLine.base)
+        }
     }
 
+    /// 底栏：顶部 `line-2` 分隔、内边距 8/16/10（与品牌区的上下留白同款）。
     private var connectionFooter: some View {
-        VStack(alignment: .leading, spacing: DmSpace.s6) {
+        VStack(alignment: .leading, spacing: DmSpace.s4) {
             HStack(spacing: DmSpace.s6) {
                 Circle()
                     .fill(Color.dmOk)
                     .frame(width: 6, height: 6)
                 Text("已连接")
                     .font(.system(size: DmText.t11))
-                    .foregroundColor(Color.dmInk2)
+                    .foregroundColor(Color.dmInk3)
             }
             Text(state.endpointLabel)
                 .font(.system(size: DmText.t11))
@@ -87,11 +101,18 @@ private struct SidebarView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DmSpace.s16)
+        .padding(.horizontal, DmSpace.s16)
+        .padding(.top, DmSpace.s8)
+        .padding(.bottom, DmSpace.s10)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.dmLine2).frame(height: DmLine.base)
+        }
     }
 }
 
-/// 手写侧栏行：选中走「浅底 + 主色字」，悬停 `panel-2`，失焦降一档。
+/// 手写侧栏行：选中走「浅底 + 主色字」，悬停 `panel-3`，失焦降一档。
+/// 规格与视频下载 `SidebarRow` ↔ 密码管理 `.cat` 逐项一致：图标 16、字号 13、
+/// 横向 8、行高钉控件档 32、圆角 8、行距 2（第七节「侧栏行」）。
 private struct NavRow: View {
     let title: String
     let icon: String
@@ -104,7 +125,7 @@ private struct NavRow: View {
     var body: some View {
         let look = SelectState.of(isSelected: isSelected, hovered: isHovered, windowActive: windowActive)
         HStack(spacing: DmSpace.s8) {
-            LucideIcon(icon, size: DmIcon.i14)
+            LucideIcon(icon, size: DmIcon.i16)
                 .foregroundColor(look.foreground)
             Text(title)
                 .font(.system(size: DmText.t13, weight: isSelected ? .medium : .regular))
@@ -113,11 +134,12 @@ private struct NavRow: View {
         }
         .padding(.horizontal, DmSpace.s8)
         .frame(height: DmControl.h32)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: DmRadius.r6).fill(look.background)
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(look.background)
         )
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+        .contentShape(RoundedRectangle(cornerRadius: DmRadius.r8))
+        .trackingHover($isHovered)
         .onTapGesture(perform: action)
     }
 }
@@ -129,12 +151,14 @@ private struct MainAreaView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 页头：字号 17 / semibold / 字距 -0.01em，内边距 20/24/12（原型 `.page-head`）。
             Text(state.module.title)
-                .font(.system(size: DmText.t15, weight: .semibold))
+                .font(.system(size: DmText.t17, weight: .semibold))
+                .kerning(-0.17)
                 .foregroundColor(Color.dmInk)
-                .padding(.top, DmLayout.titlebar)
-                .padding(.horizontal, DmSpace.s20)
-                .padding(.bottom, DmSpace.s14)
+                .padding(.top, DmSpace.s20)
+                .padding(.horizontal, DmSpace.s24)
+                .padding(.bottom, DmSpace.s12)
 
             switch state.module {
             case .music:
@@ -163,7 +187,8 @@ private struct MainAreaView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.dmBg)
+        // 主内容区取 `panel`（第一节落位口径：主区 panel、卡片 panel-2、悬停 panel-3）。
+        .background(Color.dmPanel)
     }
 }
 
@@ -203,11 +228,10 @@ private struct ModulePlaceholder: View {
                 .font(.system(size: DmText.t11))
                 .foregroundColor(Color.dmInk3)
         }
-        .padding(DmSpace.s16)
+        .padding(DmSpace.s14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.dmPanel)
-        .cornerRadius(DmRadius.r12)
-        .padding(.horizontal, DmSpace.s20)
+        .dmCard()
+        .padding(.horizontal, DmSpace.s24)
     }
 }
 
@@ -231,11 +255,10 @@ private struct SettingsPane: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
             }
-            .padding(DmSpace.s16)
+            .padding(DmSpace.s14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.dmPanel)
-            .cornerRadius(DmRadius.r12)
+            .dmCard()
         }
-        .padding(.horizontal, DmSpace.s20)
+        .padding(.horizontal, DmSpace.s24)
     }
 }

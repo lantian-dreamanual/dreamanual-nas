@@ -45,7 +45,9 @@ enum SelectState {
     var background: Color {
         switch self {
         case .normal: return .clear
-        case .hovered: return .dmPanel2
+        // 悬停取 `panel-3`（第八节四态表）。侧栏底是 `panel-2`，悬停再用
+        // `panel-2` 会与底同色、画出隐身 —— 亮一档的那一格是 `panel-3`。
+        case .hovered: return .dmPanel3
         case .selected, .selectedInactive: return .dmAccentSoft
         }
     }
@@ -140,6 +142,28 @@ extension View {
     }
 }
 
+/// 内容卡片（第八节「卡片」）：底 `panel-2`、圆角 `r-12`、`line-2` 0.5px 描边。
+/// 内边距不在这里 —— 内容卡片 `s14`、列表卡片 `0`（内容按行排，行自带内边距），
+/// 由调用点按角色给。
+private struct ContentCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: DmRadius.r12).fill(Color.dmPanel2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DmRadius.r12)
+                    .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+            )
+    }
+}
+
+extension View {
+    func dmCard() -> some View {
+        modifier(ContentCardModifier())
+    }
+}
+
 /// 窗口是否处于活跃（key）状态。手写选中行要自己接这个 —— 原生 `List`
 /// 失焦会自动把选中行降级，换成手写行之后得靠 `SelectState.selectedInactive`。
 struct WindowActiveReader<Content: View>: View {
@@ -159,6 +183,51 @@ struct WindowActiveReader<Content: View>: View {
 }
 
 // ============ 控件 ============
+
+/// 控件所在的面 ——「所在面相邻一档」取色的入参（第八节「输入框」与「卡片」）。
+/// 主区（`panel`）/ 侧栏（`panel-2`）上的控件取 `panel-2`；卡片（`panel-2`）内的
+/// 控件抬到 `panel-3` —— 不抬的话控件底与卡面同色，只剩描边可辨
+/// （密码管理 `.modal .inp` / `.lock-card .inp` 同一条规矩）。
+enum DmSurface {
+    case panel
+    case card
+
+    var controlFill: Color {
+        switch self {
+        case .panel: return .dmPanel2
+        case .card: return .dmPanel3
+        }
+    }
+}
+
+/// 品牌标记：应用图标位的占位件。两档 —— 侧栏品牌区 26（圆角 `r-8`、图形 14）、
+/// 连接页 48（圆角 `r-12`、图形 24），几何与密码管理 `.lock-mark` 同。
+///
+/// 底走强调色渐变、图形取 `on-accent`（深字方案）。§十 的 App 图标定稿后，
+/// 这里换成图标原图 —— 视频下载与密码管理的品牌位都是直接放图标原图，
+/// 换图标时窗口跟着换，不再描一份。
+struct DmBrandMark: View {
+    let size: CGFloat
+
+    private var radius: CGFloat { size >= 48 ? DmRadius.r12 : DmRadius.r8 }
+    private var glyph: CGFloat { size >= 48 ? DmIcon.i24 : DmIcon.i14 }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius)
+            .fill(
+                LinearGradient(
+                    colors: [Color.dmAccentFill2, Color.dmAccentFill],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: size, height: size)
+            .overlay(
+                LucideIcon("server", size: glyph)
+                    .foregroundColor(Color.dmOnAccent)
+            )
+    }
+}
 
 /// 主按钮：实心强调色档（表单规格：高 38 / 横向内边距 16 / 圆角 8 / 字号 13）。
 ///
@@ -222,9 +291,11 @@ struct SecondaryButtonStyle: ButtonStyle {
 }
 
 /// 输入框外壳：表单规格（高 38 / 圆角 8 / 字号 13），横向内边距 12。
-/// 聚焦时描边转 `accent-2`（浅档）。名字不带 `dm` 前缀 —— 那是生成令牌的
-/// 命名空间，门禁按它对账。
+/// 聚焦时描边转 `accent-2`（浅档）；底色按所在面取（`formField(on:)`）。
+/// 名字不带 `dm` 前缀 —— 那是生成令牌的命名空间，门禁按它对账。
 private struct FormFieldModifier: ViewModifier {
+    let surface: DmSurface
+
     @Environment(\.isFocused) private var envFocused
 
     func body(content: Content) -> some View {
@@ -235,7 +306,7 @@ private struct FormFieldModifier: ViewModifier {
             .padding(.horizontal, DmSpace.s12)
             .frame(height: DmControl.h38)
             .background(
-                RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
+                RoundedRectangle(cornerRadius: DmRadius.r8).fill(surface.controlFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DmRadius.r8)
@@ -245,8 +316,8 @@ private struct FormFieldModifier: ViewModifier {
 }
 
 extension View {
-    func formField() -> some View {
-        modifier(FormFieldModifier())
+    func formField(on surface: DmSurface = .panel) -> some View {
+        modifier(FormFieldModifier(surface: surface))
     }
 }
 
@@ -282,11 +353,24 @@ struct DmSegmented<Item: Hashable>: View {
     let items: [Item]
     let label: (Item) -> String
     @Binding var selection: Item
+    /// 段是否等宽撑满容器。表单里的互斥切换（连接方式）取 true —— 与投资监控
+    /// 主 Tab 同形态；跟随内容宽度时留默认 false（如工具条上的小切换）。
+    let fillsWidth: Bool
+    /// 容器底色按所在面取（同输入框的「相邻一档」口径）。
+    let surface: DmSurface
     @State private var hovered: Item?
 
-    init(_ items: [Item], selection: Binding<Item>, label: @escaping (Item) -> String) {
+    init(
+        _ items: [Item],
+        selection: Binding<Item>,
+        fillsWidth: Bool = false,
+        on surface: DmSurface = .panel,
+        label: @escaping (Item) -> String
+    ) {
         self.items = items
         self._selection = selection
+        self.fillsWidth = fillsWidth
+        self.surface = surface
         self.label = label
     }
 
@@ -306,6 +390,7 @@ struct DmSegmented<Item: Hashable>: View {
                         )
                         .padding(.horizontal, DmSpace.s12)
                         .frame(height: DmControl.h28)
+                        .frame(maxWidth: fillsWidth ? .infinity : nil)
                         .background(
                             RoundedRectangle(cornerRadius: DmRadius.r6)
                                 .fill(Color.dmAccentFill)
@@ -325,7 +410,7 @@ struct DmSegmented<Item: Hashable>: View {
         }
         .padding(DmSpace.s2)
         .background(
-            RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(surface.controlFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: DmRadius.r8)

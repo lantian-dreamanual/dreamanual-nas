@@ -12,7 +12,7 @@ struct PlayerBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             Rectangle()
-                .fill(Color.dmLine)
+                .fill(Color.dmLine2)
                 .frame(height: DmLine.hairline)
 
             // 进度条：贴上沿、拉满整窗宽。悬停拉高到 8（原型口径）。

@@ -118,8 +118,8 @@ input,select{font:inherit;color:inherit}
   grid-area:1/1;background:var(--panel-2);border-right:var(--lw-hairline) solid var(--line);
   display:flex;flex-direction:column;min-width:0;padding-top:var(--layout-titlebar);
 }
-.brand{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-16) var(--sp-14) var(--sp-12);border-bottom:var(--lw-hairline) solid var(--line-2)}
-.brand .mark{width:26px;height:26px;border-radius:var(--r-8);background:linear-gradient(150deg,#00bcff,#0084d1);display:grid;place-items:center;color:var(--on-accent);flex:none}
+.brand{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-16) var(--sp-14) var(--sp-12);border-bottom:var(--lw-base) solid var(--line-2)}
+.brand .mark{width:26px;height:26px;border-radius:var(--r-8);background:linear-gradient(150deg,var(--accent-fill-2),var(--accent-fill));display:grid;place-items:center;color:var(--on-accent);flex:none}
 .brand b{font-size:var(--fs-13);font-weight:600;letter-spacing:-.01em}
 .nav{padding:var(--sp-10) var(--sp-8) 0;display:flex;flex-direction:column;gap:var(--sp-2)}
 .nav-row{
@@ -132,7 +132,7 @@ input,select{font:inherit;color:inherit}
 .nav-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
 .nav-row.on .cnt{color:var(--accent)}
 .nav-sep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-10) var(--sp-8) var(--sp-8)}
-.sider-foot{margin-top:auto;border-top:var(--lw-hairline) solid var(--line-2);padding:var(--sp-8) var(--sp-16) var(--sp-10)}
+.sider-foot{margin-top:auto;border-top:var(--lw-base) solid var(--line-2);padding:var(--sp-8) var(--sp-16) var(--sp-10)}
 .foot-row{display:flex;align-items:center;gap:var(--sp-6);font-size:var(--fs-11);color:var(--ink-3)}
 .foot-row + .foot-row{margin-top:var(--sp-4)}
 .dot-ok{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
@@ -185,6 +185,11 @@ input,select{font:inherit;color:inherit}
 .field > label{font-size:var(--fs-12);font-weight:500;color:var(--ink-2)}
 .hint{font-size:var(--fs-11);color:var(--ink-3);line-height:1.6}
 .seg{display:inline-flex;align-items:center;gap:var(--sp-2);height:var(--ctl-32);padding:var(--sp-2);background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8)}
+/* 撑满宽度：段等宽平分容器（向投资监控主 Tab 看齐）。表单里的互斥切换用它。 */
+.seg.fill{display:flex}
+/* 卡内抬一档：卡面是 panel-2，容器取 panel-3（同 .inp.on-card） */
+.seg.on-card{background:var(--panel-3)}
+.seg.fill button{flex:1}
 .seg button{height:var(--ctl-28);padding:0 var(--sp-12);border-radius:var(--r-6);font-size:var(--fs-12);color:var(--ink-2);transition:var(--mo-fast)}
 .seg button:hover{color:var(--ink)}
 .seg button.on{background:var(--accent-fill);color:var(--on-accent);font-weight:500}
@@ -338,8 +343,12 @@ input,select{font:inherit;color:inherit}
 
 /* 连接页 */
 .connect{flex:1;display:grid;place-items:center}
-.connect-card{width:420px;background:var(--panel);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-16);padding:var(--sp-24);box-shadow:var(--shadow-card)}
-.connect-mark{width:48px;height:48px;border-radius:var(--r-12);background:linear-gradient(150deg,#00bcff,#0084d1);display:grid;place-items:center;color:var(--on-accent);margin-bottom:var(--sp-16)}
+/* 连接卡对齐密码管理的 `.lock-card`（同一角色：登录卡）—— 整屏 `bg`、卡片 `panel-2`
+   + `line` 1px + `r-16` + `shadow-card`，卡内一律左对齐。 */
+.connect-card{width:420px;background:var(--panel-2);border:var(--lw-base) solid var(--line);border-radius:var(--r-16);padding:var(--sp-24);box-shadow:var(--shadow-card)}
+.connect-mark{width:48px;height:48px;border-radius:var(--r-12);background:linear-gradient(150deg,var(--accent-fill-2),var(--accent-fill));display:grid;place-items:center;color:var(--on-accent);margin-bottom:var(--sp-16)}
+.connect-name{font-size:var(--fs-20);font-weight:600;letter-spacing:-.01em}
+.connect-sub{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-4);margin-bottom:var(--sp-20)}
 .connect-stat{display:flex;align-items:center;gap:var(--sp-8);margin-top:var(--sp-14);font-size:var(--fs-12);color:var(--ink-2)}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -630,21 +639,23 @@ body.anno [data-note]::before{
         <div class="connect">
           <div class="connect-card" data-note="QuickConnect 与直连地址互斥，分段切换（直连形态见下一屏）。必填只有 QuickConnect ID。口令的存放说明不写在登录页 —— 用户此刻只关心能不能连上，这句话放设置页的口令行。">
             <div class="connect-mark"><i data-ic="server" data-sz="24"></i></div>
-            <div class="seg" style="margin-bottom:var(--sp-16)">
+            <div class="connect-name">Dreamanual NAS 助手</div>
+            <div class="connect-sub">仅支持管理群晖 NAS</div>
+            <div class="seg fill on-card" style="margin-bottom:var(--sp-16)">
               <button class="on">QuickConnect</button>
               <button>直连地址</button>
             </div>
             <div class="field">
               <label>QuickConnect ID</label>
-              <input class="inp" value="my-nas" spellcheck="false">
+              <input class="inp on-card" value="my-nas" spellcheck="false">
             </div>
             <div class="field">
               <label>账号</label>
-              <input class="inp" value="wuyifa001" spellcheck="false">
+              <input class="inp on-card" value="wuyifa001" spellcheck="false">
             </div>
             <div class="field">
               <label>口令</label>
-              <input class="inp" type="password" value="............">
+              <input class="inp on-card" type="password" value="............">
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat" data-note="两段都要有可见状态：解析端点一次往返、登录一次往返，不做「按下去转圈到出结果」。">
@@ -661,24 +672,26 @@ body.anno [data-note]::before{
         <div class="connect">
           <div class="connect-card" data-note="直连形态：地址与端口分开填，端口默认 5001（HTTP）／5001（HTTPS 按开关）。用于局域网、Tailscale 或中继不畅的场合。">
             <div class="connect-mark"><i data-ic="server" data-sz="24"></i></div>
-            <div class="seg" style="margin-bottom:var(--sp-16)">
+            <div class="connect-name">Dreamanual NAS 助手</div>
+            <div class="connect-sub">仅支持管理群晖 NAS</div>
+            <div class="seg fill on-card" style="margin-bottom:var(--sp-16)">
               <button>QuickConnect</button>
               <button class="on">直连地址</button>
             </div>
             <div class="field">
               <label>地址</label>
               <div class="addr-row">
-                <input class="inp" placeholder="主机名或 IP" spellcheck="false">
-                <input class="inp port" value="5001" inputmode="numeric">
+                <input class="inp on-card" placeholder="主机名或 IP" spellcheck="false">
+                <input class="inp on-card port" value="5001" inputmode="numeric">
               </div>
             </div>
             <div class="field">
               <label>账号</label>
-              <input class="inp" value="wuyifa001" spellcheck="false">
+              <input class="inp on-card" value="wuyifa001" spellcheck="false">
             </div>
             <div class="field">
               <label>口令</label>
-              <input class="inp" type="password" value="............">
+              <input class="inp on-card" type="password" value="............">
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat">

@@ -81,10 +81,6 @@ final class AppState {
         username = defaults.string(forKey: Keys.username) ?? ""
     }
     var isConnected: Bool { phase == .connected }
-    var hasSavedPassword: Bool {
-        guard !trimmedUsername.isEmpty else { return false }
-        return KeychainStore.password(endpointID: endpointKey, username: trimmedUsername) != nil
-    }
 
     func select(_ module: Module) {
         self.module = module
@@ -93,9 +89,19 @@ final class AppState {
     // MARK: - 连接
 
     /// 启动时自动连一次（钥匙串里真有那条凭据才动）。
+    ///
+    /// 钥匙串的读可能弹系统授权框 —— 每次重新编译，ad-hoc 签名跟着变，macOS
+    /// 要求重新授权读取 `dreamanual-nas` 条目；`SecItemCopyMatching` 在框被点掉
+    /// 之前不返回。所以读取不能留在 `@MainActor` 上：挂在主线程时弹窗期间整个
+    /// 窗口都不渲染（2026-10-12 实测：进程活着、窗口 0×0、卡死在启动帧）。
     func restoreAndAutoConnect() async {
-        guard isConnected == false, phase.isBusy == false, hasSavedPassword else { return }
-        guard let password = KeychainStore.password(endpointID: endpointKey, username: trimmedUsername) else { return }
+        guard isConnected == false, phase.isBusy == false else { return }
+        let endpoint = endpointKey
+        let user = trimmedUsername
+        let saved = await Task.detached(priority: .userInitiated) {
+            KeychainStore.password(endpointID: endpoint, username: user)
+        }.value
+        guard let password = saved else { return }
         await connect(password: password)
     }
 
@@ -136,11 +142,12 @@ final class AppState {
             lastConnectedAt = Date()
             phase = .connected
 
-            // 连上即存：口令只进钥匙串，下次启动自动重连。
-            KeychainStore.save(
-                password: password,
-                account: KeychainStore.accountKey(endpointID: endpointKey, username: user)
-            )
+            // 连上即存：口令只进钥匙串，下次启动自动重连。写也走后台 ——
+            // 同一条授权框没点掉时写入一样会挂住主线程。
+            let account = KeychainStore.accountKey(endpointID: endpointKey, username: user)
+            Task.detached(priority: .utility) {
+                KeychainStore.save(password: password, account: account)
+            }
         } catch {
             phase = .failed(error.localizedDescription)
             sessionManager = nil
