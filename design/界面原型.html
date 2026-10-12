@@ -132,7 +132,7 @@ input,select{font:inherit;color:inherit}
 .nav-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
 .nav-row.on:hover{background:var(--accent-hover)}
 .nav-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
-.nav-row.on .cnt{color:var(--accent-2);opacity:.7}
+.nav-row.on .cnt{color:var(--accent)}
 .nav-sep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-10) var(--sp-8) var(--sp-8)}
 .sider-foot{margin-top:auto;border-top:var(--lw-hairline) solid var(--line-2);padding:var(--sp-8) var(--sp-16) var(--sp-10)}
 .foot-row{display:flex;align-items:center;gap:var(--sp-6);font-size:var(--fs-11);color:var(--ink-3)}
@@ -244,19 +244,27 @@ input,select{font:inherit;color:inherit}
 .tbl tbody tr:hover td{background:var(--panel-2);color:var(--ink)}
 .tbl td.num{color:var(--ink-3);font-size:var(--fs-12);font-variant-numeric:tabular-nums}
 .tbl td.main-c{color:var(--ink);font-weight:500}
-/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。次要列的降档只进文字色（带 alpha），
-   不能给 td 整格加 opacity —— opacity 连背景一起降，行会从主列处断成两截 */
+/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。两档文字都用实心色档：
+   主色字 = accent-2（sky-400，压 soft 6.37:1）、次要字 = accent（sky-500，5.13:1）。
+   不透明度一律不进文字与背景（透明叠出来的色既是非档位值，也让行断色） */
 .tbl tbody tr.on td{background:var(--accent-soft);color:var(--accent-2)}
 .tbl tbody tr.on td.main-c{color:var(--accent-2)}
-.tbl tbody tr.on td.dim{color:rgba(0,188,255,.72)}
-.tbl tbody tr.on:hover td{background:var(--accent-hover)}
+.tbl tbody tr.on td.dim{color:var(--accent)}
 /* 艺术家 / 专辑列是链接形态：悬停只转主色，不下划线（dreamanual 系约定） */
 .a-link{cursor:pointer}
 .a-link:hover{color:var(--accent-2)}
-/* 表头即排序：点表头切换正序 / 倒序（同访达），当前列亮箭头 */
+/* 表头即排序：点表头切换正序 / 倒序（同访达），当前列亮箭头；表头本身可拖动改列序 */
 .tbl th.sortable{cursor:pointer}
 .tbl th .ic{display:inline-block;vertical-align:-1px;color:var(--accent-2);margin-left:2px}
-.tbl td.cov{padding-top:var(--sp-6);padding-bottom:var(--sp-6)}
+/* 标题列内嵌 28 封面缩略图 */
+.t-title{display:flex;align-items:center;gap:var(--sp-8);min-width:0}
+.t-title .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl td.tc{padding-top:var(--sp-6);padding-bottom:var(--sp-6)}
+/* 多选框（文件管理首列） */
+.cb{width:14px;height:14px;border-radius:var(--r-6);border:var(--lw-base) solid var(--line-2);background:var(--panel-2);display:inline-grid;place-items:center;color:var(--on-accent);flex:none}
+.cb.on,.cb.ind{background:var(--accent-fill);border-color:transparent}
+.tbl td.cbc,.tbl th.cbc{width:32px;padding-right:0}
+.tbl tbody tr.on .cb{border-color:var(--accent-line)}
 .tbl-wrap{flex:1;min-height:0;overflow-y:auto;position:relative}
 .load-more{
   display:flex;align-items:center;justify-content:center;gap:var(--sp-8);
@@ -340,7 +348,9 @@ input,select{font:inherit;color:inherit}
 .banner-card.info{background:var(--panel-2);color:var(--ink)}
 .banner-card.bad{background:var(--danger-soft);color:var(--danger-ink)}
 .banner-card .t{font-size:var(--fs-13);font-weight:500}
-.banner-card .d{font-size:var(--fs-12);color:inherit;opacity:.8;margin-top:var(--sp-4);line-height:1.65}
+.banner-card .d{font-size:var(--fs-12);margin-top:var(--sp-4);line-height:1.65;color:var(--warn-ink-strong)}
+.banner-card.info .d{color:var(--ink-3)}
+.banner-card.bad .d{color:var(--danger-ink-strong)}
 .banner-card code{font-size:var(--fs-12);background:rgba(0,0,0,.25);padding:1px var(--sp-4);border-radius:var(--r-6)}
 
 /* 上传行 */
@@ -368,6 +378,7 @@ input,select{font:inherit;color:inherit}
 .tree-row .ic{color:var(--ink-3)}
 .tree-row.on .ic{color:var(--accent-2)}
 .tree-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3)}
+.tree-row.on .cnt{color:var(--accent)}
 .tree-row.ind{padding-left:var(--sp-20)}
 /* 拖拽悬停目标行：主色虚线描边 */
 .tree-row.drop{outline:var(--lw-base) dashed var(--accent-2);outline-offset:-1px;background:var(--accent-soft);color:var(--accent-2)}
@@ -444,7 +455,11 @@ input,select{font:inherit;color:inherit}
 .modal-foot{padding:var(--sp-14) var(--sp-20) var(--sp-16);border-top:var(--lw-hairline) solid var(--line);display:flex;justify-content:flex-end;gap:var(--sp-8)}
 
 /* 沉浸模式 */
-.imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative}
+.imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative;overflow:hidden}
+/* 底：封面等比撑满 + 重高斯模糊 + 一层压暗，保证前景文字对比度 */
+.imm-bg{position:absolute;inset:-15%;background:linear-gradient(150deg,#00bcff,#0069a8);filter:blur(80px) saturate(1.15);opacity:.45;pointer-events:none}
+.imm-scrim{position:absolute;inset:0;background:rgba(10,10,10,.62);pointer-events:none}
+.imm > .imm-cover,.imm > .imm-info{position:relative;z-index:1}
 .imm-close{position:absolute;top:38px;right:var(--sp-24)}
 .imm-cover{width:280px;height:280px;border-radius:var(--r-12);box-shadow:var(--shadow-modal);flex:none}
 .imm-info{width:380px;min-width:0}
@@ -633,14 +648,14 @@ body.anno [data-note]::before{
               </div>
             </div>
             <div class="tbl-wrap">
-              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。排序做在表头里（同访达）：点表头切换正序 / 倒序，当前列亮箭头，再点别的列换排序键。ID3 列给全：封面 / 曲序 / 标题 / 艺术家 / 专辑 / 流派 / 年份 / 时长；流派按「; 」拆多标签、用英文原名。">
+              <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。列序：标题（内嵌封面缩略图）/ 艺术家 / 专辑 / 流派 / 年份 / 时长 / 曲序 —— 曲序是 ID3 原值，放最后，不跟行首位置混淆。流派按「; 」拆多标签、用英文原名。">
                 <colgroup>
-                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px">
+                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px">
                 </colgroup>
-                <thead>
-                  <tr><th class="num">#</th><th></th><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th></tr>
+                <thead data-note="表头两个动作：① 点表头切换正序 / 倒序（同访达），当前列亮箭头；② 拖动表头改列序（拖动样态见组件板）。列序与列宽按用户偏好持久化。">
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th></tr>
                 </thead>
-                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 显示在文件管理，样态见组件板）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
+                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 定位文件位置，样态见组件板）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
               </table>
               <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
                 <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
@@ -681,23 +696,23 @@ body.anno [data-note]::before{
               </div>
             </div>
             <div class="tbl-wrap">
-              <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（封面 / 流派等信息都在）。正在播放行 = 浅底 + 主色字 + 均衡器。表头不参与排序 —— 这里的顺序就是播放顺序。">
+              <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（封面 / 流派等信息都在）。首列是播放顺序（不是 ID3 曲序，所以留在最前），正在播放行 = 浅底 + 主色字 + 均衡器。表头不参与排序 —— 这里的顺序就是播放顺序。">
                 <colgroup>
-                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px">
+                  <col style="width:36px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">#</th><th></th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
+                  <tr><th class="num">顺序</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th></tr>
                 </thead>
                 <tbody id="qtbl"></tbody>
               </table>
             </div>
             <!-- 右键菜单样态（画出来，不做交互） -->
-            <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。专辑、艺人的跳转走列表里的链接列，不占菜单项。">
+            <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。「定位文件位置」= 切到文件管理、展开到该曲所在目录，并把那一行高亮选中（同访达的「显示简介」位置感）。专辑、艺人的跳转走列表里的链接列，不占菜单项。">
               <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
               <div class="msep"></div>
-              <div class="mi"><i data-ic="folder-open" data-sz="12"></i>显示在文件管理</div>
+              <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
               <div class="msep"></div>
               <div class="mi danger"><i data-ic="x" data-sz="12"></i>移出队列</div>
             </div>
@@ -750,10 +765,10 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl">
                 <colgroup>
-                  <col style="width:36px"><col style="width:46px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px">
+                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">#</th><th></th><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th></tr>
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th></tr>
                 </thead>
                 <tbody id="ftbl"></tbody>
               </table>
@@ -766,7 +781,9 @@ body.anno [data-note]::before{
     <!-- ===== 沉浸模式 ===== -->
     <section class="screen" data-screen="immersive">
       <div class="page">
-        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出），只收掉侧栏 —— 底部播放条原样保留，控制、进度、气泡与曲库状态是同一套。左封面右歌词；点歌手名回曲库并筛选该歌手。">
+        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出），只收掉侧栏 —— 底部播放条原样保留，控制、进度、气泡与曲库状态是同一套。背景是封面等比撑满 + 重高斯模糊 + 一层压暗（正式实现取专辑图，无图时退回纯色底）。左封面右歌词；点歌手名回曲库并筛选该歌手。">
+          <div class="imm-bg"></div>
+          <div class="imm-scrim"></div>
           <button class="icon-btn imm-close"><i data-ic="x" data-sz="18"></i></button>
           <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
           <div class="imm-info">
@@ -790,7 +807,7 @@ body.anno [data-note]::before{
     <section class="screen" data-screen="files">
       <div class="page">
         <div class="body" style="overflow:hidden">
-          <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
+          <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。每行右侧直接写「可写 / 只读」，不写 RW / RO 缩写。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
             <div class="tree-head">共享文件夹</div>
             <div class="tree-body" id="tree"></div>
           </div>
@@ -826,9 +843,9 @@ body.anno [data-note]::before{
             </div>
             <div class="tbl-wrap">
               <table class="tbl">
-                <colgroup><col><col style="width:110px"><col style="width:150px"><col style="width:90px"></colgroup>
-                <thead><tr><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th></tr></thead>
-                <tbody id="files" data-note="多选样态：Cmd 点加选三行（浅底 + 主色字同单选）。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。"></tbody>
+                <colgroup><col style="width:32px"><col><col style="width:110px"><col style="width:150px"><col style="width:90px"></colgroup>
+                <thead><tr><th class="cbc"><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span></th><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th></tr></thead>
+                <tbody id="files" data-note="多选样态：三行已勾选（浅底 + 主色字与单选一致）。首列多选框是主入口，勾表头 = 全选 / 半选表示部分选中；Cmd 点加选、Shift 点范围选、Cmd+A 全选也照旧可用。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。"></tbody>
               </table>
             </div>
             <!-- 多选右键菜单样态 -->
@@ -981,9 +998,19 @@ body.anno [data-note]::before{
 
           <div class="group-title">关于</div>
           <div class="group">
+            <div class="srow" data-note="检查更新：四种结果（检查中 / 已是最新 / 发现新版本 / 检查失败）都落在标题右侧的副标题里，按钮只管触发 —— 与密码管理同形。下面那份是本产品的唯一联网动作。">
+              <div class="k">检查更新<small style="color:var(--accent-2)">发现新版本 0.2.0</small></div>
+              <div class="v"><button class="btn btn-sec btn-xs">立即检查</button></div>
+            </div>
             <div class="srow"><div class="k">版本</div><div class="v mono">0.1.0（开发中）</div></div>
             <div class="srow"><div class="k">许可</div><div class="v">MIT</div></div>
             <div class="srow"><div class="k">接口结论</div><div class="v"><button class="btn btn-sec btn-xs">在仓库中查看</button></div></div>
+            <div class="srow" style="cursor:pointer" data-note="整行是一个动作（不是「说明 + 按钮」），与密码管理、投资监控同形；右侧箭头表示会离开本应用、在浏览器里打开。">
+              <div class="k" style="display:flex;align-items:center;gap:var(--sp-6);color:var(--accent-2)">
+                <i data-ic="coffee" data-sz="14"></i>请我喝杯咖啡
+              </div>
+              <div class="v"><i data-ic="external-link" data-sz="14"></i></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1089,7 +1116,28 @@ body.anno [data-note]::before{
       <div class="nav-row on" style="border-radius:var(--r-8)">选中 · accent-soft 底 + accent-2 字（6.37:1）</div>
       <div class="nav-row on" style="border-radius:var(--r-8)">正在播放 · 同选中底色，另加均衡器 <span class="eq" style="margin-left:var(--sp-6)"><i></i><i></i><i></i></span></div>
     </div>
-    <div class="b-note">选中行按拍板改「浅底 + 主色字」，侧栏行、表行、树行共用。选中与正在播放共用一种底色，靠均衡器区分 —— 不再引入第二套底色。</div>
+    <div class="b-note">选中行按拍板改「浅底 + 主色字」，侧栏行、表行、树行共用。两档文字都取实心色档（主色字 sky-400、次要字 sky-500，压 soft 底 6.37 / 5.13:1）—— 不透明度不进文字与背景，透明叠出来的既不是档位值，还会让选中行断色。选中与正在播放共用一种底色，靠均衡器区分。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">表头：排序与拖动改列序</div>
+    <div style="border-radius:var(--r-8);overflow:hidden;background:var(--panel-2)">
+      <table class="tbl" style="table-layout:fixed">
+        <colgroup><col style="width:170px"><col style="width:130px"><col style="width:120px"><col></colgroup>
+        <thead>
+          <tr>
+            <th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th>
+            <th style="outline:var(--lw-base) dashed var(--accent-2);outline-offset:-1px;color:var(--accent-2)">艺术家<i data-ic="grip-vertical" data-sz="10"></i></th>
+            <th class="sortable" style="box-shadow:-2px 0 0 var(--accent-2)">专辑</th>
+            <th class="sortable">流派</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="main-c" style="color:var(--ink-3);font-weight:400">拖动中的列被抬起</td><td class="num">落点在左侧</td><td class="num">主色竖线</td><td class="num">松手即换位</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="b-note">① 点表头 = 切换正序 / 倒序，当前列亮主色箭头；② 拖动表头 = 改列序，被拖的列虚线抬起，落点出现主色竖线（同访达）。列序与列宽按用户偏好持久化；队列表头不参与排序（顺序即播放顺序）。</div>
   </div>
 
   <div class="card">
@@ -1113,6 +1161,7 @@ body.anno [data-note]::before{
           <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+          <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
         </div>
         <div class="b-lab" style="margin-top:var(--sp-8);width:auto">歌曲行</div>
       </div>
@@ -1260,6 +1309,10 @@ const ICONS={
   copy:'<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  minus:'<path d="M5 12h14"/>',
+  coffee:'<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>',
+  'external-link':'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  'grip-vertical':'<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
   'circle-check':'<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
   'circle-x':'<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
@@ -1327,32 +1380,31 @@ const esc = s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 
 /* 流派标签统一无彩色：一格里能放好几个，带色会花 */
 const tagHtml=(g)=>`<span class="tag">${esc(g)}</span>`;
-/* 封面小图：按专辑给底色占位（正式实现读封面缩略图） */
+/* 封面缩略图按专辑给底色占位（正式实现读封面缩略图），内嵌在标题列里 */
 const ALTBG={'潮汐':'','夏日信件':' alt1','银翼':' alt2','迁徙':' alt1','十一月':' alt2','深水':''};
-const coverCell=(album,on)=>`<td class="cov"><span class="cover${ALTBG[album]||''}" style="width:28px;height:28px;${on?'box-shadow:0 0 0 1px rgba(0,188,255,.35) inset':''}"><i data-ic="music" data-sz="12"></i></span></td>`;
+const titleCell=(t)=>`<td class="main-c tc"><span class="t-title"><span class="cover${ALTBG[t[3]]||''}" style="width:28px;height:28px"><i data-ic="music" data-sz="12"></i></span><span class="tt">${esc(t[1])}</span></span></td>`;
 
 $('#tracks').innerHTML = TRACKS.map((t,i)=>{
   const on = i===0;
   const cls = (b)=> on ? `${b} dim` : b;
   return `<tr${on?' class="on"':''}>`+
-    `<td class="${cls('num')}">${t[0]}</td>`+
-    coverCell(t[3],on)+
-    `<td class="main-c">${esc(t[1])}</td>`+
+    titleCell(t)+
     `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
     `<td class="${cls('')} a-link">${esc(t[3])}</td>`+
     `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
-    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
+    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td>`+
+    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td></tr>`;
 }).join('');
 
 $('#qtbl').innerHTML = QPLAY.map((q)=>{
   const on = !!q[6];
-  // 正在播放的「#」格放均衡器；td 保持 table-cell，不改成 flex（改了两行底色会接不上）
+  // 正在播放的「顺序」格放均衡器；td 保持 table-cell，不改成 flex（改了两行底色会接不上）
   const num = on ? '<span class="eq"><i></i><i></i><i></i></span>' : String(q[0]);
+  const t=[q[0],q[1],q[2],q[3],q[4],2024,q[5]];
   return `<tr${on?' class="on"':''}>`+
     `<td class="num">${num}</td>`+
-    coverCell(q[3],on)+
-    `<td class="main-c">${esc(q[1])}</td>`+
+    titleCell(t)+
     `<td class="${on?'dim':''} a-link">${esc(q[2])}</td>`+
     `<td class="${on?'dim':''} a-link">${esc(q[3])}</td>`+
     `<td class="${on?'dim':''}"><span class="tags">${q[4].map(tagHtml).join('')}</span></td>`+
@@ -1364,33 +1416,33 @@ $('#ftbl').innerHTML = TRACKS.filter(t=>t[2]==='林间电台').map((t,i)=>{
   const on = i===0;
   const cls = (b)=> on ? `${b} dim` : b;
   return `<tr${on?' class="on"':''}>`+
-    `<td class="${cls('num')}">${t[0]}</td>`+
-    coverCell(t[3],on)+
-    `<td class="main-c">${esc(t[1])}</td>`+
+    titleCell(t)+
     `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
     `<td class="${cls('')} a-link">${esc(t[3])}</td>`+
     `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
-    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
+    `<td class="${cls('num')}" style="text-align:right">${t[6]}</td>`+
+    `<td class="${cls('num')}" style="text-align:right">${t[0]}</td></tr>`;
 }).join('');
 
 $('#tree').innerHTML = FOLDERS.map((f,i)=>{
   const on = i===0;
   return `<div class="tree-row${on?' on':''}"><i data-ic="folder" data-sz="14"></i>${esc(f[0])}`+
-         (f[2]?'<span class="cnt">RW</span>':'')+'</div>';
+         (f[2]?'<span class="pill ok" style="height:16px;margin-left:auto">可写</span>':'')+'</div>';
 }).join('') +
  '<div class="tree-row ind"><i data-ic="folder-open" data-sz="14"></i>华语</div>'+
  `<div class="tree-row ind drop" data-note="拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。"><i data-ic="folder" data-sz="14"></i>欧美</div>`+
  '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>古典</div>';
 
-/* 图标只按文件类型给，列表里没有任何播放状态；多选：Cmd 点加选、Shift 范围选 */
+/* 图标只按文件类型给，列表里没有任何播放状态；多选：首列多选框 / Cmd 加选 / Shift 范围选 */
 const FILE_ICON={dir:'folder',audio:'music',image:'image',text:'file-text',list:'list-music'};
 const SEL=new Set([2,3,4]);
-$('#files').innerHTML = FILES.map((f)=>{
-  const on = SEL.has(FILES.indexOf(f));
+$('#files').innerHTML = FILES.map((f,i)=>{
+  const on = SEL.has(i);
   const perm = f[3]==='可写' ? '<span class="pill ok" style="height:16px">可写</span>' : '<span class="pill" style="height:16px">只读</span>';
   const c = (extra)=> on ? `${extra} dim` : extra;
-  return `<tr${on?' class="on"':''}>`+
+  const cb = `<td class="cbc"><span class="cb${on?' on':''}">${on?'<i data-ic="check" data-sz="10"></i>':''}</span></td>`;
+  return `<tr${on?' class="on"':''}>`+ cb +
     `<td class="main-c"><span style="display:inline-flex;align-items:center;gap:var(--sp-8)"><i data-ic="${FILE_ICON[f[4]]}" data-sz="14"></i>${esc(f[0])}</span></td>`+
     `<td class="${c('num')}" style="text-align:right">${esc(f[1])}</td>`+
     `<td class="${c('num')}">${esc(f[2])}</td>`+
