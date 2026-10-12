@@ -501,7 +501,6 @@ input,select{font:inherit;color:inherit}
 .imm-next .nx-title{font-size:var(--fs-15);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .imm-next .nx-sub{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .imm-next .nx-dur{font-size:var(--fs-12);color:var(--ink-3);flex:none;font-variant-numeric:tabular-nums}
-.imm-next .nx-foot{margin-top:var(--sp-12);font-size:var(--fs-11);color:var(--ink-3)}
 
 /* 组件板（页面级） */
 .board{width:1120px;display:none;grid-template-columns:1fr 1fr;gap:var(--sp-16)}
@@ -839,8 +838,8 @@ body.anno [data-note]::before{
             <div class="imm-title">夜航</div>
             <div class="imm-artist">林间电台</div>
             <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12</div>
-            <div class="imm-next" data-note="无歌词态：曲库带内嵌歌词的只约 0.3%，所以这是常态、不配警告色。三行结构固定 ——「为什么没有」→「接下来播什么」→「队列还剩多少」。队列到尾时把牌头换成「队列到此为止」，条目位改成一行占位文案。">
-              <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>本曲目没有歌词<br>内嵌歌词与在线搜索都没匹配到</span></div>
+            <div class="imm-next" data-note="无歌词态：曲库带内嵌歌词的只约 0.3%，所以这是常态、不配警告色。说明行只写「未匹配到歌词」，不解释接口与来源。下有牌头 + 可点跳的下一首条目。队列到尾时把牌头换成「队列到此为止」，条目位改成一行占位文案。">
+              <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>未匹配到歌词</span></div>
               <div class="nx-cap">接下来播放</div>
               <div class="nx-item">
                 <div class="nx-cover"><i data-ic="music" data-sz="16"></i></div>
@@ -850,7 +849,6 @@ body.anno [data-note]::before{
                 </div>
                 <div class="nx-dur">4:02</div>
               </div>
-              <div class="nx-foot">队列还剩 12 首 · 点这一条跳到它</div>
             </div>
           </div>
         </div>
@@ -1329,7 +1327,7 @@ body.anno [data-note]::before{
     </div>
     <div class="b-lab" style="width:auto;margin-top:var(--sp-16)">没有歌词 —— 换成「接下来播放」</div>
     <div class="imm-next" style="margin-top:var(--sp-8);height:auto">
-      <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>本曲目没有歌词<br>内嵌歌词与在线搜索都没匹配到</span></div>
+      <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>未匹配到歌词</span></div>
       <div class="nx-cap">接下来播放</div>
       <div class="nx-item">
         <div class="nx-cover"><i data-ic="music" data-sz="16"></i></div>
@@ -1339,8 +1337,8 @@ body.anno [data-note]::before{
         </div>
         <div class="nx-dur">4:02</div>
       </div>
-      <div class="nx-foot">队列还剩 12 首 · 点这一条跳到它</div>
     </div>
+    <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以「没有歌词」是常态，不配警告色。说明行只写「未匹配到歌词」。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成「队列到此为止」。</div>
     <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以「没有歌词」是常态，不配警告色。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成「队列到此为止」。</div>
   </div>
 
