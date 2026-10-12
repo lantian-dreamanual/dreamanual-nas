@@ -6,22 +6,29 @@ struct RootView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        if state.isConnected {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    SidebarView()
-                    Rectangle()
-                        .fill(Color.dmLine)
-                        .frame(width: DmLine.hairline)
-                    MainAreaView()
+        Group {
+            if state.isConnected {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        SidebarView()
+                        Rectangle()
+                            .fill(Color.dmLine)
+                            .frame(width: DmLine.hairline)
+                        MainAreaView()
+                    }
+                    .frame(maxHeight: .infinity)
+                    PlayerBarView()
                 }
-                .frame(maxHeight: .infinity)
-                PlayerBarView()
+                .background(Color.dmBg)
+            } else {
+                ConnectView()
             }
-            .background(Color.dmBg)
-        } else {
-            ConnectView()
         }
+        // 内容延伸进顶部安全区：hiddenTitleBar 后系统安全区（约 28pt）依然存在，
+        // 不 ignore 的话侧栏会从安全区下才开始，顶部露出一条窗口底色的深带，
+        // 且与品牌区的 DmLayout.titlebar padding 叠成双重让位 —— 侧栏顶上多出
+        // 一块空白（2026-10-12 用户截图）。与视频下载根部同一条处理。
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

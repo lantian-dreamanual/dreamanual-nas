@@ -30,7 +30,7 @@ struct ConnectView: View {
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk3)
                 .padding(.top, DmSpace.s4)
-                .padding(.bottom, DmSpace.s20)
+                .padding(.bottom, 24)
 
             DmSegmented([.quickconnect, .direct], selection: $mode, fillsWidth: true, on: .card) {
                 $0 == .quickconnect ? "QuickConnect" : "直连地址"
@@ -72,12 +72,19 @@ struct ConnectView: View {
             .buttonStyle(PrimaryButtonStyle())
             .disabled(isSubmitDisabled)
             .keyboardShortcut(.defaultAction)
+            // 最后一个字段的 14 + 这里的 16 = 30，与 `.lock-actions` 的节奏一致。
+            .padding(.top, DmSpace.s16)
 
             statusLine
                 .padding(.top, DmSpace.s14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DmSpace.s24)
+        // 卡片节奏对齐密码管理 `.lock-card`：内边距 34/32/26、标记下 16、
+        // 标题块下 24、字段间 14、按钮前 14+16。这几个是容器级大留白
+        // （vault 也按布局值保留裸值），不进尺度档。
+        .padding(.top, 34)
+        .padding(.horizontal, 32)
+        .padding(.bottom, 26)
         .frame(width: 420)
         .background(
             RoundedRectangle(cornerRadius: DmRadius.r16).fill(Color.dmPanel2)
