@@ -489,7 +489,19 @@ input,select{font:inherit;color:inherit}
 .imm-meta{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-8)}
 .imm-lyrics{margin-top:var(--sp-24);height:250px;overflow:hidden;display:flex;flex-direction:column;gap:var(--sp-10);font-size:var(--fs-13);color:var(--ink-3)}
 .imm-lyrics .on{color:var(--accent-2);font-size:var(--fs-14);font-weight:600}
-.imm-lyrics .na{display:flex;flex-direction:column;align-items:center;gap:var(--sp-8);padding:var(--sp-24)}
+/* 歌词区为空时：不留白板，换成「接下来播放」（自然高度，不占满歌词那 250px） */
+.imm-next{margin-top:var(--sp-24);display:flex;flex-direction:column;min-width:0}
+.imm-next .nx-why{display:flex;gap:var(--sp-8);font-size:var(--fs-12);color:var(--ink-3);line-height:1.6}
+.imm-next .nx-why .ic{flex:none;margin-top:1px}
+.imm-next .nx-cap{margin-top:var(--sp-16);padding-top:var(--sp-16);border-top:var(--lw-hairline) solid var(--line);font-size:var(--fs-11);letter-spacing:.08em;color:var(--ink-3)}
+.imm-next .nx-item{margin-top:var(--sp-10);display:flex;align-items:center;gap:var(--sp-12);padding:var(--sp-10);border-radius:var(--r-10);background:rgba(255,255,255,.06);cursor:pointer}
+.imm-next .nx-item:hover{background:rgba(255,255,255,.1)}
+.imm-next .nx-cover{width:44px;height:44px;border-radius:var(--r-6);background:rgba(255,255,255,.1);display:grid;place-items:center;color:var(--ink-3);flex:none}
+.imm-next .nx-body{flex:1;min-width:0}
+.imm-next .nx-title{font-size:var(--fs-15);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.imm-next .nx-sub{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.imm-next .nx-dur{font-size:var(--fs-12);color:var(--ink-3);flex:none;font-variant-numeric:tabular-nums}
+.imm-next .nx-foot{margin-top:var(--sp-12);font-size:var(--fs-11);color:var(--ink-3)}
 
 /* 组件板（页面级） */
 .board{width:1120px;display:none;grid-template-columns:1fr 1fr;gap:var(--sp-16)}
@@ -818,7 +830,7 @@ body.anno [data-note]::before{
     <!-- ===== 沉浸模式 ===== -->
     <section class="screen" data-screen="immersive">
       <div class="page">
-        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出），只收掉侧栏 —— 底部播放条原样保留，控制、进度、气泡与曲库状态是同一套。背景是封面等比撑满 + 重高斯模糊 + 一层压暗（正式实现取专辑图，无图时退回纯色底）。左封面右歌词；点歌手名回曲库并筛选该歌手。">
+        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出），只收掉侧栏 —— 底部播放条原样保留，控制、进度、气泡与曲库状态是同一套。背景是封面等比撑满 + 重高斯模糊 + 一层压暗（正式实现取专辑图，无图时退回纯色底）。左封面右歌词；点歌手名回曲库并筛选该歌手。歌词区没有歌词时不留白板 —— 换成「接下来播放」：先说明本曲目没有歌词，再摆出队列里的下一首（点这条即跳到它）。">
           <div class="imm-bg"></div>
           <div class="imm-scrim"></div>
           <button class="icon-btn imm-close"><i data-ic="x" data-sz="18"></i></button>
@@ -827,13 +839,18 @@ body.anno [data-note]::before{
             <div class="imm-title">夜航</div>
             <div class="imm-artist">林间电台</div>
             <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12</div>
-            <div class="imm-lyrics" data-note="歌词区：NAS 歌词接口在、但曲库里没有歌词文件 —— 无歌词时这块显示空态（图标 + 「暂无歌词」），不留白板。">
-              <span>夜航</span>
-              <span>灯熄了 路还长</span>
-              <span class="on">仪表盘的光落在手上</span>
-              <span>电台里放着老歌</span>
-              <span>像谁在副驾轻轻唱</span>
-              <span>…</span>
+            <div class="imm-next" data-note="无歌词态：曲库带内嵌歌词的只约 0.3%，所以这是常态、不配警告色。三行结构固定 ——「为什么没有」→「接下来播什么」→「队列还剩多少」。队列到尾时把牌头换成「队列到此为止」，条目位改成一行占位文案。">
+              <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>本曲目没有歌词<br>内嵌歌词与在线搜索都没匹配到</span></div>
+              <div class="nx-cap">接下来播放</div>
+              <div class="nx-item">
+                <div class="nx-cover"><i data-ic="music" data-sz="16"></i></div>
+                <div class="nx-body">
+                  <div class="nx-title">城市的雨</div>
+                  <div class="nx-sub">苏郁青 · 潮汐</div>
+                </div>
+                <div class="nx-dur">4:02</div>
+              </div>
+              <div class="nx-foot">队列还剩 12 首 · 点这一条跳到它</div>
             </div>
           </div>
         </div>
@@ -1298,8 +1315,33 @@ body.anno [data-note]::before{
         <span>从曲库里右键「添加到歌单」</span>
       </div>
     </div>
-    <div class="empty">暂无歌词 · 该曲目没有内嵌或同名 LRC</div>
-    <div class="b-note">三件套（图标 44 + 标题 15 + 说明 12）只用在独占一整块内容区的地方；嵌在栏或卡片内的空列表走单行。</div>
+    <div class="empty">搜索没有匹配的曲目 · 换个关键词或改用筛选</div>
+    <div class="b-note">三件套（图标 44 + 标题 15 + 说明 12）只用在独占一整块内容区的地方；嵌在栏或卡片内的空列表走单行。歌词区不走这两档 —— 见下一张卡。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">沉浸模式 · 歌词区两态</div>
+    <div class="b-lab" style="width:auto">有歌词 —— 直接渲染，当前行高亮</div>
+    <div class="imm-lyrics" style="margin-top:var(--sp-8);height:auto">
+      <span>灯熄了 路还长</span>
+      <span class="on">仪表盘的光落在手上</span>
+      <span>电台里放着老歌</span>
+    </div>
+    <div class="b-lab" style="width:auto;margin-top:var(--sp-16)">没有歌词 —— 换成「接下来播放」</div>
+    <div class="imm-next" style="margin-top:var(--sp-8);height:auto">
+      <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>本曲目没有歌词<br>内嵌歌词与在线搜索都没匹配到</span></div>
+      <div class="nx-cap">接下来播放</div>
+      <div class="nx-item">
+        <div class="nx-cover"><i data-ic="music" data-sz="16"></i></div>
+        <div class="nx-body">
+          <div class="nx-title">城市的雨</div>
+          <div class="nx-sub">苏郁青 · 潮汐</div>
+        </div>
+        <div class="nx-dur">4:02</div>
+      </div>
+      <div class="nx-foot">队列还剩 12 首 · 点这一条跳到它</div>
+    </div>
+    <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以「没有歌词」是常态，不配警告色。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成「队列到此为止」。</div>
   </div>
 
   <div class="card">
