@@ -35,10 +35,14 @@
   --bg:#0a0a0a; --panel:#171717; --panel-2:#262626; --panel-3:#404040;
   --line:#262626; --line-2:#404040;
   --ink:#f5f5f5; --ink-2:#d4d4d4; --ink-3:#a1a1a1;
-  /* 强调色：sky（群晖天蓝）。主按钮走深字方案（底亮字深），与投资监控同构：
-     950 压 500 = 7.32:1，hover 提到 400 档 = 9.09:1；白字压 500 仅 2.71:1 不可用 */
+  /* 强调色：sky（群晖天蓝）。三条轨道（design-system.md 第八节「选中与悬停」）：
+     小块（按钮 / 分段）走深字 —— 950 压 500 = 7.32:1，hover 提到 400 档 = 9.09:1，
+     白字压 500 仅 2.71:1 不可用；侧栏行的实心选中底走白字 —— row 取本族能压住
+     白字的最浅档 sky-700（5.86:1），失焦底掉 950、字不动（13.89:1）；
+     列表行（表行 / 树行 / 弹窗结果行）走浅底 —— soft 底 + accent-2 字，不做失焦降级 */
   --accent:#00a6f4; --accent-2:#00bcff; --accent-soft:#052f4a; --accent-line:#00598a;
   --accent-fill:#00a6f4; --accent-fill-2:#00bcff; --on-accent:#0a0a0a;
+  --accent-row:#0069a8; --on-accent-row:#ffffff;
   --danger:#fb2c36; --danger-soft:#460809; --danger-line:#9f0712;
   --danger-ink:#ffa2a2; --danger-ink-strong:#ff6467; --danger-hover:#82181a;
   --ok:#00bc7d; --ok-soft:#002c22; --ok-line:#006045;
@@ -138,10 +142,10 @@ input,select{font:inherit;color:inherit}
   font-size:var(--fs-13);color:var(--ink-2);transition:background var(--mo-fast),color var(--mo-fast);
 }
 .nav-row:hover{background:var(--panel-3);color:var(--ink)}
-.nav-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
+.nav-row.on{background:var(--accent-row);color:var(--on-accent-row);font-weight:600}
 /* 选中行悬停不变亮：产品线口径里没有「选中 + 悬停」这一态（SelectState 选中盖过悬停），生成器也不出这个变量 */
 .nav-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
-.nav-row.on .cnt{color:var(--accent)}
+.nav-row.on .cnt{color:var(--on-accent-row)}
 .nav-sep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-10) var(--sp-8) var(--sp-8)}
 .sider-foot{margin-top:auto;border-top:var(--lw-base) solid var(--line-2);padding:var(--sp-8) var(--sp-16) var(--sp-10)}
 .foot-row{display:flex;align-items:center;gap:var(--sp-6);font-size:var(--fs-11);color:var(--ink-3)}
@@ -260,9 +264,11 @@ input,select{font:inherit;color:inherit}
 /* 只读：名称右侧一个灰 pencil。可写是常态、不给标志 —— 列表里只标「不能写」这一种异常 */
 .tbl td .ro{display:inline-flex;color:var(--ink-3);margin-left:var(--sp-6)}
 .tbl td.main-c{color:var(--ink);font-weight:500}
-/* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。两档文字都用实心色档：
-   主色字 = accent-2（sky-400，压 soft 6.37:1）、次要字 = accent（sky-500，5.13:1）。
-   不透明度一律不进文字与背景（透明叠出来的色既是非档位值，也让行断色） */
+/* 列表行选中走浅底轨（2026-10-12 拍板）：accent-soft 底 + accent-2 字、次要格 accent。
+   与侧栏行分轨 —— 侧栏走实心主色底 + 白字（见 .nav-row.on）：侧栏总共三四行、选中行表达
+   「你在哪个模块」；列表行一屏几十上百行、多选还会成片连成色带。这底同时是深字端的失焦
+   降级档，所以这一类行不做失焦降级。两档字都取实心色档（6.37 / 5.13:1），不透明度一律
+   不进文字与背景（透明叠出来的色既不是档位值，也让行断色） */
 .tbl tbody tr.on td{background:var(--accent-soft);color:var(--accent-2)}
 .tbl tbody tr.on td.main-c{color:var(--accent-2)}
 .tbl tbody tr.on td.dim{color:var(--accent)}
@@ -406,6 +412,7 @@ input,select{font:inherit;color:inherit}
 .tree-body{flex:1;overflow-y:auto;padding:0 var(--sp-8) var(--sp-12);display:flex;flex-direction:column;gap:var(--sp-2)}
 .tree-row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);transition:var(--mo-fast)}
 .tree-row:hover{background:var(--panel-2);color:var(--ink)}
+/* 当前目录行 = 列表行选中（浅底轨），与表行同一套，说明见上面 .tbl tbody tr.on td */
 .tree-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
 .tree-row .ic{color:var(--ink-3)}
 .tree-row.on .ic{color:var(--accent-2)}
@@ -511,6 +518,7 @@ input,select{font:inherit;color:inherit}
 .mv-list{max-height:288px;overflow-y:auto;border:var(--lw-hairline) solid var(--line);border-radius:var(--r-8);padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-2);margin-bottom:var(--sp-6)}
 .mv-hit{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);transition:var(--mo-fast)}
 .mv-hit:hover{background:var(--panel-2);color:var(--ink)}
+/* 筛选结果的选中行 = 列表行选中（浅底轨），与表行同一套 */
 .mv-hit.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
 .mv-hit.on .ic{color:var(--accent-2)}
 .mv-hit .pth{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-weight:400}
@@ -627,7 +635,7 @@ body.anno [data-note]::before{
       <b>Dreamanual NAS 助手</b>
     </div>
     <nav class="nav">
-      <div class="nav-row on" data-go="music" data-note="选中态按拍板改为：浅底（accent-soft）+ 主色字（accent-2），全产品统一。">
+      <div class="nav-row on" data-go="music" data-note="选中态：主色实心底（sky-700）+ 白字，与视频下载、密码管理、音频转换同档（design-system.md 第八节「大面积轨道」）。本端小块控件走深字，不套用这条。">
         <i data-ic="headphones" data-sz="16"></i>听歌<span class="cnt">12331</span>
       </div>
       <div class="nav-row" data-go="files"><i data-ic="folder" data-sz="16"></i>文件管理<span class="cnt">8</span></div>
@@ -1383,15 +1391,15 @@ body.anno [data-note]::before{
     <div class="b-note">输入框底色按所在层级取相邻一档：主区上取 panel-2，卡片里取 panel-3。聚焦只转描边色（accent-2），底色不动。</div>
   </div>
 
-  <div class="card">
-    <div class="card-title">选中与悬停（浅底 + 主色字）</div>
+  <div class="card" data-note="本卡只落了侧栏行。原型里的表行（曲库 / 队列）、目录树行、移动弹窗结果行按 2026-10-12 拍板保持浅底 —— 列表行不并入大面积轨，理由见下面那行说明。">
+    <div class="card-title">选中与悬停（三条轨道）</div>
     <div style="display:flex;flex-direction:column;gap:var(--sp-2)">
-      <div class="nav-row" style="border-radius:var(--r-8)">常态 · 未选中</div>
+      <div class="nav-row" style="border-radius:var(--r-8)">常态 · 未选中（透明底 + ink-2 字）</div>
       <div class="nav-row" style="border-radius:var(--r-8);background:var(--panel-3);color:var(--ink)">悬停 · panel-3 底 + ink 字</div>
-      <div class="nav-row on" style="border-radius:var(--r-8)">选中 · accent-soft 底 + accent-2 字（6.37:1）</div>
+      <div class="nav-row on" style="border-radius:var(--r-8)">选中 · sky-700 实心底 + 白字（5.86:1）</div>
       <div class="nav-row on" style="border-radius:var(--r-8)">正在播放 · 同选中底色，另加均衡器 <span class="eq" style="margin-left:var(--sp-6)"><i></i><i></i><i></i></span></div>
     </div>
-    <div class="b-note">选中行按拍板改「浅底 + 主色字」，侧栏行、表行、树行共用。两档文字都取实心色档（主色字 sky-400、次要字 sky-500，压 soft 底 6.37 / 5.13:1）—— 不透明度不进文字与背景，透明叠出来的既不是档位值，还会让选中行断色。选中与正在播放共用一种底色，靠均衡器区分。</div>
+    <div class="b-note">三条轨道按选中块面积分（design-system.md 第八节）。大面积 —— 只有侧栏行 —— 走白字：底取本族能压住白字的最浅档 sky-700（白字 5.86:1），窗口失焦时底掉到 accent-soft、字保持白（13.89:1）。浅底 —— 列表行（表行、目录树行、弹窗结果行）：accent-soft 底 + accent-2 字，不做失焦降级，因为这底本身就是深字端的降级档、没有再退一档的余地；侧栏总共三四行、选中行表达「你在哪个模块」，列表行一屏几十上百行、多选还会成片连成色带，两条分开走。小块 —— 分段段、主按钮、开关、计数徽章：底 accent-fill、字 on-accent，悬停提到 accent-fill-2。选中与正在播放共用一种底色，靠均衡器区分。</div>
   </div>
 
   <div class="card">

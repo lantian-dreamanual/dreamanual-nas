@@ -117,9 +117,10 @@ private struct SidebarView: View {
     }
 }
 
-/// 手写侧栏行：选中走「浅底 + 主色字」，悬停 `panel-3`，失焦降一档。
+/// 手写侧栏行：选中走实心主色底 + 白字（大面积轨道，`SelectState`），悬停 `panel-3`，
+/// 失焦底掉 `accent-soft`、字不动。
 /// 规格与视频下载 `SidebarRow` ↔ 密码管理 `.cat` 逐项一致：图标 16、字号 13、
-/// 横向 8、行高钉控件档 32、圆角 8、行距 2（第七节「侧栏行」）。
+/// 横向 8、行高钉控件档 32、圆角 8、行距 2、选中标签 semibold（第七节「侧栏行」）。
 private struct NavRow: View {
     let title: String
     let icon: String
@@ -135,7 +136,7 @@ private struct NavRow: View {
             LucideIcon(icon, size: DmIcon.i16)
                 .foregroundColor(look.foreground)
             Text(title)
-                .font(.system(size: DmText.t13, weight: isSelected ? .medium : .regular))
+                .font(.system(size: DmText.t13, weight: isSelected ? .semibold : .regular))
                 .foregroundColor(look.foreground)
             Spacer(minLength: 0)
         }

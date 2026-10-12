@@ -20,11 +20,20 @@ enum DreamanualAppearance {
     }
 }
 
-/// 选中 / 悬停的三件套配色。NAS 是全产品线里唯一走**浅底形态**的 app。
+/// 选中 / 悬停的四态配色。
 ///
-/// 四个老 app 的选中是实心强调色底 + 白/深字（`accent-fill-2` 一整条），
-/// 用户 2026-10-12 拍板 NAS 单独走浅底（`accent-soft` 底 + `accent-2` 字，6.37:1）：
-/// 选中与「正在播放」共用同一底色，靠均衡器图标区分，实心底会把那一列压得太重。
+/// **大面积选中行（侧栏行、列表行）走实心主色底 + 白字** —— 全产品线统一形态。
+/// 白字端两端取各自的 `accent-fill-2`（视频下载 red-700、密码管理 blue-700），
+/// 本端是深字方案、小块控件用亮档 sky-500，所以大面积行另立一个角色
+/// `accent-row` = 本族里能压住白字的最浅档（sky-700，5.86:1），字取
+/// `on-accent-row`（白）。与视频下载 `SelectState.selected` 逐项同构。
+///
+/// 窗口失焦时底掉 `accent-soft`，**字不动** —— 与白字端同一条。深字端才需要连字一起换
+/// （近黑压 soft 只有 1.36:1）；本端的行字本来就是白，掉到 soft 上是 13.89:1。
+///
+/// 小块控件（分段段、主按钮、开关）走另一条轨道：`accent-fill` sky-500 + `on-accent`
+/// 近黑 —— 白字压 sky-500 只有 2.71:1，够不到 AA。两条轨道的取档表见
+/// design-system.md 第八节「选中与悬停」。
 ///
 /// 产品线没有「选中 + 悬停」这一态 —— 选中直接盖过悬停，与四个老 app 的
 /// `SelectState.of(isSelected:hovered:)` 同一条规矩，所以这里也不看 hovered。
@@ -32,9 +41,8 @@ enum SelectState {
     case normal
     case hovered
     case selected
-    /// 选中但窗口失焦：底保持 `accent-soft`，字从 `accent-2`（400 档）掉到
-    /// `accent`（500 档）—— 亮度降一截、轮廓还在。别降成中性底：它与面板底
-    /// 亮度几乎相同，选中行会直接隐身（老四端在实心方案下踩过这个坑）。
+    /// 选中但窗口失焦：底从实心 `accent-row` 掉回 `accent-soft`（暗强调底，亮度降一截、
+    /// 轮廓还在），字保持白。别降成中性底：它与侧栏底亮度太近，选中行会直接隐身。
     case selectedInactive
 
     static func of(isSelected: Bool, hovered: Bool, windowActive: Bool = true) -> SelectState {
@@ -48,7 +56,8 @@ enum SelectState {
         // 悬停取 `panel-3`（第八节四态表）。侧栏底是 `panel-2`，悬停再用
         // `panel-2` 会与底同色、画出隐身 —— 亮一档的那一格是 `panel-3`。
         case .hovered: return .dmPanel3
-        case .selected, .selectedInactive: return .dmAccentSoft
+        case .selected: return .dmAccentRow
+        case .selectedInactive: return .dmAccentSoft
         }
     }
 
@@ -56,8 +65,7 @@ enum SelectState {
         switch self {
         case .normal: return .dmInk2
         case .hovered: return .dmInk
-        case .selected: return .dmAccent2
-        case .selectedInactive: return .dmAccent
+        case .selected, .selectedInactive: return .dmOnAccentRow
         }
     }
 }
@@ -345,10 +353,15 @@ struct FormLabel: View {
 /// 的无缝形态（那版是为了治「纵向 padding 撑高随字体漂」，把段高钉档保留了，
 /// 钉的对象从容器改成段）。
 ///
-/// 选中态取 `accent-fill` 实心底 + `on-accent` 字：这是**深字方案两端**
-/// （本 app 与投资监控）的口径。第八节四态表那条「选中取下一档
-/// `accent-fill-2`」是给白字方案写的 —— 对白字是「取更深一档」，本方案里
-/// `fill2` 比 `fill` 更亮，方向反了，不套用。
+/// 选中态取 `accent-fill` 实心底 + `on-accent` 字：这是**小块控件轨道**（本 app 与
+/// 投资监控）的口径。第八节取档表里那条「大面积选中行取 700 档 + 白字」是给侧栏行 /
+/// 列表行写的 —— 分段是小块，取本端 fill 档；白字压 sky-500 只有 2.71:1，所以这里
+/// 压近黑。
+///
+/// **失焦降级**：窗口不是 key 时，选中段从「亮实心 + 近黑字」切到「暗强调底 + 亮字」
+/// （`accent-soft` + `accent-2`，6.37:1），与投资监控 `SegmentedTabs` 同款。深字方案
+/// 不能照搬白字端那条「字保持」——近黑压 `accent-soft` 只有 1.36:1，字会看不见，
+/// 必须连字一起换（第八节「两条轨道」）。本 app 只有主窗口一个，不过滤通知来源。
 struct DmSegmented<Item: Hashable>: View {
     let items: [Item]
     let label: (Item) -> String
@@ -359,6 +372,7 @@ struct DmSegmented<Item: Hashable>: View {
     /// 容器底色按所在面取（同输入框的「相邻一档」口径）。
     let surface: DmSurface
     @State private var hovered: Item?
+    @State private var windowActive = true
 
     init(
         _ items: [Item],
@@ -385,7 +399,7 @@ struct DmSegmented<Item: Hashable>: View {
                         .font(.system(size: DmText.t12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .foregroundColor(
-                            isSelected ? Color.dmOnAccent
+                            isSelected ? (windowActive ? Color.dmOnAccent : Color.dmAccent2)
                                        : (hovered == item ? Color.dmInk : Color.dmInk2)
                         )
                         .padding(.horizontal, DmSpace.s12)
@@ -393,7 +407,7 @@ struct DmSegmented<Item: Hashable>: View {
                         .frame(maxWidth: fillsWidth ? .infinity : nil)
                         .background(
                             RoundedRectangle(cornerRadius: DmRadius.r6)
-                                .fill(Color.dmAccentFill)
+                                .fill(windowActive ? Color.dmAccentFill : Color.dmAccentSoft)
                                 .opacity(isSelected ? 1 : 0)
                         )
                         .contentShape(Rectangle())
@@ -416,6 +430,14 @@ struct DmSegmented<Item: Hashable>: View {
             RoundedRectangle(cornerRadius: DmRadius.r8)
                 .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
         )
+        // 窗口 key 状态（第八节「两条轨道」的失焦降级）。与投资监控 `SegmentedTabs`
+        // 同款：只订本进程的通知，不过滤 object —— NAS 只有主窗口一个。
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            windowActive = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            windowActive = false
+        }
     }
 }
 
