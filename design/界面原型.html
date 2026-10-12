@@ -44,7 +44,7 @@
   --shadow-toast:0 2px 8px rgba(0,0,0,.3);
   --shadow-modal:0 20px 50px rgba(0,0,0,.5);
   --mask:rgba(0,0,0,.5);
-  --r-6:6px; --r-8:8px; --r-10:10px; --r-12:12px; --r-16:16px;
+  --r-4:4px; --r-6:6px; --r-8:8px; --r-10:10px; --r-12:12px; --r-16:16px;
   --sp-2:2px; --sp-4:4px; --sp-6:6px; --sp-8:8px; --sp-10:10px; --sp-12:12px;
   --sp-14:14px; --sp-16:16px; --sp-20:20px; --sp-24:24px;
   --fs-10:10px; --fs-11:11px; --fs-12:12px; --fs-13:13px; --fs-14:14px;
@@ -261,8 +261,10 @@ input,select{font:inherit;color:inherit}
 .t-title .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbl td.tc{padding-top:var(--sp-6);padding-bottom:var(--sp-6)}
 /* 多选框（文件管理首列） */
-.cb{width:14px;height:14px;border-radius:var(--r-6);border:var(--lw-base) solid var(--line-2);background:var(--panel-2);display:inline-grid;place-items:center;color:var(--on-accent);flex:none}
+.cb{width:14px;height:14px;border-radius:var(--r-4);border:var(--lw-base) solid var(--line-2);background:var(--panel-2);display:inline-grid;place-items:center;color:var(--on-accent);flex:none}
 .cb.on,.cb.ind{background:var(--accent-fill);border-color:transparent}
+.cb.hov{border-color:var(--ink-2)}
+.cb.dis{border-color:var(--line);background:var(--panel);color:var(--ink-3)}
 .tbl td.cbc,.tbl th.cbc{width:32px;padding-right:0}
 .tbl tbody tr.on .cb{border-color:var(--accent-line)}
 .tbl-wrap{flex:1;min-height:0;overflow-y:auto;position:relative}
@@ -285,7 +287,7 @@ input,select{font:inherit;color:inherit}
 .msider{width:200px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
 .mside-body{flex:1;overflow-y:auto;padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-2)}
 /* 分组标题行带「+」：与密码管理的新建分类同形，不做整宽按钮 */
-.mside-head{display:flex;align-items:center;gap:var(--sp-6);padding:var(--sp-14) var(--sp-10) var(--sp-4) var(--sp-8)}
+.mside-head{display:flex;align-items:center;gap:var(--sp-6);padding:var(--sp-14) var(--sp-4) var(--sp-4) var(--sp-8)}
 .mside-head .t{font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
 .mside-head .icon-btn{width:22px;height:22px;border-radius:var(--r-6);margin-left:auto}
 
@@ -1255,6 +1257,18 @@ body.anno [data-note]::before{
   </div>
 
   <div class="card">
+    <div class="card-title">多选框（文件 / 歌曲列表首列）</div>
+    <div style="display:flex;gap:var(--sp-24);align-items:flex-end">
+      <div><span class="cb"></span><div class="b-lab" style="margin-top:var(--sp-8);width:auto">未选</div></div>
+      <div><span class="cb hov"></span><div class="b-lab" style="margin-top:var(--sp-8);width:auto">悬停</div></div>
+      <div><span class="cb on"><i data-ic="check" data-sz="10"></i></span><div class="b-lab" style="margin-top:var(--sp-8);width:auto">选中</div></div>
+      <div><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span><div class="b-lab" style="margin-top:var(--sp-8);width:auto">半选</div></div>
+      <div><span class="cb dis"></span><div class="b-lab" style="margin-top:var(--sp-8);width:auto">禁用</div></div>
+    </div>
+    <div class="b-note">14×14、圆角 4（复选框专属小档 —— 现档最小 6 落在 14px 框上近圆点）、描边 1px。选中 / 半选 = accent-fill 底 + on-accent 图形；悬停描边转 ink-2；键盘聚焦描边转 accent-line；禁用只留形。半选用在表头全选位。</div>
+  </div>
+
+  <div class="card">
     <div class="card-title">列表与卡片</div>
     <div class="card list" style="background:var(--panel-2)">
       <div class="srow"><div class="k">列表卡片</div><div class="v">行自带内边距，卡片不加</div></div>
@@ -1453,7 +1467,7 @@ $('#files').innerHTML = FILES.map((f,i)=>{
 /* ---------- 图标注入 ---------- */
 $$('[data-ic]').forEach(el=>{
   const sz = el.dataset.sz || 16;
-  const filled = el.dataset.fill ? ' fill="currentColor" stroke="none"' : ' fill="none" stroke="currentColor"';
+  const filled = el.dataset.fill ? ' fill="currentColor" stroke="currentColor"' : ' fill="none" stroke="currentColor"';
   el.outerHTML = `<svg class="ic" width="${sz}" height="${sz}" viewBox="0 0 24 24"${filled} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[el.dataset.ic]||''}</svg>`;
 });
 
