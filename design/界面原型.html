@@ -201,7 +201,9 @@ input,select{font:inherit;color:inherit}
 
 /* 卡片 */
 .card{background:var(--panel-2);border-radius:var(--r-12);border:var(--lw-hairline) solid var(--line-2);padding:var(--sp-14)}
-.card.list{padding:0}
+.card.list{padding:0;display:flex;flex-direction:column}
+/* 并排两卡由 grid 拉伸到等高（向高的那张看齐）；卡内长列表自己滚、脚注贴底 */
+.sched-list{flex:1;min-height:0;overflow-y:auto}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-8);margin-bottom:var(--sp-10)}
 .card-title{font-size:var(--fs-15);font-weight:600}
 .group{background:var(--panel-2);border-radius:var(--r-8);overflow:hidden}
@@ -221,11 +223,11 @@ input,select{font:inherit;color:inherit}
 }
 .pill.ok{color:var(--ok-ink-strong)} .pill.bad{color:var(--danger-ink-strong)}
 .pill.warn{color:var(--warn-ink-strong)} .pill.ac{color:var(--accent-2)}
-/* 分类标签：字取分类自己的颜色（色板 400 档，压 panel-2 最差 5.5:1） */
+/* 分类标签：无彩色，底统一 panel-2 + 发丝描边 —— 流派一格能放好几个，带色会花 */
 .tag{
   display:inline-flex;align-items:center;height:18px;padding:var(--sp-2) var(--sp-8);border-radius:20px;
   background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);
-  font-size:var(--fs-11);font-weight:500;white-space:nowrap;
+  font-size:var(--fs-11);font-weight:500;color:var(--ink-2);white-space:nowrap;
 }
 .tags{display:flex;align-items:center;gap:var(--sp-4);min-width:0;overflow:hidden}
 
@@ -268,7 +270,10 @@ input,select{font:inherit;color:inherit}
 /* 听歌模块的内容区侧栏（歌单 / 每日随机） */
 .msider{width:200px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
 .mside-body{flex:1;overflow-y:auto;padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-2)}
-.mside-foot{border-top:var(--lw-hairline) solid var(--line);padding:var(--sp-10) var(--sp-12)}
+/* 分组标题行带「+」：与密码管理的新建分类同形，不做整宽按钮 */
+.mside-head{display:flex;align-items:center;gap:var(--sp-6);padding:var(--sp-14) var(--sp-10) var(--sp-4) var(--sp-16)}
+.mside-head .t{font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
+.mside-head .icon-btn{width:22px;height:22px;border-radius:var(--r-6);margin-left:auto}
 
 /* 播放条（通栏，网易云布局：进度条贴顶拉满整窗宽） */
 .player{
@@ -435,14 +440,18 @@ input,select{font:inherit;color:inherit}
 /* 沉浸模式 */
 .imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative}
 .imm-close{position:absolute;top:38px;right:var(--sp-24)}
+.imm-left{width:280px;display:flex;flex-direction:column;align-items:center;gap:var(--sp-10);flex:none}
 .imm-cover{width:280px;height:280px;border-radius:var(--r-12);box-shadow:var(--shadow-modal)}
+.imm-line{position:relative;top:0;width:280px;height:4px}
+.imm-time{font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.imm-ctl{display:flex;align-items:center;gap:var(--sp-10);margin-top:var(--sp-4)}
 .imm-info{width:380px;min-width:0}
 .imm-title{font-size:var(--fs-28);font-weight:700;letter-spacing:-.02em;cursor:pointer}
 .imm-title:hover{color:var(--accent-2)}
 .imm-artist{font-size:var(--fs-15);color:var(--accent-2);margin-top:var(--sp-6);cursor:pointer}
 .imm-artist:hover{text-decoration:underline;text-underline-offset:3px}
 .imm-meta{font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-8)}
-.imm-lyrics{margin-top:var(--sp-24);height:280px;overflow:hidden;display:flex;flex-direction:column;gap:var(--sp-10);font-size:var(--fs-13);color:var(--ink-3)}
+.imm-lyrics{margin-top:var(--sp-24);height:250px;overflow:hidden;display:flex;flex-direction:column;gap:var(--sp-10);font-size:var(--fs-13);color:var(--ink-3)}
 .imm-lyrics .on{color:var(--accent-2);font-size:var(--fs-14);font-weight:600}
 .imm-lyrics .na{display:flex;flex-direction:column;align-items:center;gap:var(--sp-8);padding:var(--sp-24)}
 
@@ -592,13 +601,13 @@ body.anno [data-note]::before{
             <div class="mside-body">
               <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
               <div class="tree-row on"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
-              <div class="tree-head" style="padding-top:var(--sp-14)">我的歌单</div>
+              <div class="mside-head" data-note="新建歌单收成标题行右侧的小「+」，与密码管理的新建分类同形 —— 这是低频操作，不占整行。">
+                <span class="t">我的歌单</span>
+                <button class="icon-btn" title="新建歌单"><i data-ic="plus" data-sz="14"></i></button>
+              </div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
-            </div>
-            <div class="mside-foot">
-              <button class="btn btn-sec btn-xs" style="width:100%"><i data-ic="plus" data-sz="12"></i>新建歌单</button>
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column">
@@ -656,13 +665,13 @@ body.anno [data-note]::before{
             <div class="mside-body">
               <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
               <div class="tree-row" data-go="music"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
-              <div class="tree-head" style="padding-top:var(--sp-14)">我的歌单</div>
+              <div class="mside-head">
+                <span class="t">我的歌单</span>
+                <button class="icon-btn" title="新建歌单"><i data-ic="plus" data-sz="14"></i></button>
+              </div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
               <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
-            </div>
-            <div class="mside-foot">
-              <button class="btn btn-sec btn-xs" style="width:100%"><i data-ic="plus" data-sz="12"></i>新建歌单</button>
             </div>
           </aside>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;position:relative">
@@ -688,7 +697,7 @@ body.anno [data-note]::before{
               </table>
             </div>
             <!-- 右键菜单样态（画出来，不做交互） -->
-            <div class="menu" style="top:172px;right:60px" data-note="右键菜单样态，全部列表通用（队列 / 曲库 / 文件）。这一份是队列行的。">
+            <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。「查看专辑」= 主区切到那张专辑的页面（封面 + 曲目表，见「专辑视图」屏）。">
               <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
@@ -703,16 +712,75 @@ body.anno [data-note]::before{
       </div>
     </section>
 
+    <!-- ===== 专辑视图（右键「查看专辑」的落点） ===== -->
+    <section class="screen" data-screen="album">
+      <div class="page">
+        <div class="body">
+          <aside class="msider">
+            <div class="tree-head">资料库</div>
+            <div class="mside-body">
+              <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
+              <div class="tree-row" data-go="music"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
+              <div class="mside-head">
+                <span class="t">我的歌单</span>
+                <button class="icon-btn" title="新建歌单"><i data-ic="plus" data-sz="14"></i></button>
+              </div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>深夜开车<span class="cnt">23</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>通勤民谣<span class="cnt">41</span></div>
+              <div class="tree-row"><i data-ic="list-music" data-sz="14"></i>后摇长夜<span class="cnt">67</span></div>
+            </div>
+          </aside>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:var(--sp-16);padding:var(--sp-20) var(--sp-24) var(--sp-14)" data-note="「查看专辑」落到这里：封面 + 专辑级信息 + 该专辑的完整曲目表。表列与曲库完全一致，不另立一套样式。">
+              <div class="cover" style="width:96px;height:96px"><i data-ic="music" data-sz="32"></i></div>
+              <div style="min-width:0">
+                <div style="font-size:var(--fs-20);font-weight:600;letter-spacing:-.01em">潮汐</div>
+                <div style="font-size:var(--fs-13);color:var(--accent-2);margin-top:var(--sp-4)">林间电台</div>
+                <div style="font-size:var(--fs-12);color:var(--ink-3);margin-top:var(--sp-4)">专辑 · 2024 · 8 首 · 38 分钟</div>
+                <div class="tags" style="margin-top:var(--sp-8)"><span class="tag">Ambient</span><span class="tag">Instrumental</span></div>
+              </div>
+              <div style="margin-left:auto;display:flex;gap:var(--sp-6);flex:none">
+                <button class="btn btn-sec btn-xs"><i data-ic="play" data-sz="12" data-fill="1"></i>播放全部</button>
+                <button class="btn btn-sec btn-xs"><i data-ic="list-plus" data-sz="12"></i>加入队列</button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <colgroup>
+                  <col style="width:40px"><col><col style="width:118px"><col style="width:118px"><col style="width:158px"><col style="width:56px"><col style="width:52px">
+                </colgroup>
+                <thead>
+                  <tr><th class="num">#</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th>年份</th><th style="text-align:right">时长</th></tr>
+                </thead>
+                <tbody id="atbl"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== 沉浸模式 ===== -->
     <section class="screen" data-screen="immersive">
       <div class="page">
-        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出）。封面大图 + 完整 ID3 + 歌词；点歌手名回曲库并筛选该歌手。">
+        <div class="imm" data-note="沉浸模式：点播放条的封面或歌名进来（再点退出）。左列封面 + 进度 + 播放控制，右列 ID3 与歌词；点歌手名回曲库并筛选该歌手。">
           <button class="icon-btn imm-close"><i data-ic="x" data-sz="18"></i></button>
-          <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
+          <div class="imm-left" data-note="沉浸模式也带全套播放控制：进度条（悬停样态同播放条）+ 循环 / 上一首 / 播放 / 下一首 / 队列。不放音质、码率这类信息。">
+            <div class="cover imm-cover"><i data-ic="music" data-sz="64"></i></div>
+            <div class="p-line imm-line"><i style="width:36%"></i><em style="left:36%"></em><span class="tip" style="left:36%">1:32 / 4:12</span></div>
+            <div class="imm-time">1:32 / 4:12</div>
+            <div class="imm-ctl">
+              <button class="icon-btn" title="单曲循环"><i data-ic="repeat" data-sz="16"></i></button>
+              <button class="icon-btn" title="上一首"><i data-ic="skip-back" data-sz="18" data-fill="1"></i></button>
+              <button class="btn-play" title="暂停"><i data-ic="pause" data-sz="16" data-fill="1"></i></button>
+              <button class="icon-btn" title="下一首"><i data-ic="skip-forward" data-sz="18" data-fill="1"></i></button>
+              <button class="icon-btn" title="播放队列"><i data-ic="list-music" data-sz="16"></i></button>
+            </div>
+          </div>
           <div class="imm-info">
             <div class="imm-title">夜航</div>
             <div class="imm-artist">林间电台</div>
-            <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12 · FLAC 961 kbps</div>
+            <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12</div>
             <div class="imm-lyrics" data-note="歌词区：NAS 歌词接口在、但曲库里没有歌词文件 —— 无歌词时这块显示空态（图标 + 「暂无歌词」），不留白板。">
               <span>夜航</span>
               <span>灯熄了 路还长</span>
@@ -741,11 +809,12 @@ body.anno [data-note]::before{
                 <div class="crumb" style="padding:var(--sp-4) 0 0"><span>music</span><i data-ic="chevron-right" data-sz="12"></i><span>华语</span><i data-ic="chevron-right" data-sz="12"></i><b>2024</b></div>
               </div>
             </div>
-            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。上传是次要按钮 —— 上传不是这个 app 的主功能。目录大小入口已按反馈去掉。">
+            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。不做「复制 / 粘贴 / 剪切」三件套 —— 改「复制到…」「移动到…」两个入口，各自弹目录选择，省掉剪贴板状态（现在粘到哪、粘没粘过，都不用记）。上传是次要按钮。目录大小入口已去掉。">
               <button class="btn btn-sec btn-xs"><i data-ic="folder-plus" data-sz="12"></i>新建文件夹</button>
               <button class="btn btn-sec btn-xs"><i data-ic="upload" data-sz="12"></i>上传</button>
               <button class="btn btn-sec btn-xs"><i data-ic="download" data-sz="12"></i>下载</button>
-              <button class="btn btn-sec btn-xs"><i data-ic="copy" data-sz="12"></i>复制</button>
+              <button class="btn btn-sec btn-xs"><i data-ic="copy" data-sz="12"></i>复制到…</button>
+              <button class="btn btn-sec btn-xs"><i data-ic="folder-input" data-sz="12"></i>移动到…</button>
               <button class="icon-btn" title="更多操作" style="width:var(--ctl-28);height:var(--ctl-28)"><i data-ic="more-horizontal" data-sz="14" data-fill="1"></i></button>
               <div class="right">
                 <div class="searchbox" style="width:200px">
@@ -770,17 +839,18 @@ body.anno [data-note]::before{
                 <tbody id="files" data-note="列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。行支持右键菜单（图中样态）。"></tbody>
               </table>
             </div>
-            <!-- 文件右键菜单样态 -->
-            <div class="menu" style="bottom:84px;left:430px" data-note="文件右键菜单样态：播放（音频时）/ 下载 / 复制 / 改名 / 删除。">
-              <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
+            <!-- 目录行右键菜单样态（不含播放项） -->
+            <div class="menu" style="top:300px;left:520px" data-note="目录行的右键菜单：打开 / 下载 / 复制到… / 移动到… / 改名 / 删除。音频文件的菜单才多一条「播放」，且点它直接切到听歌模块。">
+              <div class="mi"><i data-ic="folder-open" data-sz="12"></i>打开</div>
               <div class="mi"><i data-ic="download" data-sz="12"></i>下载</div>
-              <div class="mi"><i data-ic="copy" data-sz="12"></i>复制</div>
+              <div class="mi"><i data-ic="copy" data-sz="12"></i>复制到…</div>
+              <div class="mi"><i data-ic="folder-input" data-sz="12"></i>移动到…</div>
               <div class="msep"></div>
               <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
               <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
             </div>
             <div class="statusbar">
-              <span>已选中 1 项 · 12.4 MB</span>
+              <span>已选中 1 项 · 目录</span>
               <div class="right">
                 <span class="pill ok"><i data-ic="check" data-sz="10"></i>可写</span>
                 <span>8 个共享夹</span>
@@ -838,15 +908,19 @@ body.anno [data-note]::before{
                 <div class="v"><button class="btn btn-sec btn-xs"><i data-ic="refresh-cw" data-sz="12"></i>重启…</button></div>
               </div>
             </div>
-            <div class="card list" data-note="计划表由 NAS 侧保存，客户端只做读写；每条 = 星期 + 时间 + 开关，改完一次性写回。">
-              <div style="padding:var(--sp-14) var(--sp-14) var(--sp-6);display:flex;align-items:center;justify-content:space-between">
+            <div class="card list" data-note="计划表由 NAS 侧保存，客户端只做读写；每条 = 星期 + 时间 + 开关，改完一次性写回。条目变多时这张卡会长高，并排两张由 grid 拉到等高（向高的看齐）；卡内的计划列表自己滚，操作脚注贴在卡底。">
+              <div style="padding:var(--sp-14) var(--sp-14) var(--sp-6);display:flex;align-items:center;justify-content:space-between;flex:none">
                 <div class="card-title" style="font-size:var(--fs-13)">开关机计划</div>
                 <button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>添加</button>
               </div>
-              <div class="sched-row"><span class="d">每天</span><span class="t">07:30</span><span class="pill ok">开机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
-              <div class="sched-row"><span class="d">每天</span><span class="t">23:45</span><span class="pill warn">关机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
-              <div class="sched-row"><span class="d">周日</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw"><i></i></span></span></div>
-              <div style="padding:var(--sp-12) var(--sp-14);display:flex;justify-content:flex-end;gap:var(--sp-8);border-top:var(--lw-hairline) solid var(--line)">
+              <div class="sched-list">
+                <div class="sched-row"><span class="d">每天</span><span class="t">07:30</span><span class="pill ok">开机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">每天</span><span class="t">23:45</span><span class="pill warn">关机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">周一</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">周六</span><span class="t">09:00</span><span class="pill ok">开机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">周日</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw"><i></i></span></span></div>
+              </div>
+              <div style="padding:var(--sp-12) var(--sp-14);display:flex;justify-content:flex-end;gap:var(--sp-8);border-top:var(--lw-hairline) solid var(--line);flex:none">
                 <button class="btn btn-sec btn-xs">放弃修改</button>
                 <button class="btn btn-pri btn-xs">保存到 NAS</button>
               </div>
@@ -1044,20 +1118,35 @@ body.anno [data-note]::before{
   <div class="card">
     <div class="card-title">右键菜单与溢出下拉（同一形态）</div>
     <div style="display:flex;gap:var(--sp-24);align-items:flex-start">
-      <div class="menu" style="position:relative">
-        <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
-        <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
-        <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
-        <div class="msep"></div>
-        <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+      <div>
+        <div class="menu" style="position:relative">
+          <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
+          <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
+          <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+          <div class="mi"><i data-ic="disc" data-sz="12"></i>查看专辑</div>
+        </div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">歌曲行</div>
       </div>
-      <div class="menu" style="position:relative">
-        <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
-        <div class="mi"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+      <div>
+        <div class="menu" style="position:relative">
+          <div class="mi"><i data-ic="download" data-sz="12"></i>下载</div>
+          <div class="mi"><i data-ic="copy" data-sz="12"></i>复制到…</div>
+          <div class="mi"><i data-ic="folder-input" data-sz="12"></i>移动到…</div>
+          <div class="msep"></div>
+          <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
+          <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+        </div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">目录行 / 文件行</div>
       </div>
-      <button class="icon-btn" style="margin-top:var(--sp-4)"><i data-ic="more-horizontal" data-sz="16" data-fill="1"></i></button>
+      <div>
+        <div class="menu" style="position:relative">
+          <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
+          <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
+        </div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">工具条「…」</div>
+      </div>
     </div>
-    <div class="b-note">左：列表右键菜单（曲库 / 队列 / 文件通用）；中：文件管理工具条放不下时收进「…」的第二层；右：「…」按钮本体。菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。</div>
+    <div class="b-note">菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。文件操作不做复制 / 粘贴 / 剪切三件套：「复制到…」「移动到…」各弹一次目录选择，省掉剪贴板状态。</div>
   </div>
 
   <div class="card">
@@ -1071,16 +1160,12 @@ body.anno [data-note]::before{
       <span class="pill">23 首</span>
     </div>
     <div class="b-row" style="margin-top:var(--sp-14)">
-      <span class="tags">
-        <span class="tag" style="color:#00bcff">Ambient</span><span class="tag" style="color:#00d492">Instrumental</span>
-      </span>
-      <span class="tags">
-        <span class="tag" style="color:#ff6467">Rock</span><span class="tag" style="color:#51a2ff">Electronic</span>
-      </span>
-      <span class="tag" style="color:#05df72">Folk</span>
-      <span class="tag" style="color:#fdc700">Jazz</span>
+      <span class="tags"><span class="tag">Ambient</span><span class="tag">Instrumental</span></span>
+      <span class="tags"><span class="tag">Rock</span><span class="tag">Electronic</span></span>
+      <span class="tag">Folk</span>
+      <span class="tag">Jazz</span>
     </div>
-    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签用英文原名，多值按「; 」拆成多个胶囊，字取各分类 400 档色。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。</div>
+    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签无彩色 —— 一格常放两个以上，带色会花；用英文原名，多值按「; 」拆成多个胶囊。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。</div>
   </div>
 
   <div class="card">
@@ -1141,7 +1226,7 @@ body.anno [data-note]::before{
       <div class="stat" style="background:var(--panel-2)"><div class="k"><i data-ic="thermometer" data-sz="12"></i>温度</div><div class="v">42<small>°C</small></div><div class="f">正常</div></div>
       <div class="stat" style="background:var(--panel-2)"><div class="k"><i data-ic="activity" data-sz="12"></i>CPU</div><div class="v">12<small>%</small></div><div class="f">4 核</div></div>
     </div>
-    <div class="b-note">牌卡嵌在深一层底上时长宽自适应、两列铺开；数字用 20 档，标签与脚注取 11 档。</div>
+    <div class="b-note">牌卡嵌在深一层底上时长宽自适应、两列铺开；数字用 20 档，标签与脚注取 11 档。并排两张卡片由 grid 拉到等高（向高的那张看齐），卡内长列表自己滚、操作脚注贴卡底 —— 系统状态页的「电源 / 开关机计划」就是这么对齐的。</div>
   </div>
 </section>
 
@@ -1158,6 +1243,9 @@ const ICONS={
   headphones:'<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>',
   folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   'folder-open':'<path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/>',
+  'folder-input':'<path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/>',
+  image:'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  'file-text':'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   'folder-plus':'<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   power:'<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
   gauge:'<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
@@ -1230,15 +1318,26 @@ const QPLAY=[
   [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],'3:29',0]
 ];
 const FOLDERS=[['music','',1],['photo','',0],['video','',0],['homes','',0],['backup','',0],['docker','',0],['downloads','',0],['web','',0]];
+/* [名称, 大小, 修改时间, 权限, 类型] —— 类型只决定图标，列表里没有播放状态列 */
 const FILES=[
-  ['华语','','2026-10-11 22:04','可写',1],
-  ['2024','','2026-09-30 18:12','可写',1],
-  ['夜航.mp3','12.4 MB','2026-10-08 21:33','可写',0],
-  ['潮汐.flac','49.2 MB','2026-10-08 21:30','可写',0],
-  ['cover.jpg','245 KB','2026-09-12 10:02','可写',0],
-  ['playlist.m3u','1.2 KB','2026-09-12 10:02','可写',0],
-  ['notes.txt','840 B','2026-08-21 09:41','可写',0],
-  ['备份','','2026-08-01 14:20','只读',1]
+  ['华语','','2026-10-11 22:04','可写','dir'],
+  ['2024','','2026-09-30 18:12','可写','dir'],
+  ['夜航.mp3','12.4 MB','2026-10-08 21:33','可写','audio'],
+  ['潮汐.flac','49.2 MB','2026-10-08 21:30','可写','audio'],
+  ['cover.jpg','245 KB','2026-09-12 10:02','可写','image'],
+  ['playlist.m3u','1.2 KB','2026-09-12 10:02','可写','list'],
+  ['notes.txt','840 B','2026-08-21 09:41','可写','text'],
+  ['备份','','2026-08-01 14:20','只读','dir']
+];
+const ALBUM=[
+  [1,'潮汐',['Ambient','Instrumental'],'5:03'],
+  [2,'逆风',['Ambient'],'4:56'],
+  [3,'夜航',['Ambient'],'4:12'],
+  [4,'灯塔',['Ambient','Electronic'],'5:28'],
+  [5,'暗涌',['Ambient'],'6:04'],
+  [6,'退潮',['Instrumental'],'3:47'],
+  [7,'潮间带',['Ambient','Instrumental'],'4:31'],
+  [8,'远海',['Ambient'],'4:09']
 ];
 
 /* ---------- 渲染 ---------- */
@@ -1246,9 +1345,8 @@ const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const esc = s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-/* 分类标签色：色板 400 档（v4 原值） */
-const GENRE_COLOR={'Ambient':'#00bcff','Electronic':'#51a2ff','Folk':'#05df72','Rock':'#ff6467','Post-Rock':'#ffa2a2','Jazz':'#fdc700','Instrumental':'#00d492','Pop':'#ffb900'};
-const tagHtml=(g,on)=>`<span class="tag" style="color:${GENRE_COLOR[g]||'var(--ink-2)'}${on?';background:rgba(10,10,10,.28);border-color:transparent':''}">${esc(g)}</span>`;
+/* 流派标签统一无彩色：一格里能放好几个，带色会花 */
+const tagHtml=(g)=>`<span class="tag">${esc(g)}</span>`;
 
 $('#tracks').innerHTML = TRACKS.map((t,i)=>{
   const on = i===0;
@@ -1258,21 +1356,35 @@ $('#tracks').innerHTML = TRACKS.map((t,i)=>{
     `<td class="main-c">${esc(t[1])}</td>`+
     `<td class="${cls('')} a-link">${esc(t[2])}</td>`+
     `<td class="${cls('')}">${esc(t[3])}</td>`+
-    `<td class="${cls('')}"><span class="tags">${t[4].map(g=>tagHtml(g,on)).join('')}</span></td>`+
+    `<td class="${cls('')}"><span class="tags">${t[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${cls('num')}">${t[5]}</td>`+
     `<td class="${cls('num')}" style="text-align:right">${t[6]}</td></tr>`;
 }).join('');
 
-$('#qtbl').innerHTML = QPLAY.map((q,i)=>{
+$('#qtbl').innerHTML = QPLAY.map((q)=>{
   const on = !!q[6];
+  // 正在播放的「#」格放均衡器；td 保持 table-cell，不改成 flex（改了两行底色会接不上）
   const num = on ? '<span class="eq"><i></i><i></i><i></i></span>' : String(q[0]);
   return `<tr${on?' class="on"':''}>`+
-    `<td class="num" style="display:flex;align-items:center;min-height:29px">${num}</td>`+
+    `<td class="num">${num}</td>`+
     `<td class="main-c">${esc(q[1])}</td>`+
     `<td class="${on?'dim':''} a-link">${esc(q[2])}</td>`+
     `<td class="${on?'dim':''}">${esc(q[3])}</td>`+
-    `<td class="${on?'dim':''}"><span class="tags">${q[4].map(g=>tagHtml(g,on)).join('')}</span></td>`+
+    `<td class="${on?'dim':''}"><span class="tags">${q[4].map(tagHtml).join('')}</span></td>`+
     `<td class="${on?'dim':'num'}" style="text-align:right">${q[5]}</td></tr>`;
+}).join('');
+
+$('#atbl').innerHTML = ALBUM.map((a)=>{
+  const on = a[0]===3;
+  const cls = (b)=> on ? `${b} dim` : b;
+  return `<tr${on?' class="on"':''}>`+
+    `<td class="num">${a[0]}</td>`+
+    `<td class="main-c">${esc(a[1])}</td>`+
+    `<td class="${cls('')} a-link">林间电台</td>`+
+    `<td class="${cls('')}">潮汐</td>`+
+    `<td class="${cls('')}"><span class="tags">${a[2].map(tagHtml).join('')}</span></td>`+
+    `<td class="${cls('num')}">2024</td>`+
+    `<td class="${cls('num')}" style="text-align:right">${a[3]}</td></tr>`;
 }).join('');
 
 $('#tree').innerHTML = FOLDERS.map((f,i)=>{
@@ -1284,13 +1396,14 @@ $('#tree').innerHTML = FOLDERS.map((f,i)=>{
  `<div class="tree-row ind drop" data-note="拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。"><i data-ic="folder" data-sz="14"></i>欧美</div>`+
  '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>古典</div>';
 
+/* 图标只按文件类型给，列表里没有任何播放状态 */
+const FILE_ICON={dir:'folder',audio:'music',image:'image',text:'file-text',list:'list-music'};
 $('#files').innerHTML = FILES.map((f,i)=>{
-  const on = i===2;
-  const icon = f[4] ? 'folder' : 'music';
+  const on = i===1;                       // 选中的是目录行，不是音频行
   const perm = f[3]==='可写' ? '<span class="pill ok" style="height:16px">可写</span>' : '<span class="pill" style="height:16px">只读</span>';
   const c = (extra)=> on ? `${extra} dim` : extra;
   return `<tr${on?' class="on"':''}>`+
-    `<td class="main-c"><span style="display:inline-flex;align-items:center;gap:var(--sp-8)"><i data-ic="${icon}" data-sz="14"></i>${esc(f[0])}</span></td>`+
+    `<td class="main-c"><span style="display:inline-flex;align-items:center;gap:var(--sp-8)"><i data-ic="${FILE_ICON[f[4]]}" data-sz="14"></i>${esc(f[0])}</span></td>`+
     `<td class="${c('num')}" style="text-align:right">${esc(f[1])}</td>`+
     `<td class="${c('num')}">${esc(f[2])}</td>`+
     `<td class="${c('')}">${perm}</td></tr>`;
@@ -1304,7 +1417,7 @@ $$('[data-ic]').forEach(el=>{
 });
 
 /* ---------- 页面切换 ---------- */
-const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
+const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['album','专辑视图'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
 $('#tabs').innerHTML = TABS.map(([k,l])=>`<button class="tab" data-tab="${k}">${l}</button>`).join('');
 
 const win = $('#win');
