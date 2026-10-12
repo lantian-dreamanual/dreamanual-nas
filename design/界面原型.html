@@ -12,9 +12,8 @@
     选中行改「浅底 + 主色字」；播放器对齐网易云布局（进度条贴顶拉满、悬浮拉高 + 气泡）；
     曲库表头吸附 + 曲序/年份/多流派标签；播放队列占主区；沉浸模式；歌单与每日随机进内容区侧栏；
     文件管理操作收「…」、去目录大小、拖拽移动、右键菜单；登录页 QC/直连分段互斥。
-  令牌来源：design/tokens.json（0.8.0）逐字抄进下面的 :root，强调色族换成 sky（v4 官方 oklch 经同一
-           OKLab→sRGB 管线换算：400 #00bcff / 500 #00a6f4 / 700 #0069a8 / 800 #00598a / 900 #024a70 /
-           950 #052f4a）；sky 族待落码时补进 tokens.json 并出 dreamanual.nas.css。
+  令牌来源：design/tokens.json 0.9.0（2026-10-12 NAS 已正式接入：sky 族与 4px 圆角档都在共享定义里，
+           生成物 design/dist/css/dreamanual.nas.css）。下面的 :root 仍是逐字抄本，落码时直接换生成物。
   规格来源：design/docs/design-system.md 第七节（尺度）、第八节（组件形态与状态）。
   窗口按 1× 画，1120×700。右侧「标注」勾上会圈出每个可讨论的点，说明列在窗口下方。
 -->
@@ -28,7 +27,6 @@
   /* 强调色：sky（群晖天蓝）。主按钮走深字方案（底亮字深），与投资监控同构：
      950 压 500 = 7.32:1，hover 提到 400 档 = 9.09:1；白字压 500 仅 2.71:1 不可用 */
   --accent:#00a6f4; --accent-2:#00bcff; --accent-soft:#052f4a; --accent-line:#00598a;
-  --accent-hover:#024a70;
   --accent-fill:#00a6f4; --accent-fill-2:#00bcff; --on-accent:#0a0a0a;
   --danger:#fb2c36; --danger-soft:#460809; --danger-line:#9f0712;
   --danger-ink:#ffa2a2; --danger-ink-strong:#ff6467; --danger-hover:#82181a;
@@ -130,7 +128,7 @@ input,select{font:inherit;color:inherit}
 }
 .nav-row:hover{background:var(--panel-3);color:var(--ink)}
 .nav-row.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
-.nav-row.on:hover{background:var(--accent-hover)}
+/* 选中行悬停不变亮：产品线口径里没有「选中 + 悬停」这一态（SelectState 选中盖过悬停），生成器也不出这个变量 */
 .nav-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-variant-numeric:tabular-nums}
 .nav-row.on .cnt{color:var(--accent)}
 .nav-sep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-10) var(--sp-8) var(--sp-8)}
@@ -550,7 +548,7 @@ body.anno [data-note]::before{
 <div class="pvbar">
   <div class="t">
     <b>Dreamanual NAS 助手 · 界面原型</b>
-    <span>令牌对齐 design/tokens.json 0.8.0　窗口 1120×700　强调色 sky（群晖天蓝 · 深字方案）</span>
+    <span>令牌对齐 design/tokens.json 0.9.0（已落 design/dist）　窗口 1120×700　强调色 sky（群晖天蓝 · 深字方案）</span>
   </div>
   <nav class="tabs" id="tabs"></nav>
   <label class="chk"><input type="checkbox" id="annoChk"> 标注</label>
@@ -1613,17 +1611,23 @@ const treeRow=(o,opt={})=>{
   return `<div class="${cls}"${note?` data-note="${note}"`:''}>`+
          `<i data-ic="${ico}" data-sz="14"></i>${esc(o.n)}${tgl}</div>`;
 };
+/* 目录树按名称正序排（正式实现走 FileStation.List 的 sort_by=filename + asc，服务端排好）：
+   顶层共享夹与各层子目录渲染前都排一次，下面 demo 数据的书写顺序不代表展示顺序。
+   当前所在目录按名字匹配高亮，不靠排序后的位置 */
+const CUR_DIR='2024';
+const byName=(a,b)=>String(a).localeCompare(String(b),'zh',{numeric:true});
+const subName=s=>typeof s==='string'?s:s.n;
 $('#tree').innerHTML = (()=>{
   const out=[];
-  FOLDERS.forEach(f=>{
+  [...FOLDERS].sort((a,b)=>byName(a.n,b.n)).forEach(f=>{
     out.push(treeRow(f,{open:!!f.open}));
     if(!f.open||!f.sub) return;
-    f.sub.forEach(s=>{
+    [...f.sub].sort((a,b)=>byName(subName(a),subName(b))).forEach(s=>{
       const so = typeof s==='string' ? {n:s} : s;
       const drop = so.n==='欧美';
       out.push(treeRow(so,{ind:1,open:!!so.open,drop,
         note: drop?'拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。':''}));
-      if(so.open&&so.sub) so.sub.forEach((t,k)=>out.push(treeRow({n:t},{ind:2,on:k===0})));
+      if(so.open&&so.sub) [...so.sub].sort(byName).forEach(t=>out.push(treeRow({n:t},{ind:2,on:t===CUR_DIR})));
     });
     if(f.more) out.push(`<div class="tree-more">还有 ${f.more} 个文件夹 · 到右侧列表看</div>`);
   });

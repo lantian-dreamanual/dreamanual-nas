@@ -25,7 +25,8 @@
 
 - **SwiftUI**，与产品线另四个 app 一致
 - 播放用 **AVPlayer**
-- 设计令牌来自产品线的 `design/tokens.json`，强调色 **amber**
+- 设计令牌来自产品线的 `design/tokens.json`（0.9.0 起正式接入），强调色 **sky**（群晖天蓝，深字方案）；
+  生成物在 `design/dist/css/dreamanual.nas.css` 与 `design/dist/swift/DreamanualTheme.nas.swift`
 
 ## 项目结构
 
