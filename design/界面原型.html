@@ -426,7 +426,6 @@ input,select{font:inherit;color:inherit}
 .sw i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform var(--mo-fast)}
 .sw.on{background:var(--accent-fill)}
 .sw.on i{transform:translateX(18px)}
-.sw.on.light i{background:var(--on-accent)}
 .slider{width:120px;height:4px;border-radius:2px;background:var(--panel-3);position:relative;flex:none}
 .slider i{position:absolute;left:0;top:0;bottom:0;width:70%;border-radius:2px;background:var(--accent)}
 .slider em{position:absolute;top:50%;left:70%;width:14px;height:14px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%)}
@@ -923,10 +922,10 @@ body.anno [data-note]::before{
                 <button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>添加</button>
               </div>
               <div class="sched-list">
-                <div class="sched-row"><span class="d">每天</span><span class="t">07:30</span><span class="pill ok">开机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
-                <div class="sched-row"><span class="d">每天</span><span class="t">23:45</span><span class="pill warn">关机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
-                <div class="sched-row"><span class="d">周一</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
-                <div class="sched-row"><span class="d">周六</span><span class="t">09:00</span><span class="pill ok">开机</span><span class="right"><span class="sw on light"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">每天</span><span class="t">07:30</span><span class="pill ok">开机</span><span class="right"><span class="sw on"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">每天</span><span class="t">23:45</span><span class="pill warn">关机</span><span class="right"><span class="sw on"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">周一</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw on"><i></i></span></span></div>
+                <div class="sched-row"><span class="d">周六</span><span class="t">09:00</span><span class="pill ok">开机</span><span class="right"><span class="sw on"><i></i></span></span></div>
                 <div class="sched-row"><span class="d">周日</span><span class="t">02:00</span><span class="pill warn">关机</span><span class="right"><span class="sw"><i></i></span></span></div>
               </div>
               <div style="padding:var(--sp-12) var(--sp-14);display:flex;justify-content:flex-end;gap:var(--sp-8);border-top:var(--lw-hairline) solid var(--line);flex:none">
@@ -982,7 +981,7 @@ body.anno [data-note]::before{
             </div>
             <div class="srow">
               <div class="k">启动时继续上次播放<small>接着上次的位置与队列</small></div>
-              <div class="v"><span class="sw on light"><i></i></span></div>
+              <div class="v"><span class="sw on"><i></i></span></div>
             </div>
           </div>
 
@@ -1106,7 +1105,7 @@ body.anno [data-note]::before{
       <span class="hint" style="margin-left:var(--sp-4)">互斥切换，登录页专用</span>
     </div>
     <div class="b-row"><span class="b-lab">下拉</span><button class="select">排序：标题<i data-ic="chevrons-up-down" data-sz="12"></i></button><button class="select" style="height:var(--ctl-38);padding:0 var(--sp-12)">全部流派<i data-ic="chevron-down" data-sz="12"></i></button></div>
-    <div class="b-row"><span class="b-lab">开关</span><span class="sw on light"><i></i></span><span class="sw"><i></i></span><span class="slider"><i></i><em></em></span></div>
+    <div class="b-row"><span class="b-lab">开关</span><span class="sw on"><i></i></span><span class="sw"><i></i></span><span class="slider"><i></i><em></em></span></div>
     <div class="b-note">输入框底色按所在层级取相邻一档：主区上取 panel-2，卡片里取 panel-3。聚焦只转描边色（accent-2），底色不动。</div>
   </div>
 
