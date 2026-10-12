@@ -82,8 +82,8 @@ final class AppState {
     }
     var isConnected: Bool { phase == .connected }
     var hasSavedPassword: Bool {
-        guard !username.isEmpty else { return false }
-        return KeychainStore.password(account: KeychainStore.accountKey(endpointID: endpointKey, username: username)) != nil
+        guard !trimmedUsername.isEmpty else { return false }
+        return KeychainStore.password(endpointID: endpointKey, username: trimmedUsername) != nil
     }
 
     func select(_ module: Module) {
@@ -95,8 +95,7 @@ final class AppState {
     /// 启动时自动连一次（钥匙串里真有那条凭据才动）。
     func restoreAndAutoConnect() async {
         guard isConnected == false, phase.isBusy == false, hasSavedPassword else { return }
-        let account = KeychainStore.accountKey(endpointID: endpointKey, username: username)
-        guard let password = KeychainStore.password(account: account) else { return }
+        guard let password = KeychainStore.password(endpointID: endpointKey, username: trimmedUsername) else { return }
         await connect(password: password)
     }
 
@@ -106,6 +105,11 @@ final class AppState {
         phase = .resolving
         endpointLabel = ""
 
+        // 表单里粘进来的值常带首尾空白，账号那一个字符之差就是 Auth 400，
+        // 而错误提示看不出是空白 —— 发出去之前先剪掉。
+        let qc = trimmedQCID
+        let user = trimmedUsername
+
         do {
             let client: SynologyClient
             if let direct = DirectAddress.parse(directAddress) {
@@ -113,8 +117,8 @@ final class AppState {
                 client = SynologyClient(host: direct.host, port: direct.port, allowSelfSigned: true)
                 endpointLabel = "直连 \(direct.host):\(direct.port)"
             } else {
-                guard !qcID.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID，或填一个直连地址") }
-                let endpoint = try await resolver.resolve(id: qcID)
+                guard !qc.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID，或填一个直连地址") }
+                let endpoint = try await resolver.resolve(id: qc)
                 // 中继挂的是真证书，走默认校验。
                 client = SynologyClient(host: endpoint.host, port: endpoint.port, allowSelfSigned: false)
                 let region = endpoint.region.map { " · \($0)" } ?? ""
@@ -122,14 +126,10 @@ final class AppState {
             }
 
             phase = .loggingIn
-            let manager = SessionManager(client: client, account: username, password: password)
+            let manager = SessionManager(client: client, account: user, password: password)
 
             // 会话是否真能用，拿一次心跳说话 —— 登录成功但权限不对是另一回事。
-            await manager.heartbeat()
-            if let failure = await manager.heartbeatFailure {
-                throw QuickConnectError.network(failure)
-            }
-            _ = try await manager.credentials(for: .file)
+            try await manager.probe()
 
             sessionManager = manager
             await manager.startKeepAlive()
@@ -139,7 +139,7 @@ final class AppState {
             // 连上即存：口令只进钥匙串，下次启动自动重连。
             KeychainStore.save(
                 password: password,
-                account: KeychainStore.accountKey(endpointID: endpointKey, username: username)
+                account: KeychainStore.accountKey(endpointID: endpointKey, username: user)
             )
         } catch {
             phase = .failed(error.localizedDescription)
@@ -161,7 +161,17 @@ final class AppState {
     /// 各自记各自的凭据，切换连接方式不会互相覆盖。
     private var endpointKey: String {
         if let direct = DirectAddress.parse(directAddress) { return "direct:\(direct.host):\(direct.port)" }
-        return "qc:\(qcID)"
+        return "qc:\(trimmedQCID)"
+    }
+
+    /// 表单值发出去之前剪掉首尾空白。存储的那份保持原样 —— 一边敲一边被改，
+    /// 光标会跳。
+    private var trimmedQCID: String {
+        qcID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

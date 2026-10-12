@@ -20,7 +20,7 @@ struct ConnectView: View {
                 Text("Dreamanual NAS 助手")
                     .font(.system(size: DmText.t17, weight: .semibold))
                     .foregroundColor(Color.dmInk)
-                Text("仅支持群晖 NAS 管理")
+                Text("仅支持管理群晖 NAS")
                     .font(.system(size: DmText.t12))
                     .foregroundColor(Color.dmInk3)
             }
@@ -29,7 +29,6 @@ struct ConnectView: View {
                 DmSegmented([.quickconnect, .direct], selection: $mode) {
                     $0 == .quickconnect ? "QuickConnect" : "直连地址"
                 }
-                .frame(width: 340)
 
                 switch mode {
                 case .quickconnect:
@@ -37,12 +36,14 @@ struct ConnectView: View {
                         FormLabel("QuickConnect ID")
                         TextField("例如 mynas", text: $state.qcID)
                             .formField()
+                            .onSubmit { submit() }
                     }
                 case .direct:
                     VStack(alignment: .leading, spacing: DmSpace.s6) {
                         FormLabel("直连地址")
                         TextField("主机或主机:端口（局域网 / Tailscale）", text: $state.directAddress)
                             .formField()
+                            .onSubmit { submit() }
                     }
                 }
 
@@ -50,26 +51,27 @@ struct ConnectView: View {
                     FormLabel("账号")
                     TextField("DSM 账号", text: $state.username)
                         .formField()
+                        .onSubmit { submit() }
                 }
 
                 VStack(alignment: .leading, spacing: DmSpace.s6) {
                     FormLabel("口令")
                     SecureField("DSM 密码", text: $password)
                         .formField()
+                        .onSubmit { submit() }
                 }
             }
             .frame(width: 340)
 
             VStack(spacing: DmSpace.s8) {
                 Button {
-                    Task { await state.connect(password: password) }
+                    submit()
                 } label: {
                     Text("连接").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(state.phase.isBusy || password.isEmpty
-                          || (mode == .quickconnect && state.qcID.isEmpty)
-                          || (mode == .direct && DirectAddress.parse(state.directAddress) == nil))
+                .disabled(isSubmitDisabled)
+                .keyboardShortcut(.defaultAction)
 
                 statusLine
             }
@@ -80,13 +82,25 @@ struct ConnectView: View {
         .background(Color.dmBg)
     }
 
+    /// 回车提交：字段上的 `.onSubmit` 管「光标在字段里按回车」，按钮上的
+    /// `.keyboardShortcut(.defaultAction)` 管「焦点不在字段里也认回车」。
+    /// 两处都可能触发，但 `AppState.connect` 开头就把重复调用挡掉了。
+    private func submit() {
+        guard !isSubmitDisabled else { return }
+        Task { await state.connect(password: password) }
+    }
+
+    private var isSubmitDisabled: Bool {
+        state.phase.isBusy || password.isEmpty
+            || (mode == .quickconnect && state.qcID.isEmpty)
+            || (mode == .direct && DirectAddress.parse(state.directAddress) == nil)
+    }
+
     @ViewBuilder
     private var statusLine: some View {
         switch state.phase {
         case .idle:
-            Text("填好上面的信息后连接")
-                .font(.system(size: DmText.t12))
-                .foregroundColor(Color.dmInk3)
+            EmptyView()
         case .resolving, .loggingIn:
             HStack(spacing: DmSpace.s6) {
                 LucideIcon("loader", size: DmIcon.i12)

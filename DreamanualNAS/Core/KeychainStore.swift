@@ -50,6 +50,16 @@ enum KeychainStore {
         return text
     }
 
+    /// 取口令：先查「端点|账号」那条，再退回**裸账号**。
+    ///
+    /// 退回这一步是必须的 —— 用户照上面那句 `security add-generic-password`
+    /// 存进去的条目，`acct` 只有账号名，拼出来的键查不到。少了退回，App 会
+    /// 以为「没存过口令」，让用户把已经存好的口令再敲一遍。
+    static func password(endpointID: String, username: String) -> String? {
+        password(account: accountKey(endpointID: endpointID, username: username))
+            ?? password(account: username)
+    }
+
     @discardableResult
     static func delete(account: String) -> Bool {
         let query: [String: Any] = [

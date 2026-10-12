@@ -98,6 +98,10 @@ actor SessionManager {
                 let credentials = SynologyCredentials(sid: sid, token: (data["synotoken"] as? String) ?? "")
                 sessions[kind] = credentials
                 return credentials
+            } catch let error as SynologyError where !error.worthTryingOtherEndpoint {
+                // 账号口令类的错换端点也一样错 —— 重打一遍只会把失败次数翻倍，
+                // DSM 的自动封锁是照失败次数记的。
+                throw error
             } catch {
                 lastError = error
             }
@@ -127,12 +131,18 @@ actor SessionManager {
     /// 心跳：拿文件会话打一次系统信息。失败不抛 —— 由下一次请求去触发重登。
     func heartbeat() async {
         do {
-            _ = try await call(kind: .file, api: "SYNO.Core.System", version: 1, method: "info")
-            lastHeartbeat = Date()
-            heartbeatFailure = nil
+            try await probe()
         } catch {
             heartbeatFailure = error.localizedDescription
         }
+    }
+
+    /// 同上，但把错抛出来。连接流程要用它判「这个会话真的能用吗」——
+    /// 登录回包里拿到 sid 不等于这个账号有权限，得真调一次。
+    func probe() async throws {
+        _ = try await call(kind: .file, api: "SYNO.Core.System", version: 2, method: "info")
+        lastHeartbeat = Date()
+        heartbeatFailure = nil
     }
 
     func startKeepAlive() {

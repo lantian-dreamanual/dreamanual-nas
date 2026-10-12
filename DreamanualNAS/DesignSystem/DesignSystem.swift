@@ -265,13 +265,22 @@ struct FormLabel: View {
     }
 }
 
-/// 分段控件：容器 `panel-2` 底 + `line-2` 发丝描边 + r8，内边距 2；
-/// 段内按钮高 28 / r6 / 字号 12，选中段实心 `accent-fill` + `on-accent` 字。
-/// 与原型 `.seg` 同一规格（连接页 QC / 直连互斥切换用）。
+/// 分段控件：互斥切换（连接页的 QuickConnect / 直连地址、曲库的浏览维度）。
+///
+/// 形态基准 = 投资监控的 `SegmentedTabs` —— 跨端落点表里这个组件唯一的实装，
+/// 逐项对齐：容器与段同高（控件默认档 28）、容器与段都取 `r-6`（第七节
+/// 「分段 Tab 底」那一档），`panel-2` 底 + `line-2` 1px 描边，**段间不留缝、
+/// 容器不留内边距**，选中段的圆角与容器圆角同心。
+///
+/// 选中态取 `accent-fill` 实心底 + `on-accent` 字：这是**深字方案两端**
+/// （本 app 与投资监控）的口径。第八节四态表那条「选中取下一档
+/// `accent-fill-2`」是给白字方案写的 —— 对白字是「取更深一档」，本方案里
+/// `fill2` 比 `fill` 更亮，方向反了，不套用。
 struct DmSegmented<Item: Hashable>: View {
     let items: [Item]
     let label: (Item) -> String
     @Binding var selection: Item
+    @State private var hovered: Item?
 
     init(_ items: [Item], selection: Binding<Item>, label: @escaping (Item) -> String) {
         self.items = items
@@ -280,7 +289,7 @@ struct DmSegmented<Item: Hashable>: View {
     }
 
     var body: some View {
-        HStack(spacing: DmSpace.s2) {
+        HStack(spacing: 0) {
             ForEach(items, id: \.self) { item in
                 let isSelected = item == selection
                 Button {
@@ -288,26 +297,39 @@ struct DmSegmented<Item: Hashable>: View {
                 } label: {
                     Text(label(item))
                         .font(.system(size: DmText.t12, weight: isSelected ? .medium : .regular))
-                        .foregroundColor(isSelected ? Color.dmOnAccent : Color.dmInk2)
-                        .padding(.horizontal, DmSpace.s12)
-                        .frame(height: DmControl.h28)
+                        .lineLimit(1)
+                        .foregroundColor(
+                            isSelected ? Color.dmOnAccent
+                                       : (hovered == item ? Color.dmInk : Color.dmInk2)
+                        )
+                        .padding(.horizontal, DmSpace.s16)
+                        .frame(maxHeight: .infinity)
                         .background(
                             RoundedRectangle(cornerRadius: DmRadius.r6)
-                                .fill(isSelected ? Color.dmAccentFill : Color.clear)
+                                .fill(Color.dmAccentFill)
+                                .opacity(isSelected ? 1 : 0)
                         )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .onHover { isInside in
+                    if isInside {
+                        hovered = item
+                    } else if hovered == item {
+                        hovered = nil
+                    }
+                }
             }
         }
-        .padding(DmSpace.s2)
+        .frame(height: DmControl.h28)
         .background(
-            RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
+            RoundedRectangle(cornerRadius: DmRadius.r6).fill(Color.dmPanel2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DmRadius.r8)
-                .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+            RoundedRectangle(cornerRadius: DmRadius.r6)
+                .stroke(Color.dmLine2, lineWidth: DmLine.base)
         )
+        .clipShape(RoundedRectangle(cornerRadius: DmRadius.r6))
     }
 }
 

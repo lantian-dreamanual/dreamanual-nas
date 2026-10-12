@@ -19,7 +19,15 @@ struct SynologyError: LocalizedError {
     /// 会话类错误：重登一次再重放通常就好。
     var isSessionInvalid: Bool { [105, 106, 107, 119].contains(code) }
 
+    /// 这个错值不值得换另一个登录端点再试一次。
+    /// 只有「这个端点不认识这个接口」和会话类才有意义；账号口令不对、
+    /// 权限不够、被封锁这些换端点也是同一个答案。
+    var worthTryingOtherEndpoint: Bool {
+        [101, 102, 103, 104, 119].contains(code)
+    }
+
     var errorDescription: String? {
+        if let friendly = Self.friendlyMessage(api: api, code: code) { return friendly }
         let base = "\(api).\(method) 失败（code \(code)）"
         guard !errors.isEmpty else { return base }
         let detail = errors.map { err -> String in
@@ -28,6 +36,27 @@ struct SynologyError: LocalizedError {
             return path.isEmpty ? c : "\(c) @ \(path)"
         }.joined(separator: "，")
         return "\(base)：\(detail)"
+    }
+
+    /// 业务码转人话。**码的语义随 API 变**，所以只翻 `SYNO.API.Auth` 这一组
+    /// —— 同一个 `400` 在 FileStation 是「路径不合法」，翻成「账号或口令不对」
+    /// 就是把用户往错方向指。其余一律保留原始码，码本身是查文档的钥匙。
+    static func friendlyMessage(api: String, code: Int) -> String? {
+        guard api == "SYNO.API.Auth" else { return nil }
+        switch code {
+        case 400: return "账号或口令不对。"
+        case 401: return "这个账号已被停用。"
+        case 402: return "这个账号没有登录权限。"
+        case 403, 406: return "这个账号开了两步验证，需要验证码才能登录，当前版本还不支持。"
+        case 404: return "两步验证码不对。"
+        case 407: return "这台设备的 IP 被 NAS 的自动封锁拦住了，去 DSM 的「控制面板 → 安全性 → 自动封锁」解开。"
+        case 408, 409: return "这个账号的口令已过期，需要先在 DSM 里改。"
+        case 105: return "登录会话权限不够或被顶掉了。"
+        case 106: return "登录会话超时了。"
+        case 107: return "这个账号在别处又登了一次，当前会话被顶掉。"
+        case 119: return "登录会话已失效。"
+        default: return nil
+        }
     }
 }
 

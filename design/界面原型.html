@@ -184,8 +184,8 @@ input,select{font:inherit;color:inherit}
 .field{display:flex;flex-direction:column;gap:var(--sp-6);margin-bottom:var(--sp-14)}
 .field > label{font-size:var(--fs-12);font-weight:500;color:var(--ink-2)}
 .hint{font-size:var(--fs-11);color:var(--ink-3);line-height:1.6}
-.seg{display:inline-flex;align-items:center;gap:2px;height:var(--ctl-32);padding:2px;background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8)}
-.seg button{height:var(--ctl-28);padding:0 var(--sp-12);border-radius:var(--r-6);font-size:var(--fs-12);color:var(--ink-2);transition:var(--mo-fast)}
+.seg{display:inline-flex;align-items:stretch;height:var(--ctl-28);background:var(--panel-2);border:var(--lw-base) solid var(--line-2);border-radius:var(--r-6);overflow:hidden}
+.seg button{height:auto;padding:0 var(--sp-16);border-radius:var(--r-6);font-size:var(--fs-12);color:var(--ink-2);transition:var(--mo-fast)}
 .seg button:hover{color:var(--ink)}
 .seg button.on{background:var(--accent-fill);color:var(--on-accent);font-weight:500}
 .searchbox{position:relative;width:280px}
@@ -520,7 +520,7 @@ input,select{font:inherit;color:inherit}
 .foot-cb .cb .ic{display:none}
 .foot-cb .cb.on{background:var(--accent-fill);border-color:var(--accent-fill)}
 .foot-cb .cb.on .ic{display:grid}
-.demo-seg{position:absolute;left:var(--sp-16);top:var(--sp-16);display:flex;gap:var(--sp-4);padding:var(--sp-4);background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8);box-shadow:var(--shadow-card);z-index:40}
+.demo-seg{position:absolute;left:var(--sp-16);top:var(--sp-16);display:flex;align-items:stretch;padding:0;background:var(--panel-2);border:var(--lw-base) solid var(--line-2);border-radius:var(--r-6);overflow:hidden;box-shadow:var(--shadow-card);z-index:40}
 .demo-seg button{padding:var(--sp-6) var(--sp-10);border-radius:var(--r-6);font-size:var(--fs-11);color:var(--ink-3);transition:var(--mo-fast)}
 .demo-seg button:hover{color:var(--ink)}
 .demo-seg button.on{background:var(--accent-fill);color:var(--on-accent);font-weight:500}
