@@ -243,6 +243,8 @@ input,select{font:inherit;color:inherit}
 .tbl tbody tr{transition:background var(--mo-fast)}
 .tbl tbody tr:hover td{background:var(--panel-2);color:var(--ink)}
 .tbl td.num{color:var(--ink-3);font-size:var(--fs-12);font-variant-numeric:tabular-nums}
+/* 只读：名称右侧一个灰 pencil。可写是常态、不给标志 —— 列表里只标「不能写」这一种异常 */
+.tbl td .ro{display:inline-flex;color:var(--ink-3);margin-left:var(--sp-6)}
 .tbl td.main-c{color:var(--ink);font-weight:500}
 /* 选中行：浅底 + 主色字（用户拍板，2026-10-12）。两档文字都用实心色档：
    主色字 = accent-2（sky-400，压 soft 6.37:1）、次要字 = accent（sky-500，5.13:1）。
@@ -392,6 +394,16 @@ input,select{font:inherit;color:inherit}
 .tree-row .cnt{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3)}
 .tree-row.on .cnt{color:var(--accent)}
 .tree-row.ind{padding-left:var(--sp-20)}
+.tree-row.ind2{padding-left:calc(var(--sp-20) + var(--sp-12))}
+/* 展开/收起箭头贴在行右侧（左图标留给「是什么」，右箭头管「展开什么」）。
+   点箭头只展开/收起，点行本身仍是进入该目录 —— 两件事分开，鼠标不用瞄准文字。 */
+.tree-row .tgl{margin-left:auto;width:18px;height:18px;flex:none;border-radius:var(--r-4);display:grid;place-items:center;color:var(--ink-3);transition:var(--mo-fast)}
+.tree-row .tgl:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.tree-row .tgl .ic{transition:transform var(--mo-fast)}
+.tree-row.open .tgl .ic{transform:rotate(90deg)}
+/* 展开的子层过长时只列前几项，剩下的走这一行 —— music 下就有几千个文件夹 */
+.tree-more{margin-left:var(--sp-20);padding:var(--sp-4) var(--sp-8);font-size:var(--fs-11);color:var(--ink-3);line-height:1.5;cursor:pointer}
+.tree-more:hover{color:var(--ink)}
 /* 拖拽悬停目标行：主色虚线描边 */
 .tree-row.drop{outline:var(--lw-base) dashed var(--accent-2);outline-offset:-1px;background:var(--accent-soft);color:var(--accent-2)}
 
@@ -859,7 +871,7 @@ body.anno [data-note]::before{
     <section class="screen" data-screen="files">
       <div class="page">
         <div class="body" style="overflow:hidden">
-          <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。每行右侧直接写「可写 / 只读」，不写 RW / RO 缩写。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
+          <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。可写是常态、不给标志，只在不可写时标（见列表的名称列）。含子目录的行在右侧给箭头：点箭头展开 / 收起一层，点行本身仍是进入该目录，两件事分开。子层过长时只列前几项，其余收进「还有 N 个」一行 —— music 下就有几千个文件夹。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
             <div class="tree-head">共享文件夹</div>
             <div class="tree-body" id="tree"></div>
           </div>
@@ -895,9 +907,9 @@ body.anno [data-note]::before{
             </div>
             <div class="tbl-wrap">
               <table class="tbl">
-                <colgroup><col style="width:32px"><col><col style="width:110px"><col style="width:150px"><col style="width:90px"><col style="width:32px"></colgroup>
-                <thead><tr><th class="cbc"><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span></th><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th><th class="th-cfg"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr></thead>
-                <tbody id="files" data-note="多选样态：三行已勾选（浅底 + 主色字与单选一致）。首列多选框是主入口，勾表头 = 全选 / 半选表示部分选中；Cmd 点加选、Shift 点范围选、Cmd+A 全选也照旧可用。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。"></tbody>
+                <colgroup><col style="width:32px"><col><col style="width:110px"><col style="width:150px"><col style="width:32px"></colgroup>
+                <thead><tr><th class="cbc"><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span></th><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th class="th-cfg"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr></thead>
+                <tbody id="files" data-note="多选样态：三行已勾选（浅底 + 主色字与单选一致）。首列多选框是主入口，勾表头 = 全选 / 半选表示部分选中；Cmd 点加选、Shift 点范围选、Cmd+A 全选也照旧可用。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。名称右侧那个灰 pencil 是只读标记（图中「备份」），可写不给标志。"></tbody>
               </table>
             </div>
             <!-- 多选右键菜单样态 -->
@@ -911,7 +923,6 @@ body.anno [data-note]::before{
             <div class="statusbar">
               <span>已选中 3 项 · 61.8 MB</span>
               <div class="right">
-                <span class="pill ok"><i data-ic="check" data-sz="10"></i>可写</span>
                 <span>8 个共享夹</span>
               </div>
             </div>
@@ -1268,8 +1279,6 @@ body.anno [data-note]::before{
   <div class="card">
     <div class="card-title">状态徽章与分类标签</div>
     <div class="b-row">
-      <span class="pill ok"><i data-ic="check" data-sz="10"></i>可写</span>
-      <span class="pill"><i data-ic="lock" data-sz="10"></i>只读</span>
       <span class="pill ac"><i data-ic="wifi" data-sz="10"></i>中继</span>
       <span class="pill bad"><i data-ic="circle-x" data-sz="10"></i>上传失败</span>
       <span class="pill warn"><i data-ic="triangle-alert" data-sz="10"></i>重试中</span>
@@ -1281,7 +1290,7 @@ body.anno [data-note]::before{
       <span class="tag">Folk</span>
       <span class="tag">Jazz</span>
     </div>
-    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签无彩色 —— 一格常放两个以上，带色会花；用英文原名，多值按「; 」拆成多个胶囊。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。</div>
+    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签无彩色 —— 一格常放两个以上，带色会花；用英文原名，多值按「; 」拆成多个胶囊。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。<br>目录读写不用徽章表达：可写是常态、不给标志，只在不可写时于名称右侧给一个灰 pencil（见文件管理页的「备份」）。</div>
   </div>
 
   <div class="card">
@@ -1508,7 +1517,21 @@ const QPLAY=[
   [6,'午后的阳台','月台少年','十一月',['Jazz','Pop'],'4:35',0,0],
   [7,'旧胶片','南方小城','夏日信件',['Folk','Pop'],'3:29',0,4]
 ];
-const FOLDERS=[['music','',1],['photo','',0],['video','',0],['homes','',0],['backup','',0],['docker','',0],['downloads','',0],['web','',0]];
+/* 共享夹（实测 8 个，全部可写 —— 所以这里看不到只读标志）。
+   open = 当前展开的层；sub = 展开后列出的子目录；more = 收起来没列的剩余数量。
+   music 下几千个文件夹是常态，子层只列前几项、其余走「还有 N 个」一行 → 位置在右侧列表里。 */
+const FOLDERS=[
+  {n:'music',open:true,more:'2,381',sub:[
+    {n:'华语',open:true,sub:['2024','2023']},
+    {n:'欧美'},{n:'古典'},{n:'日语'},{n:'纯音乐'},{n:'原声'}]},
+  {n:'photo',sub:['2024','2025','手机相册','截图']},
+  {n:'video',sub:['电影','剧集','纪录片','教程']},
+  {n:'homes',sub:['wuyifa001']},
+  {n:'backup',sub:['Hyper Backup']},
+  {n:'docker',sub:['project','nginx']},
+  {n:'downloads',sub:['剧集','音乐','临时']},
+  {n:'web',sub:['blog','static']}
+];
 /* [名称, 大小, 修改时间, 权限, 类型] —— 类型只决定图标，列表里没有播放状态列 */
 const FILES=[
   ['华语','','2026-10-11 22:04','可写','dir'],
@@ -1578,28 +1601,48 @@ $('#ftbl').innerHTML = TRACKS.filter(t=>t[2]==='林间电台').map((t,i)=>{
     rateCell(t[7]||0)+`</tr>`;
 }).join('');
 
-$('#tree').innerHTML = FOLDERS.map((f,i)=>{
-  const on = i===0;
-  return `<div class="tree-row${on?' on':''}"><i data-ic="folder" data-sz="14"></i>${esc(f[0])}`+
-         (f[2]?'<span class="pill ok" style="height:16px;margin-left:auto">可写</span>':'')+'</div>';
-}).join('') +
- '<div class="tree-row ind"><i data-ic="folder-open" data-sz="14"></i>华语</div>'+
- `<div class="tree-row ind drop" data-note="拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。"><i data-ic="folder" data-sz="14"></i>欧美</div>`+
- '<div class="tree-row ind"><i data-ic="folder" data-sz="14"></i>古典</div>';
+/* 目录树：右箭头管展开/收起（含子目录的行才有），行本身仍是进入该目录 */
+const treeRow=(o,opt={})=>{
+  const {on=false,open=false,ind=0,drop=false,note=''} = opt;
+  const leaf = !o.sub;
+  const cls=['tree-row',ind===1?'ind':'',ind===2?'ind2':'',
+             on?'on':'',open?'open':'',drop?'drop':''].filter(Boolean).join(' ');
+  const ico = leaf ? 'file' : (open?'folder-open':'folder');
+  const tgl = leaf ? '' :
+    `<span class="tgl" title="${open?'收起':'展开'}"><i data-ic="chevron-right" data-sz="12"></i></span>`;
+  return `<div class="${cls}"${note?` data-note="${note}"`:''}>`+
+         `<i data-ic="${ico}" data-sz="14"></i>${esc(o.n)}${tgl}</div>`;
+};
+$('#tree').innerHTML = (()=>{
+  const out=[];
+  FOLDERS.forEach(f=>{
+    out.push(treeRow(f,{open:!!f.open}));
+    if(!f.open||!f.sub) return;
+    f.sub.forEach(s=>{
+      const so = typeof s==='string' ? {n:s} : s;
+      const drop = so.n==='欧美';
+      out.push(treeRow(so,{ind:1,open:!!so.open,drop,
+        note: drop?'拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。':''}));
+      if(so.open&&so.sub) so.sub.forEach((t,k)=>out.push(treeRow({n:t},{ind:2,on:k===0})));
+    });
+    if(f.more) out.push(`<div class="tree-more">还有 ${f.more} 个文件夹 · 到右侧列表看</div>`);
+  });
+  return out.join('');
+})();
 
 /* 图标只按文件类型给，列表里没有任何播放状态；多选：首列多选框 / Cmd 加选 / Shift 范围选 */
 const FILE_ICON={dir:'folder',audio:'music',image:'image',text:'file-text',list:'list-music'};
 const SEL=new Set([2,3,4]);
 $('#files').innerHTML = FILES.map((f,i)=>{
   const on = SEL.has(i);
-  const perm = f[3]==='可写' ? '<span class="pill ok" style="height:16px">可写</span>' : '<span class="pill" style="height:16px">只读</span>';
+  // 只读才标：名称右侧一个灰 pencil。可写是常态、不给标志 —— 列表里只标「不能写」这一种异常
+  const ro = f[3]==='只读' ? '<span class="ro" title="不可写"><i data-ic="pencil" data-sz="12"></i></span>' : '';
   const c = (extra)=> on ? `${extra} dim` : extra;
   const cb = `<td class="cbc"><span class="cb${on?' on':''}">${on?'<i data-ic="check" data-sz="10"></i>':''}</span></td>`;
   return `<tr${on?' class="on"':''}>`+ cb +
-    `<td class="main-c"><span style="display:inline-flex;align-items:center;gap:var(--sp-8)"><i data-ic="${FILE_ICON[f[4]]}" data-sz="14"></i>${esc(f[0])}</span></td>`+
+    `<td class="main-c"><span style="display:inline-flex;align-items:center;gap:var(--sp-8)"><i data-ic="${FILE_ICON[f[4]]}" data-sz="14"></i>${esc(f[0])}${ro}</span></td>`+
     `<td class="${c('num')}" style="text-align:right">${esc(f[1])}</td>`+
-    `<td class="${c('num')}">${esc(f[2])}</td>`+
-    `<td class="${c('')}">${perm}</td></tr>`;
+    `<td class="${c('num')}">${esc(f[2])}</td></tr>`;
 }).join('');
 
 /* ---------- 图标注入 ---------- */
