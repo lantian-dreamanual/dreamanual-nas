@@ -2,9 +2,10 @@
 
 连接群晖（Synology）NAS 的 macOS 桌面客户端。以听自己的曲库为主轴，兼顾文件管理与开关机。
 
-> **当前状态：设计阶段。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
-> 功能范围已定（见 [产品定义](docs/产品定义.md)），整体界面出了 HTML 原型（[界面原型](design/界面原型.html)），
-> 代码尚未开始。
+> **当前状态：源码骨架已起（2026-10-12）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
+> 功能范围已定（见 [产品定义](docs/产品定义.md)），整体界面出了 HTML 原型（[界面原型](design/界面原型.html)）。
+> 地基已通：QuickConnect 端点解析、双会话（FileStation + AudioStation）、钥匙串口令、保活重登、
+> 外壳（侧栏 + 主区 + 底部播放条）。曲库 / 文件 / 系统状态三个模块还没接数据。
 
 ## 功能
 
@@ -32,16 +33,36 @@
 
 ```
 nas/
+├── DreamanualNAS/           源码（SwiftUI，macOS 14+）
+│   ├── DreamanualNASApp.swift   入口：固定深色 + 窗口
+│   ├── DesignSystem/
+│   │   ├── DreamanualTheme.nas.swift   生成物副本（勿手改，门禁对账 design/dist）
+│   │   └── DesignSystem.swift          组件层：选中态（浅底形态）/ 按钮 / 输入框 / LucideIcon
+│   ├── Core/
+│   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
+│   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码
+│   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
+│   │   ├── KeychainStore.swift    口令只进系统钥匙串
+│   │   └── AppState.swift         连接状态机 + 模块切换
+│   └── Features/
+│       ├── ConnectView.swift      连接页
+│       ├── RootView.swift         外壳（侧栏 + 主区）
+│       └── PlayerBarView.swift    底部常驻播放条（空态）
+├── scripts/
+│   ├── check-tokens.mjs    令牌门禁（生成物一致 + 引用完整）
+│   └── build-app.sh        编译 → 组装 .app → 签名
 ├── design/
 │   └── 界面原型.html    整体界面与功能位置（浏览器直接打开，含组件板与标注）
 ├── docs/
 │   ├── 产品定义.md      做什么、不做什么、界面结构
 │   └── 接口结论.md      接口怎么调、踩过的坑（脱敏版）
+├── project.yml          XcodeGen 工程定义
 ├── LICENSE
 └── README.md
 ```
 
-源码目录在落代码时建。
+编译：`./scripts/build-app.sh`（或 `--install` 装进 /Applications）。门禁：`node scripts/check-tokens.mjs`；
+产品线级 `node design/scripts/check-cross-end.mjs`（固定深色一项已扫 NAS）。
 
 ## 文档
 
