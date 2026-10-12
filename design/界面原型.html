@@ -265,6 +265,8 @@ input,select{font:inherit;color:inherit}
 .cb.on,.cb.ind{background:var(--accent-fill);border-color:transparent}
 .cb.hov{border-color:var(--ink-2)}
 .cb.dis{border-color:var(--line);background:var(--panel);color:var(--ink-3)}
+/* 勾选但不可改（如表格字段里的主键列） */
+.cb.dis.on{background:var(--line-2);border-color:transparent;color:var(--ink-3)}
 /* 评分（星级）：5 颗 10px 星。空星中性描边、实心星主色。未评分的行整格留空，悬停该行才出空星 */
 .rate{display:inline-flex;gap:2px;align-items:center;color:var(--ink-3)}
 .rate .ic.f{color:var(--accent-2);fill:currentColor}
@@ -417,6 +419,11 @@ input,select{font:inherit;color:inherit}
 .menu .mi.danger .ic{color:var(--danger-ink)}
 .menu .mi.danger:hover{background:var(--danger-soft)}
 .menu .msep{height:var(--lw-hairline);background:var(--line-2);margin:var(--sp-4) var(--sp-6)}
+/* 表格字段配置：表头最右的竖三点，下拉里逐字段勾选（多选框贴右，与设置页的右侧状态控件同侧） */
+.tbl th.th-cfg{padding:0 var(--sp-6) 0 0;text-align:right}
+.tbl th.th-cfg .icon-btn{width:22px;height:22px}
+.menu .fg-title{padding:var(--sp-4) var(--sp-8) var(--sp-6);font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
+.menu .mi .cb{margin-left:auto}
 
 /* 系统状态 */
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-12)}
@@ -663,16 +670,30 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl" data-note="表头吸附：列表滚多长表头都钉在顶上。列序：标题（内嵌封面缩略图）/ 艺术家 / 专辑 / 流派 / 年份 / 时长 / 曲序 / 评分 —— 曲序是 ID3 原值，放最后，不跟行首位置混淆。流派按「; 」拆多标签、用英文原名。评分放最右：左边是「库的信息」，右边是「我的标记」，一条线分开；未评分的行整格留空（不铺一列空星），鼠标悬停该行才浮出可点的空星，已评分的常显实心星。点第 n 颗 = n 星；已是 1 星再点第 1 颗 = 清除。数据即 Audio Station 的评分字段（setrating 0–5），消费入口是智能播放列表（评分 ≥ 4 星），会像普通歌单一样出现在「我的歌单」里。">
                 <colgroup>
-                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px">
+                  <col><col style="width:96px"><col style="width:96px"><col style="width:124px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px"><col style="width:32px">
                 </colgroup>
                 <thead data-note="表头两个动作：① 点表头切换正序 / 倒序（同访达），当前列亮箭头；② 拖动表头改列序（拖动样态见组件板）。列序与列宽按用户偏好持久化。">
-                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th></tr>
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th><th class="th-cfg" data-note="表头最右的竖三点 = 表格字段配置：勾选显示哪些列（标题是主键，不可隐藏 → 用禁用态多选框），列序仍在表头拖动。字段显示与列序、列宽一起按用户偏好持久化。"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr>
                 </thead>
                 <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 评分 / 定位文件位置，样态见组件板）。评分用星不用红心 —— Audio Station 没有红心，评分是它的一等字段，跨端一致。播放范围：双击 = 当前列表整体成为队列、从这首起播；想只听一首，清空队列再对它「下一首播放」（不设「只播这一首」菜单项）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
               </table>
               <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
                 <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
               </div>
+            </div>
+            <!-- 字段配置下拉（表头最右竖三点，画出来不做交互） -->
+            <div class="menu" style="top:151px;right:11px;width:196px">
+              <div class="fg-title">显示的字段</div>
+              <div class="mi">标题<span class="cb dis on" title="主键列，不可隐藏"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">艺术家<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">专辑<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">流派<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">年份<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">时长<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">曲序<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">评分<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="msep"></div>
+              <div class="mi"><i data-ic="rotate-ccw" data-sz="12"></i>恢复默认字段</div>
             </div>
           </div>
         </div>
@@ -712,10 +733,10 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl" data-note="播放队列占主区：点播放条的队列按钮进来，主区从曲库直接切过来。列表结构与曲库一致（封面 / 流派等信息都在）。首列是播放顺序（不是 ID3 曲序，所以留在最前），正在播放行 = 浅底 + 主色字 + 均衡器。表头不参与排序 —— 这里的顺序就是播放顺序。">
                 <colgroup>
-                  <col style="width:36px"><col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:48px"><col style="width:68px">
+                  <col style="width:36px"><col><col style="width:96px"><col style="width:96px"><col style="width:124px"><col style="width:48px"><col style="width:68px"><col style="width:32px">
                 </colgroup>
                 <thead>
-                  <tr><th class="num">顺序</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th><th style="text-align:right">评分</th></tr>
+                  <tr><th class="num">顺序</th><th>标题</th><th>艺术家</th><th>专辑</th><th>流派</th><th style="text-align:right">时长</th><th style="text-align:right">评分</th><th class="th-cfg" data-note="表头最右的竖三点 = 表格字段配置：勾选显示哪些列（标题是主键，不可隐藏 → 用禁用态多选框），列序仍在表头拖动。字段显示与列序、列宽一起按用户偏好持久化。"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr>
                 </thead>
                 <tbody id="qtbl"></tbody>
               </table>
@@ -781,10 +802,10 @@ body.anno [data-note]::before{
             <div class="tbl-wrap">
               <table class="tbl">
                 <colgroup>
-                  <col><col style="width:104px"><col style="width:104px"><col style="width:140px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px">
+                  <col><col style="width:96px"><col style="width:96px"><col style="width:124px"><col style="width:56px"><col style="width:48px"><col style="width:48px"><col style="width:68px"><col style="width:32px">
                 </colgroup>
                 <thead>
-                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th></tr>
+                  <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th><th class="sortable" style="text-align:right">评分</th><th class="th-cfg" data-note="表头最右的竖三点 = 表格字段配置：勾选显示哪些列（标题是主键，不可隐藏 → 用禁用态多选框），列序仍在表头拖动。字段显示与列序、列宽一起按用户偏好持久化。"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr>
                 </thead>
                 <tbody id="ftbl"></tbody>
               </table>
@@ -859,8 +880,8 @@ body.anno [data-note]::before{
             </div>
             <div class="tbl-wrap">
               <table class="tbl">
-                <colgroup><col style="width:32px"><col><col style="width:110px"><col style="width:150px"><col style="width:90px"></colgroup>
-                <thead><tr><th class="cbc"><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span></th><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th></tr></thead>
+                <colgroup><col style="width:32px"><col><col style="width:110px"><col style="width:150px"><col style="width:90px"><col style="width:32px"></colgroup>
+                <thead><tr><th class="cbc"><span class="cb ind"><i data-ic="minus" data-sz="10"></i></span></th><th>名称</th><th style="text-align:right">大小</th><th>修改时间</th><th>权限</th><th class="th-cfg"> <button class="icon-btn" title="配置字段"><i data-ic="more-vertical" data-sz="14"></i></button></th></tr></thead>
                 <tbody id="files" data-note="多选样态：三行已勾选（浅底 + 主色字与单选一致）。首列多选框是主入口，勾表头 = 全选 / 半选表示部分选中；Cmd 点加选、Shift 点范围选、Cmd+A 全选也照旧可用。列表不放播放状态 —— 双击音频文件直接切到听歌模块播放。右键落在选中集合上，菜单项带数量（图中样态）。"></tbody>
               </table>
             </div>
@@ -1177,6 +1198,7 @@ body.anno [data-note]::before{
           <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
           <div class="mi"><i data-ic="list-start" data-sz="12"></i>下一首播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
+          <div class="mi"><i data-ic="star" data-sz="12"></i>评分<span class="rate"><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10" class="f"></i><i data-ic="star" data-sz="10"></i><i data-ic="star" data-sz="10"></i></span></div>
           <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
         </div>
         <div class="b-lab" style="margin-top:var(--sp-8);width:auto">歌曲行</div>
@@ -1201,6 +1223,31 @@ body.anno [data-note]::before{
       </div>
     </div>
     <div class="b-note">菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。文件操作不做复制 / 粘贴 / 剪切三件套：「复制到…」「移动到…」各弹一次目录选择，省掉剪贴板状态。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">表格字段配置（表头最右竖三点的下拉）</div>
+    <div style="display:flex;gap:var(--sp-24);align-items:flex-start">
+      <div>
+        <div class="menu" style="position:relative;width:196px">
+          <div class="fg-title">显示的字段</div>
+          <div class="mi">标题<span class="cb dis on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">艺术家<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">专辑<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">流派<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">年份<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">时长<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="mi">曲序<span class="cb"></span></div>
+          <div class="mi">评分<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
+          <div class="msep"></div>
+          <div class="mi"><i data-ic="rotate-ccw" data-sz="12"></i>恢复默认字段</div>
+        </div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">「曲序」未勾选 = 该列隐藏</div>
+      </div>
+      <div style="max-width:280px">
+        <div class="b-note" style="margin:0">勾选即显示，改完立即生效，不用「确定」。标题是主键、不可隐藏 —— 用勾选 + 禁用的多选框表达（`.cb.dis.on`）。列序不在这里改：表头直接拖动（见「表头：排序与拖动改列序」卡）。字段显示、列序、列宽三样一起按用户偏好持久化。<br>配置项贴右、与设置页的状态控件同侧；一张表一个配置，曲库 / 队列 / 已筛选 / 文件管理各自记各自的。</div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -1387,6 +1434,8 @@ const ICONS={
   'chevron-down':'<path d="m6 9 6 6 6-6"/>',
   'chevrons-up-down':'<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
   'more-horizontal':'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  'more-vertical':'<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>',
+  'rotate-ccw':'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   thermometer:'<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>',
   activity:'<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
   clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
