@@ -482,6 +482,19 @@ input,select{font:inherit;color:inherit}
 .modal-head h2{font-size:var(--fs-15);font-weight:600}
 .modal-body{padding:var(--sp-20) var(--sp-20) var(--sp-6);overflow-y:auto}
 .modal-foot{padding:var(--sp-14) var(--sp-20) var(--sp-16);border-top:var(--lw-hairline) solid var(--line);display:flex;justify-content:flex-end;gap:var(--sp-8)}
+/* 选目标弹窗（移动/复制共用）：搜索框 + 目标路径 + 树形列表 */
+.mv-search{position:relative;margin-bottom:var(--sp-12)}
+.mv-search .ic{position:absolute;left:var(--sp-12);top:50%;transform:translateY(-50%);color:var(--ink-3)}
+.mv-search .inp{padding-left:34px;height:var(--ctl-32)}
+.mv-path{display:flex;align-items:center;gap:var(--sp-8);margin-bottom:var(--sp-8);font-size:var(--fs-12);color:var(--ink-3)}
+.mv-path b{color:var(--ink);font-weight:500}
+.mv-list{max-height:288px;overflow-y:auto;border:var(--lw-hairline) solid var(--line);border-radius:var(--r-8);padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-2);margin-bottom:var(--sp-6)}
+.mv-hit{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);transition:var(--mo-fast)}
+.mv-hit:hover{background:var(--panel-2);color:var(--ink)}
+.mv-hit.on{background:var(--accent-soft);color:var(--accent-2);font-weight:500}
+.mv-hit.on .ic{color:var(--accent-2)}
+.mv-hit .pth{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-weight:400}
+.mv-hit .ic{color:var(--ink-3);flex:none}
 
 /* 沉浸模式 */
 .imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative;overflow:hidden}
@@ -1106,6 +1119,54 @@ body.anno [data-note]::before{
         </div>
       </div>
     </div>
+
+    <!-- ===== 弹窗 · 移动/复制到（叠在文件管理页上） ===== -->
+    <div class="mask hidden" data-screen="move" data-note="移动与复制共用这一个选目标弹窗，只有标题与确认按钮换字（移动到…/复制到…）。470 标准三段。核心是顶部搜索框 —— music 下两千多个兄弟文件夹，靠滚动翻找不现实。">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>移动到…</h2>
+          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="mv-search" data-note="输入即筛选：浏览树切换为平铺结果，每行带相对共享夹的完整路径。数据两路：已加载层级客户端过滤兜底；全库搜走 FileStation.Search（filetype=folder，假空要重试，见硬约束）。回车 = 选中第一个结果。">
+            <i data-ic="search" data-sz="14"></i>
+            <input class="inp" id="mvQ" placeholder="搜索目标文件夹名，如「2024」" spellcheck="false">
+          </div>
+          <div class="mv-path" data-note="目标路径随选中实时显示。默认定位到当前所在目录（此处来源是 music › 华语 › 2024）；「最近使用目标」是后续增强，v1 不做。">
+            <span>目标</span><b id="mvPath">music › 华语 › 纯音乐</b>
+          </div>
+          <div class="mv-list" id="mvBrowse" data-note="树逐级懒加载：展开才拉子层（FileStation.List，sort_by=filename + asc，服务端排序）。选目标必须看到全部层级名，所以整层滚动展示、不设「还有 N 个」截断 —— 这与资料库树（浏览用，截断 + 指向右侧列表）是两个场景两种取舍。">
+            <div class="tree-row mv-pick" data-p="backup"><i data-ic="folder" data-sz="14"></i>backup<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="docker"><i data-ic="folder" data-sz="14"></i>docker<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="downloads"><i data-ic="folder" data-sz="14"></i>downloads<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="homes"><i data-ic="folder" data-sz="14"></i>homes<span class="tgl"></span></div>
+            <div class="tree-row open" data-p="music"><i data-ic="folder-open" data-sz="14"></i>music<span class="tgl"><i data-ic="chevron-right" data-sz="12"></i></span></div>
+            <div class="tree-row ind on mv-pick" data-p="music › 华语 › 纯音乐"><i data-ic="folder-open" data-sz="14"></i>纯音乐<span class="tgl"></span></div>
+            <div class="tree-row ind mv-pick" data-p="music › 古典"><i data-ic="folder" data-sz="14"></i>古典<span class="tgl"></span></div>
+            <div class="tree-row ind open" data-p="music › 华语"><i data-ic="folder-open" data-sz="14"></i>华语<span class="tgl"><i data-ic="chevron-right" data-sz="12"></i></span></div>
+            <div class="tree-row ind2 mv-pick" data-p="music › 华语 › 2023"><i data-ic="folder" data-sz="14"></i>2023<span class="tgl"></span></div>
+            <div class="tree-row ind2 mv-pick" data-p="music › 华语 › 2024"><i data-ic="folder" data-sz="14"></i>2024<span class="tgl"></span></div>
+            <div class="tree-row ind mv-pick" data-p="music › 欧美"><i data-ic="folder" data-sz="14"></i>欧美<span class="tgl"></span></div>
+            <div class="tree-row ind mv-pick" data-p="music › 日语"><i data-ic="folder" data-sz="14"></i>日语<span class="tgl"></span></div>
+            <div class="tree-row ind mv-pick" data-p="music › 原声"><i data-ic="folder" data-sz="14"></i>原声<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="photo"><i data-ic="folder" data-sz="14"></i>photo<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="video"><i data-ic="folder" data-sz="14"></i>video<span class="tgl"></span></div>
+            <div class="tree-row mv-pick" data-p="web"><i data-ic="folder" data-sz="14"></i>web<span class="tgl"></span></div>
+          </div>
+          <div class="mv-list hidden" id="mvFilter" data-note="筛选态：全库匹配的文件夹平铺，路径放在行右。演示输入的是「202」。">
+            <div class="mv-hit mv-pick" data-p="music › 华语 › 2024"><i data-ic="folder" data-sz="14"></i>2024<span class="pth">music › 华语</span></div>
+            <div class="mv-hit mv-pick" data-p="music › 华语 › 2023"><i data-ic="folder" data-sz="14"></i>2023<span class="pth">music › 华语</span></div>
+            <div class="mv-hit mv-pick" data-p="photo › 2025"><i data-ic="folder" data-sz="14"></i>2025<span class="pth">photo</span></div>
+            <div class="mv-hit mv-pick" data-p="photo › 2024"><i data-ic="folder" data-sz="14"></i>2024<span class="pth">photo</span></div>
+          </div>
+        </div>
+        <div class="modal-foot" data-note="确认后 CopyMove.start 走异步任务，弹窗即关，成败都靠任务轮询 + Toast 报（对不存在的源也回 success，只看它会失败报成成功）。目标 = 来源、或目标是来源的子目录时确认按钮禁用 —— 把文件夹移进自己，界面先拦、服务端也要兜底。">
+          <button class="btn btn-sec" style="margin-right:auto"><i data-ic="folder-plus" data-sz="14"></i>新建文件夹</button>
+          <button class="btn btn-sec">取消</button>
+          <button class="btn btn-pri">移动到此处</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- 播放条（通栏，网易云布局） -->
@@ -1629,7 +1690,7 @@ $('#tree').innerHTML = (()=>{
         note: drop?'拖拽目标行样态：从列表拖着文件或文件夹悬停到树上，目标行亮主色虚线描边；松手 = 移动（CopyMove.start + 任务轮询）。':''}));
       if(so.open&&so.sub) [...so.sub].sort(byName).forEach(t=>out.push(treeRow({n:t},{ind:2,on:t===CUR_DIR})));
     });
-    if(f.more) out.push(`<div class="tree-more">还有 ${f.more} 个文件夹 · 到右侧列表看</div>`);
+    if(f.more) out.push(`<div class="tree-more" data-note="浏览树的取舍：子层只列前几项、其余汇总成一行指回右侧列表。真正「从几千个文件夹里找目标」靠选目标弹窗的搜索（见「弹窗 · 移动/复制」屏）—— 那里输入即筛选、整层滚动不截断，两个场景两种取舍。">还有 ${f.more} 个文件夹 · 到右侧列表看</div>`);
   });
   return out.join('');
 })();
@@ -1658,7 +1719,7 @@ $$('[data-ic]').forEach(el=>{
 });
 
 /* ---------- 页面切换 ---------- */
-const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['filtered','曲库 · 已筛选'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['board','组件与状态']];
+const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['filtered','曲库 · 已筛选'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['move','弹窗 · 移动/复制'],['board','组件与状态']];
 $('#tabs').innerHTML = TABS.map(([k,l])=>`<button class="tab" data-tab="${k}">${l}</button>`).join('');
 
 const win = $('#win');
@@ -1669,16 +1730,29 @@ function setScreen(name){
   win.classList.toggle('hidden', isBoard);
   $$('.notes')[0].classList.toggle('hidden', isBoard);
   if(isBoard){ return; }
-  const mode = (name==='modal') ? 'music' : name;
+  const mode = (name==='modal') ? 'music' : (name==='move') ? 'files' : name;
   win.dataset.mode = mode;
   $$('.screen').forEach(s=>s.classList.toggle('on', s.dataset.screen===mode));
   $$('[data-screen="modal"]').forEach(m=>m.classList.toggle('hidden', name!=='modal'));
+  $$('[data-screen="move"]').forEach(m=>m.classList.toggle('hidden', name!=='move'));
   $$('[data-toast-live]').forEach(t=>t.classList.toggle('hidden', name!=='modal'));
   $$('.nav-row[data-go]').forEach(r=>r.classList.toggle('on', r.dataset.go===mode));
   renderLegend(mode, name);
 }
 $$('.tab').forEach(t=>t.onclick=()=>setScreen(t.dataset.tab));
 $$('.nav-row[data-go]').forEach(r=>r.onclick=()=>setScreen(r.dataset.go));
+
+/* ---------- 选目标弹窗（移动/复制）：搜索即筛选 + 选中联动目标路径 ---------- */
+$('#mvQ')?.addEventListener('input',e=>{
+  const q=e.target.value.trim();
+  $('#mvBrowse').classList.toggle('hidden',!!q);
+  $('#mvFilter').classList.toggle('hidden',!q);
+});
+$$('.mv-pick').forEach(r=>r.onclick=()=>{
+  $$('.mv-pick.on').forEach(x=>x.classList.remove('on'));
+  r.classList.add('on');
+  const p=$('#mvPath'); if(p&&r.dataset.p) p.textContent=r.dataset.p;
+});
 
 /* ---------- 标注 ---------- */
 const noted = $$('[data-note]');
