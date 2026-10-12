@@ -267,10 +267,12 @@ struct FormLabel: View {
 
 /// 分段控件：互斥切换（连接页的 QuickConnect / 直连地址、曲库的浏览维度）。
 ///
-/// 形态基准 = 投资监控的 `SegmentedTabs` —— 跨端落点表里这个组件唯一的实装，
-/// 逐项对齐：容器与段同高（控件默认档 28）、容器与段都取 `r-6`（第七节
-/// 「分段 Tab 底」那一档），`panel-2` 底 + `line-2` 1px 描边，**段间不留缝、
-/// 容器不留内边距**，选中段的圆角与容器圆角同心。
+/// 形态基准 = **内边距形态**（2026-10-12 用户拍板转正，见 design-system.md
+/// 第八节「分段控件」）：容器 `panel-2` 底 + `line-2` 发丝描边 + `r-8`（控件档）
+/// + 内边距 2；段高钉控件档 28、圆角 `r-6`、段间距 2，选中段实心 `accent-fill`
+/// + `on-accent` 字。实心块四周透气、圆角读得更清楚，取代投资监控 2026-10-09
+/// 的无缝形态（那版是为了治「纵向 padding 撑高随字体漂」，把段高钉档保留了，
+/// 钉的对象从容器改成段）。
 ///
 /// 选中态取 `accent-fill` 实心底 + `on-accent` 字：这是**深字方案两端**
 /// （本 app 与投资监控）的口径。第八节四态表那条「选中取下一档
@@ -289,7 +291,7 @@ struct DmSegmented<Item: Hashable>: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DmSpace.s2) {
             ForEach(items, id: \.self) { item in
                 let isSelected = item == selection
                 Button {
@@ -302,8 +304,8 @@ struct DmSegmented<Item: Hashable>: View {
                             isSelected ? Color.dmOnAccent
                                        : (hovered == item ? Color.dmInk : Color.dmInk2)
                         )
-                        .padding(.horizontal, DmSpace.s16)
-                        .frame(maxHeight: .infinity)
+                        .padding(.horizontal, DmSpace.s12)
+                        .frame(height: DmControl.h28)
                         .background(
                             RoundedRectangle(cornerRadius: DmRadius.r6)
                                 .fill(Color.dmAccentFill)
@@ -321,15 +323,14 @@ struct DmSegmented<Item: Hashable>: View {
                 }
             }
         }
-        .frame(height: DmControl.h28)
+        .padding(DmSpace.s2)
         .background(
-            RoundedRectangle(cornerRadius: DmRadius.r6).fill(Color.dmPanel2)
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DmRadius.r6)
-                .stroke(Color.dmLine2, lineWidth: DmLine.base)
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
         )
-        .clipShape(RoundedRectangle(cornerRadius: DmRadius.r6))
     }
 }
 
