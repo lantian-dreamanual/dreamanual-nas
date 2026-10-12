@@ -285,7 +285,7 @@ input,select{font:inherit;color:inherit}
 .msider{width:200px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
 .mside-body{flex:1;overflow-y:auto;padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-2)}
 /* 分组标题行带「+」：与密码管理的新建分类同形，不做整宽按钮 */
-.mside-head{display:flex;align-items:center;gap:var(--sp-6);padding:var(--sp-14) var(--sp-10) var(--sp-4) var(--sp-16)}
+.mside-head{display:flex;align-items:center;gap:var(--sp-6);padding:var(--sp-14) var(--sp-10) var(--sp-4) var(--sp-8)}
 .mside-head .t{font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
 .mside-head .icon-btn{width:22px;height:22px;border-radius:var(--r-6);margin-left:auto}
 
@@ -655,7 +655,7 @@ body.anno [data-note]::before{
                 <thead data-note="表头两个动作：① 点表头切换正序 / 倒序（同访达），当前列亮箭头；② 拖动表头改列序（拖动样态见组件板）。列序与列宽按用户偏好持久化。">
                   <tr><th class="sortable">标题<i data-ic="chevron-up" data-sz="10"></i></th><th class="sortable">艺术家</th><th class="sortable">专辑</th><th class="sortable">流派</th><th class="sortable">年份</th><th class="sortable" style="text-align:right">时长</th><th class="sortable" style="text-align:right">曲序</th></tr>
                 </thead>
-                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 定位文件位置，样态见组件板）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
+                <tbody id="tracks" data-note="行交互：悬停 panel-2；单击选中（浅底 + 主色字，两档都是实心色档）；双击播放；右键菜单（播放 / 下一首播放 / 添加到歌单 / 定位文件位置，样态见组件板）。播放范围：双击 = 当前列表整体成为队列、从这首起播；想只听一首，清空队列再对它「下一首播放」（不设「只播这一首」菜单项）。艺术家、专辑列都是链接形态：点击回曲库代入筛选（形态见「曲库 · 已筛选」屏）。"></tbody>
               </table>
               <div class="load-more" data-note="分页懒加载：一页 1000 首约 1.1 秒，整库 12331 首要 14.7 秒 —— 首屏拉一页，剩下的滚到底再要。">
                 <i data-ic="chevron-down" data-sz="14"></i>已载入 1000 首，继续加载
@@ -709,7 +709,7 @@ body.anno [data-note]::before{
             <!-- 右键菜单样态（画出来，不做交互） -->
             <div class="menu" style="top:172px;right:60px" data-note="歌曲列表的右键菜单（队列 / 曲库通用）。「定位文件位置」= 切到文件管理、展开到该曲所在目录，并把那一行高亮选中（同访达的「显示简介」位置感）。专辑、艺人的跳转走列表里的链接列，不占菜单项。">
               <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
-              <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
+              <div class="mi"><i data-ic="list-start" data-sz="12"></i>下一首播放</div>
               <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
               <div class="msep"></div>
               <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
@@ -1159,7 +1159,7 @@ body.anno [data-note]::before{
       <div>
         <div class="menu" style="position:relative">
           <div class="mi"><i data-ic="play" data-sz="12" data-fill="1"></i>播放</div>
-          <div class="mi"><i data-ic="list-plus" data-sz="12"></i>下一首播放</div>
+          <div class="mi"><i data-ic="list-start" data-sz="12"></i>下一首播放</div>
           <div class="mi"><i data-ic="list-plus" data-sz="12"></i>添加到歌单</div>
           <div class="mi"><i data-ic="folder-open" data-sz="12"></i>定位文件位置</div>
         </div>
@@ -1299,6 +1299,7 @@ const ICONS={
   repeat:'<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   'list-music':'<path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/>',
   'list-plus':'<path d="M11 12H3"/><path d="M16 6H3"/><path d="M16 18H3"/><path d="m19 10v4"/><path d="m17 12h4"/>',
+  'list-start':'<path d="M16 12H3"/><path d="M16 18H3"/><path d="M10 6H3"/><path d="M21 18V8a2 2 0 0 0-2-2h-5"/><path d="m16 8-2-2 2-2"/>',
   sparkles:'<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
   heart:'<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
   'volume-2':'<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>',
