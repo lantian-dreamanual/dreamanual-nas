@@ -30,7 +30,7 @@ struct ConnectView: View {
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk3)
                 .padding(.top, DmSpace.s4)
-                .padding(.bottom, 24)
+                .padding(.bottom, DmSpace.s24)
 
             DmSegmented([.quickconnect, .direct], selection: $mode, fillsWidth: true, on: .card) {
                 $0 == .quickconnect ? "QuickConnect" : "直连地址"

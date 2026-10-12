@@ -224,7 +224,7 @@ private struct ModulePlaceholder: View {
                         Circle()
                             .fill(Color.dmInk3)
                             .frame(width: 4, height: 4)
-                            .padding(.top, 6)
+                            .padding(.top, DmSpace.s6)
                         Text(item)
                             .font(.system(size: DmText.t12))
                             .foregroundColor(Color.dmInk2)
