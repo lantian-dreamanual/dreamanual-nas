@@ -495,6 +495,29 @@ input,select{font:inherit;color:inherit}
 .mv-hit.on .ic{color:var(--accent-2)}
 .mv-hit .pth{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3);font-weight:400}
 .mv-hit .ic{color:var(--ink-3);flex:none}
+/* 文件写操作弹窗：冲突处理选项 / 变更对照 / 危险提示条 / 演示切换器 */
+.opt{display:flex;align-items:flex-start;gap:var(--sp-10);padding:var(--sp-10) var(--sp-12);border-radius:var(--r-8);border:var(--lw-hairline) solid var(--line);background:var(--panel-2);cursor:pointer;transition:var(--mo-fast)}
+.opt:hover{border-color:var(--line-2)}
+.opt+.opt{margin-top:var(--sp-6)}
+.opt.on{border-color:var(--accent-line);background:var(--accent-soft)}
+.radio{width:14px;height:14px;border-radius:50%;border:var(--lw-base) solid var(--line-2);flex:none;display:grid;place-items:center;margin-top:2px}
+.opt.on .radio{border-color:var(--accent-2)}
+.opt.on .radio::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent-2)}
+.opt .t{display:block;font-size:var(--fs-13);color:var(--ink)}
+.opt .d{display:block;font-size:var(--fs-11);color:var(--ink-3);line-height:1.5;margin-top:var(--sp-2)}
+.cmp{display:flex;gap:var(--sp-16);border:var(--lw-hairline) solid var(--line);border-radius:var(--r-8);padding:var(--sp-10) var(--sp-12);margin-bottom:var(--sp-12)}
+.cmp>div{flex:1;min-width:0}
+.cmp b{display:block;font-size:var(--fs-12);font-weight:500;color:var(--ink-2);margin-bottom:var(--sp-4)}
+.cmp span{display:block;font-size:var(--fs-11);color:var(--ink-3);line-height:1.6;word-break:break-all}
+.banner-d{display:flex;align-items:flex-start;gap:var(--sp-8);padding:var(--sp-10) var(--sp-12);border-radius:var(--r-10);background:var(--danger-soft);color:var(--danger-ink);font-size:var(--fs-12);line-height:1.6;margin-bottom:var(--sp-12)}
+.banner-d .ic{flex:none;margin-top:1px}
+.pick-list{display:flex;flex-direction:column;gap:var(--sp-2);max-height:180px;overflow-y:auto;border:var(--lw-hairline) solid var(--line);border-radius:var(--r-8);padding:var(--sp-4)}
+.pick-list .row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);font-size:var(--fs-13);color:var(--ink-2);border-radius:var(--r-6)}
+.pick-list .row .sz{margin-left:auto;font-size:var(--fs-11);color:var(--ink-3)}
+.demo-seg{position:absolute;left:var(--sp-16);top:var(--sp-16);display:flex;gap:var(--sp-4);padding:var(--sp-4);background:var(--panel-2);border:var(--lw-hairline) solid var(--line-2);border-radius:var(--r-8);box-shadow:var(--shadow-card);z-index:40}
+.demo-seg button{padding:var(--sp-6) var(--sp-10);border-radius:var(--r-6);font-size:var(--fs-11);color:var(--ink-3);transition:var(--mo-fast)}
+.demo-seg button:hover{color:var(--ink)}
+.demo-seg button.on{background:var(--accent-fill);color:var(--on-accent);font-weight:500}
 
 /* 沉浸模式 */
 .imm{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:var(--sp-24);position:relative;overflow:hidden}
@@ -1167,6 +1190,111 @@ body.anno [data-note]::before{
         </div>
       </div>
     </div>
+
+    <!-- ===== 弹窗 · 文件写操作（叠在文件管理页上，演示切换器切四种） ===== -->
+    <div class="mask hidden" data-screen="wops" data-note="文件写操作的四张弹窗：同名冲突 / 新建文件夹 / 重命名 / 删除确认。左下角是演示用的切换器，不是产品界面。">
+      <div class="demo-seg" data-note="演示用切换器，落码时不进产品界面。">
+        <button class="on" data-dlg="conflict">同名冲突</button>
+        <button data-dlg="newfolder">新建文件夹</button>
+        <button data-dlg="rename">重命名</button>
+        <button data-dlg="delete">删除确认</button>
+      </div>
+
+      <div class="modal" data-dlg="conflict" data-note="同名冲突必须先由客户端判：上传 overwrite=false 撞名回「成功」但内容不变（静默跳过），所以上传前要 List 比对文件名；Rename 撞名服务端会拦（1200 + errors[414]）。CopyMove 撞名的返回码**还没实测**，落码前补一条探针 —— 三种处理的界面与返回码无关，先按用户的选择走。">
+        <div class="modal-head">
+          <h2>已有同名项目</h2>
+          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="cmp">
+            <div><b>来源</b><span>夜航.mp3<br>12.4 MB · 2026-10-08 21:33</span></div>
+            <div><b>目标已有</b><span>夜航.mp3<br>8.1 MB · 2026-09-12 10:02</span></div>
+          </div>
+          <div class="opt on" data-note="「替换」的代价要写出来：目标那份直接没了（删除不进回收站，见删除确认）。">
+            <span class="radio"></span>
+            <span><span class="t">替换</span><span class="d">用来源覆盖目标，目标那一份不可恢复</span></span>
+          </div>
+          <div class="opt" data-note="「保留两者」= 先把目标那项改名（Rename 撞名会回 1200，得自己拼一个不撞的名字），再做移动/复制。">
+            <span class="radio"></span>
+            <span><span class="t">保留两者</span><span class="d">目标那份改名为「夜航 2.mp3」，两份都保留</span></span>
+          </div>
+          <div class="opt">
+            <span class="radio"></span>
+            <span><span class="t">跳过</span><span class="d">这一项不动，其余继续</span></span>
+          </div>
+          <label class="opt" style="margin-top:var(--sp-10)" data-note="批量（多选上传、多选移动）时才出现；单选场景不给这个开关，少一个要读的控件。">
+            <span class="cb"><i data-ic="check" data-sz="10"></i></span>
+            <span><span class="t">应用于全部 3 项</span><span class="d">同类冲突不再逐项询问</span></span>
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-sec">取消</button>
+          <button class="btn btn-pri">应用</button>
+        </div>
+      </div>
+
+      <div class="modal hidden" data-dlg="newfolder" data-note="单输入框弹窗，与「重命名」同构，只有标题与按钮换字。新建在当前所在目录，路径写在标题下面，不让用户猜。">
+        <div class="modal-head">
+          <h2>新建文件夹</h2>
+          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
+          <div class="field">
+            <label>名称</label>
+            <input class="inp" value="新建文件夹" spellcheck="false">
+          </div>
+          <div class="hint" data-note="非法字符前端先拦（服务端回 418 = 名称非法）：/ \ : * ? &quot; &lt; &gt; |；名称已存在时服务端回 1200 + errors[414]，翻成「该名称已存在」。">
+            不能包含 \ / : * ? " &lt; &gt; | 这些字符。名称已存在时服务端会拒绝，界面翻成一句人话。
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-sec">取消</button>
+          <button class="btn btn-pri">创建</button>
+        </div>
+      </div>
+
+      <div class="modal hidden" data-dlg="rename" data-note="与「新建文件夹」同构。输入框预选主干、不含扩展名（macOS 惯例）—— 改名时最常见的手误就是把 .mp3 删掉。">
+        <div class="modal-head">
+          <h2>重命名</h2>
+          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="mv-path"><span>位置</span><b>music › 华语 › 2024</b></div>
+          <div class="field">
+            <label>名称</label>
+            <input class="inp" value="夜航.mp3" spellcheck="false">
+          </div>
+          <div class="hint">扩展名不在选中范围。撞名由服务端拦（1200 + errors[414]），界面提示「该名称已存在」。</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-sec">取消</button>
+          <button class="btn btn-pri">重命名</button>
+        </div>
+      </div>
+
+      <div class="modal hidden" data-dlg="delete" data-note="删除不进回收站（实测），确认文案必须写明不可恢复。多选时列清单，文件夹要标出「含 N 项」，因为删的是整棵子树。">
+        <div class="modal-head">
+          <h2>删除 3 个项目？</h2>
+          <button class="icon-btn"><i data-ic="x" data-sz="16"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="banner-d" data-note="这一条是硬约束（见产品定义第七节）：删除不进回收站，写不清楚就是一次不可逆的误操作。">
+            <i data-ic="triangle-alert" data-sz="14"></i>
+            <span>删除后不进回收站，无法恢复。文件夹里的内容会一并删除。</span>
+          </div>
+          <div class="pick-list">
+            <div class="row"><i data-ic="music" data-sz="14"></i>夜航.mp3<span class="sz">12.4 MB</span></div>
+            <div class="row"><i data-ic="music" data-sz="14"></i>潮汐.flac<span class="sz">49.2 MB</span></div>
+            <div class="row"><i data-ic="folder" data-sz="14"></i>2023<span class="sz">文件夹 · 含 3,192 项</span></div>
+          </div>
+        </div>
+        <div class="modal-foot" data-note="危险按钮走自绘 .btn-danger（danger-soft 底 + danger-ink 字 + danger-line 描边），系统 role:.destructive 那套在自绘弹窗里不用。">
+          <button class="btn btn-sec">取消</button>
+          <button class="btn btn-danger">删除</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- 播放条（通栏，网易云布局） -->
@@ -1719,22 +1847,25 @@ $$('[data-ic]').forEach(el=>{
 });
 
 /* ---------- 页面切换 ---------- */
-const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['filtered','曲库 · 已筛选'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['move','弹窗 · 移动/复制'],['board','组件与状态']];
+const TABS=[['connect','连接 · QuickConnect'],['connect2','连接 · 直连'],['music','听歌 · 曲库'],['queue','播放队列'],['filtered','曲库 · 已筛选'],['immersive','沉浸模式'],['files','文件管理'],['status','系统状态'],['settings','设置'],['modal','弹窗'],['move','弹窗 · 移动/复制'],['wops','弹窗 · 写操作'],['board','组件与状态']];
 $('#tabs').innerHTML = TABS.map(([k,l])=>`<button class="tab" data-tab="${k}">${l}</button>`).join('');
 
 const win = $('#win');
+let curTab = 'music';          // 供切换弹窗时重算标注用
 function setScreen(name){
+  curTab = name;
   $$('.tab').forEach(t=>t.classList.toggle('on', t.dataset.tab===name));
   const isBoard = name==='board';
   $('#board').classList.toggle('on', isBoard);
   win.classList.toggle('hidden', isBoard);
   $$('.notes')[0].classList.toggle('hidden', isBoard);
   if(isBoard){ return; }
-  const mode = (name==='modal') ? 'music' : (name==='move') ? 'files' : name;
+  const mode = (name==='modal') ? 'music' : (name==='move'||name==='wops') ? 'files' : name;
   win.dataset.mode = mode;
   $$('.screen').forEach(s=>s.classList.toggle('on', s.dataset.screen===mode));
   $$('[data-screen="modal"]').forEach(m=>m.classList.toggle('hidden', name!=='modal'));
   $$('[data-screen="move"]').forEach(m=>m.classList.toggle('hidden', name!=='move'));
+  $$('[data-screen="wops"]').forEach(m=>m.classList.toggle('hidden', name!=='wops'));
   $$('[data-toast-live]').forEach(t=>t.classList.toggle('hidden', name!=='modal'));
   $$('.nav-row[data-go]').forEach(r=>r.classList.toggle('on', r.dataset.go===mode));
   renderLegend(mode, name);
@@ -1754,6 +1885,18 @@ $$('.mv-pick').forEach(r=>r.onclick=()=>{
   const p=$('#mvPath'); if(p&&r.dataset.p) p.textContent=r.dataset.p;
 });
 
+/* ---------- 写操作弹窗：演示切换器（冲突 / 新建 / 重命名 / 删除） ---------- */
+$$('.demo-seg button').forEach(btn=>btn.onclick=()=>{
+  $$('.demo-seg button').forEach(x=>x.classList.toggle('on',x===btn));
+  $$('[data-dlg]').forEach(d=>d.classList.toggle('hidden', d.dataset.dlg!==btn.dataset.dlg));
+  renderLegend('files', curTab);   // 换了一张弹窗，标注列表跟着换
+});
+$$('.opt').forEach(o=>o.onclick=e=>{
+  if(e.target.closest('.cb')) return;         // 「应用于全部」是复选框，不参与单选
+  o.closest('.modal')?.querySelectorAll('.opt').forEach(x=>{ if(!x.querySelector('.cb')) x.classList.remove('on'); });
+  o.classList.add('on');
+});
+
 /* ---------- 标注 ---------- */
 const noted = $$('[data-note]');
 let nn = 0;
@@ -1766,8 +1909,10 @@ noted.forEach(el=>{
 $('#annoChk').onchange = e => document.body.classList.toggle('anno', e.target.checked);
 
 function renderLegend(mode, name){
-  const key = (name==='board') ? 'board' : mode;
-  const own = noted.filter(el=>el.dataset.screenOf===key);
+  // 弹窗类屏的标注挂在自己的遮罩上（screenOf = 屏名），不能按底层屏取
+  const key = (name==='board') ? 'board' : (noted.some(el=>el.dataset.screenOf===name) ? name : mode);
+  // 同一屏里被 .hidden 藏起来的弹窗（写操作那屏一次挂四张）不列进标注
+  const own = noted.filter(el=>el.dataset.screenOf===key && !el.closest('.hidden'));
   // 常驻元素（侧栏、播放条）在每一屏都列出来
   const chrome = (key==='board'||key==='chrome') ? [] : noted.filter(el=>el.dataset.screenOf==='chrome');
   const list = own.concat(chrome);
