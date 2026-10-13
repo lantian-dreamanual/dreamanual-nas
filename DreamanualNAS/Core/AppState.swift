@@ -321,9 +321,13 @@ final class AppState {
 
             // 连上即存：口令只进钥匙串，下次启动自动重连。写也走后台 ——
             // 同一条授权框没点掉时写入一样会挂住主线程。
+            // 🔴 口令没变就不重写：save 是删了重建，会把条目上的访问授权
+            //（security -A、历次「始终允许」）一并清掉，重编译后又要授权。
             let account = KeychainStore.accountKey(endpointID: endpointKey, username: user)
             Task.detached(priority: .utility) {
-                KeychainStore.save(password: password, account: account)
+                if KeychainStore.password(account: account) != password {
+                    KeychainStore.save(password: password, account: account)
+                }
             }
         } catch {
             phase = .failed(error.localizedDescription)

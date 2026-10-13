@@ -22,11 +22,14 @@ func render(_ px: Int) -> NSBitmapImageRep {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     let ctx = NSGraphicsContext.current!
-    // 圆角裁切：约满幅的 0.22（Apple squircle 视觉比例）
-    let r = Double(px) * 0.22
-    NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: px, height: px),
+    // macOS 图标网格：画稿只占画布 0.828、四周留透明边距 —— 与产品线其他
+    // app（投资监控 / 密码管理 / 视频下载均 0.828）同尺寸，满幅会明显偏大。
+    let content = Int(Double(px) * 0.828)
+    let inset = (px - content) / 2
+    let r = Double(content) * 0.22
+    NSBezierPath(roundedRect: NSRect(x: inset, y: inset, width: content, height: content),
                  xRadius: r, yRadius: r).addClip()
-    src.draw(in: NSRect(x: 0, y: 0, width: px, height: px),
+    src.draw(in: NSRect(x: inset, y: inset, width: content, height: content),
              from: NSRect.zero, operation: .sourceOver, fraction: 1.0)
     ctx.flushGraphics()
     NSGraphicsContext.restoreGraphicsState()
