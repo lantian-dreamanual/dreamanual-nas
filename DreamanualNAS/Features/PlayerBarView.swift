@@ -9,7 +9,8 @@ import SwiftUI
 /// overlay、不占布局 —— 线位算在布局里的话，顶上会比底下多出 3px。其余照原型
 /// `.player`：三栏（300 / 弹性 / 200）、播放钮 36 圆、音量条 80×4（填充 `ink-2`）。
 /// 数据源是 `PlaybackEngine` —— 没有引擎（未连接）或队列为空时是**空态**：
-/// 线保持 3px 灰、控件禁用、左侧写「未在播放」。
+/// 线保持 3px 灰、控件禁用、左侧写「未在播放」。左侧的封面与歌名还是一颗
+/// 进出**沉浸模式**的按钮（有歌才点得动）。
 struct PlayerBarView: View {
     @Environment(AppState.self) private var state
     let engine: PlaybackEngine?
@@ -147,37 +148,28 @@ struct PlayerBarView: View {
 
     // MARK: 正在播
 
+    /// 左侧「正在播」：封面 + 歌名 + 歌手/专辑，末尾跟一颗星。
+    ///
+    /// 封面与歌名是一颗按钮 —— **点它进出沉浸模式**（原型：「点播放条的封面或歌名
+    /// 进来，再点退出」）。没有正在播的歌时按钮禁用，点不动也不会进那一屏。
     private var nowPlaying: some View {
         HStack(spacing: DmSpace.s10) {
-            DmCover(
-                album: engine?.currentSong?.album ?? "",
-                artist: engine?.currentSong?.albumArtist ?? "",
-                size: 44
-            )
-            VStack(alignment: .leading, spacing: DmSpace.s2) {
-                if let song = engine?.currentSong {
-                    Text(song.title)
-                        .font(.system(size: DmText.t13, weight: .semibold))
-                        .foregroundColor(Color.dmInk)
-                    Text([song.artist, song.album].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: DmText.t12))
-                        .foregroundColor(Color.dmInk3)
-                } else {
-                    Text("未在播放")
-                        .font(.system(size: DmText.t13, weight: .medium))
-                        .foregroundColor(Color.dmInk2)
-                    Text("从曲库选一首开始")
-                        .font(.system(size: DmText.t11))
-                        .foregroundColor(Color.dmInk3)
+            Button {
+                state.toggleImmersive()
+            } label: {
+                HStack(spacing: DmSpace.s10) {
+                    DmCover(
+                        album: engine?.currentSong?.album ?? "",
+                        artist: engine?.currentSong?.albumArtist ?? "",
+                        size: 44
+                    )
+                    trackLabels
                 }
-                if let message = engine?.streamErrorMessage {
-                    Text(message)
-                        .font(.system(size: DmText.t11))
-                        .foregroundColor(Color.dmDanger)
-                        .lineLimit(1)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .disabled(engine?.currentSong == nil)
 
             // 播放条只放一颗星（放不下 5 颗）：点亮即 5 星、再点清零，
             // 与列表共用同一个评分字段（原型「播放条 · 单星」）。
@@ -186,6 +178,33 @@ struct PlayerBarView: View {
             }
         }
         .frame(width: 300, alignment: .leading)
+    }
+
+    private var trackLabels: some View {
+        VStack(alignment: .leading, spacing: DmSpace.s2) {
+            if let song = engine?.currentSong {
+                Text(song.title)
+                    .font(.system(size: DmText.t13, weight: .semibold))
+                    .foregroundColor(Color.dmInk)
+                Text([song.artist, song.album].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk3)
+            } else {
+                Text("未在播放")
+                    .font(.system(size: DmText.t13, weight: .medium))
+                    .foregroundColor(Color.dmInk2)
+                Text("从曲库选一首开始")
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+            }
+            if let message = engine?.streamErrorMessage {
+                Text(message)
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmDanger)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func ratingButton(for song: AudioSong) -> some View {

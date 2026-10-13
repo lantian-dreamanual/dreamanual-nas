@@ -74,6 +74,32 @@ actor SessionManager {
         }
     }
 
+    /// 与 `call` 同构，但走 **GET**。歌词那两个接口实测是 GET 形态（接口结论
+    /// §八的探测脚本就是 GET），照实测写就行 —— 会话失效同样丢掉重登、重放这一条。
+    func get(
+        kind: Kind,
+        api: String,
+        version: Int,
+        method: String,
+        params: [String: String] = [:],
+        path: String? = nil
+    ) async throws -> Any {
+        var fields = params
+        fields["api"] = api
+        fields["version"] = String(version)
+        fields["method"] = method
+
+        let target = try await entryPath(for: api, overriding: path)
+        let creds = try await credentials(for: kind)
+        do {
+            return try await client.get(path: target, params: fields, credentials: creds)
+        } catch let error as SynologyError where error.isSessionInvalid {
+            sessions[kind] = nil
+            let refreshed = try await credentials(for: kind)
+            return try await client.get(path: target, params: fields, credentials: refreshed)
+        }
+    }
+
     /// 取原始字节的非 JSON 接口（封面 / 缩略图）。与 `call` 同构 —— 会话失效
     /// 同样丢掉重登、重放这一条。
     func data(

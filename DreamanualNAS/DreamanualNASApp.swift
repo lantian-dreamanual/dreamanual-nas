@@ -35,6 +35,11 @@ struct DreamanualNASApp: App {
                     if ProcessInfo.processInfo.environment["DM_SMOKE"] == "1" {
                         await state.smokePlayFirst()
                     }
+                    // DM_IMMERSIVE=<关键词>：搜一首、开播、进沉浸模式，供真机截图核对
+                    // （AI 点不了 UI，只能让程序自己走到那一屏）。
+                    if let keyword = ProcessInfo.processInfo.environment["DM_IMMERSIVE"] {
+                        await state.smokeImmersive(keyword: keyword)
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。

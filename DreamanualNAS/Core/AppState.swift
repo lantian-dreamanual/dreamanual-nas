@@ -66,9 +66,18 @@ final class AppState {
     private(set) var sessionManager: SessionManager?
     /// 播放引擎：连上之后创建，断开即卸。曲库页与播放条都读它。
     private(set) var playback: PlaybackEngine?
+    /// 曲库页的状态（数据源 / 维度 / 筛选 / 分页）。
+    ///
+    /// 归属放在这里而不是 `LibraryView` 的 `@State`：沉浸模式会把曲库页从层级上
+    /// 换下来，状态跟着视图走的话，进出一次沉浸模式曲库就退回「全部曲目」+
+    /// 重新拉一千首。换个模块再回来同理 —— 视图是临时的，这份状态不是。
+    let library = LibraryModel()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
+    /// 沉浸模式（原型「沉浸模式」屏）：收掉侧栏、播放条保留。从播放条的封面 /
+    /// 歌名进出，Esc 或右上角关闭钮退出。
+    private(set) var showsImmersive = false
     private(set) var lastConnectedAt: Date?
 
     /// 窗口底部那条短提示。放全局是因为触发点不止一处 —— 曲库表与播放条
@@ -94,16 +103,41 @@ final class AppState {
     func select(_ module: Module) {
         self.module = module
         showsQueue = false
+        showsImmersive = false
     }
 
     /// 播放条的队列按钮：主区在曲库 ↔ 队列之间切。
     func toggleQueue() {
+        showsImmersive = false
         if module != .music {
             select(.music)
             showsQueue = true
             return
         }
         showsQueue.toggle()
+    }
+
+    // MARK: - 沉浸模式
+
+    /// 播放条的封面 / 歌名进出沉浸模式。只有队列里有歌才进得去 ——
+    /// 没有正在播的歌，那一屏没有内容可铺。
+    func toggleImmersive() {
+        guard playback?.hasQueue == true else { return }
+        showsImmersive.toggle()
+    }
+
+    func closeImmersive() {
+        showsImmersive = false
+    }
+
+    /// 沉浸模式里点歌手名：回曲库、代入该歌手的筛选（原型那一屏的说明行）。
+    func showSongs(byArtist name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        showsImmersive = false
+        showsQueue = false
+        module = .music
+        await library.apply(trimmed, in: .artist, on: sessionManager)
     }
 
     // MARK: - 提示
@@ -224,6 +258,50 @@ final class AppState {
         }
     }
 
+    /// `DM_IMMERSIVE=<关键词>` 时由入口调用：按关键词搜一首、开播、进沉浸模式，
+    /// 再把歌词结果打出来。
+    ///
+    /// 沉浸屏的底（模糊封面）、280 封面与歌词两态都只能真机看 —— AI 环境点不了 UI，
+    /// 只能让程序自己走到那一屏，再从终端起进程收日志、抓窗口截图。
+    /// 关键词传 `-`（或空）就播曲库第一首。
+    func smokeImmersive(keyword: String) async {
+        guard isConnected, let manager = sessionManager, let engine = playback else {
+            NSLog("[immersive] 未连接，跳过（phase=%@）", String(describing: phase))
+            return
+        }
+        do {
+            let page: AudioSongPage
+            if keyword.isEmpty || keyword == "-" {
+                page = try await AudioLibrary.songs(manager, limit: 20)
+            } else {
+                page = try await AudioLibrary.search(manager, keyword: keyword, limit: 50)
+            }
+            guard let first = page.songs.first else {
+                NSLog("[immersive] 搜「%@」没有命中", keyword)
+                return
+            }
+            NSLog("[immersive] 开播「%@」—「%@」id=%@", first.title, first.artist, first.id)
+            engine.play(page.songs, at: 0)
+            showsImmersive = true
+
+            // 取词与取图都是异步的，等它们落地再报。
+            try? await Task.sleep(nanoseconds: 8 * 1_000_000_000)
+            let lyrics = await LyricsStore.shared.lyrics(manager: manager, song: first)
+            if let lyrics {
+                NSLog("[immersive] 歌词 → %@ 行 · 时间轴 %@ · 来源 %@",
+                      String(lyrics.lines.count),
+                      lyrics.hasTimeline ? "有" : "无",
+                      String(describing: lyrics.origin))
+            } else {
+                NSLog("[immersive] 歌词 → 未匹配到（应走「接下来播放」那一态）")
+            }
+            NSLog("[immersive] 下一首 = %@", engine.nextSong?.title ?? "（队尾）")
+            NSLog("[immersive] 当前状态 %@", engine.smokeStatus())
+        } catch {
+            NSLog("[immersive] 失败：%@", error.localizedDescription)
+        }
+    }
+
     /// 四个数据源各取一次（侧栏点得动之前，先把「取数通不通」验掉）。
     private func smokeLibrarySources(_ manager: SessionManager) async {
         do {
@@ -334,8 +412,10 @@ final class AppState {
         playback?.detach()
         playback = nil
         showsQueue = false
-        // 封面缓存按专辑名做键、不区分是哪个库，换机器要清掉。
+        showsImmersive = false
+        // 封面与歌词缓存按专辑名 / 歌曲 id 做键、不区分是哪个库，换机器要清掉。
         await CoverStore.shared.clear()
+        await LyricsStore.shared.clear()
         if let manager = sessionManager {
             await manager.stopKeepAlive()
             await manager.logoutAll()

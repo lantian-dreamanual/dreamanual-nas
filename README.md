@@ -12,6 +12,9 @@
 > **评分写入已接**（真机验证过写 5 / 写 3 / 复原 0 三步回读一致）：曲库表 / 队列表 / 播放条三处都能点星，写后回读校验，写失败弹 Toast。
 > **封面缩略图已接**（真机验证）：曲库表 / 队列表标题列内嵌 28px、播放条 44px，按专辑取图（`cover.cgi` 只认
 > `album_name` + `album_artist_name`）、同专辑缓存、无图退占位。
+> **沉浸模式已接**：点播放条的封面或歌名进出（Esc / 右上角关闭钮退出），只收侧栏、播放条保留；
+> 底是放大封面重模糊 + 压暗，左封面 280 右信息栏 380；歌词**内嵌优先**（`getlyrics` 读 ID3 的 `USLT` 帧）、
+> **在线兜底**（`searchlyrics`，插件装在 NAS 上），没有歌词时换成「未匹配到歌词 + 接下来播放」。
 > 表头排序与字段配置、文件管理、系统状态还没接。
 
 ## 功能
@@ -53,6 +56,8 @@ nas/
 │   │   ├── KeychainStore.swift    已退役的钥匙串读写（仅 CredentialStore 迁移用）
 │   │   ├── AudioLibrary.swift     曲库数据层（四维 / 搜索 / 筛选 / 分页 / 歌单 / 评分读写 / 封面）
 │   │   ├── CoverStore.swift       封面缓存（键按专辑 + 艺术家，负结果也缓存，并发上限 4）
+│   │   ├── LyricsService.swift    歌词读取（内嵌 getlyrics + 在线 searchlyrics + LRC 解析）
+│   │   ├── LyricsStore.swift      歌词缓存（键按歌曲 id，内嵌优先、在线兜底）
 │   │   ├── PlaybackEngine.swift   播放引擎（队列 / 播放顺序 / 拖进度 / 音量）
 │   │   ├── StreamLoader.swift     取流装载器（自定义 scheme + Range + TLS 策略）
 │   │   └── AppState.swift         连接状态机 + 模块切换
@@ -60,6 +65,7 @@ nas/
 │       ├── ConnectView.swift      连接页
 │       ├── LibraryView.swift      曲库页（四维浏览 + 搜索 + 筛选）
 │       ├── QueueView.swift        队列页（播放顺序 + 正在播标记）
+│       ├── ImmersiveView.swift    沉浸模式（模糊封面底 + 大封面 + 歌词区两态）
 │       ├── RootView.swift         外壳（侧栏 + 主区）
 │       └── PlayerBarView.swift    底部常驻播放条（进度线悬停上展 + 控制钮 + 音量）
 ├── Resources/

@@ -307,6 +307,13 @@ final class LibraryModel {
 
     /// 点艺术家 / 专辑名 / 流派 —— 回到同一张表并代入筛选（原型「曲库 · 已筛选」屏）。
     func apply(_ value: String, on manager: SessionManager?) async {
+        await apply(value, in: dimension, on: manager)
+    }
+
+    /// 同上，但筛选字段由调用点指定。沉浸模式的歌手名没有「当前维度」这个上下文
+    /// （那一屏里没有分段控件），必须明说是按艺术家筛。
+    func apply(_ value: String, in dimension: Dimension, on manager: SessionManager?) async {
+        self.dimension = dimension
         source = .all
         filter = SongFilter(field: dimension.filterField, value: value)
         searchKeyword = ""
@@ -379,7 +386,11 @@ final class LibraryModel {
 /// 这是原型「曲库 · 已筛选」那一屏的规矩，也是产品定义里「不新增专辑页 / 艺人页」那条。
 struct LibraryView: View {
     @Environment(AppState.self) private var state
-    @State private var model = LibraryModel()
+
+    /// 曲库状态挂在 `AppState` 上，不是这个视图的 `@State` —— 沉浸模式会把这一页
+    /// 从层级上换下来，状态跟着视图走的话，进出一次沉浸模式就退回「全部曲目」
+    /// 并重拉一千首（理由同样写在 `AppState.library`）。
+    private var model: LibraryModel { state.library }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -428,7 +439,11 @@ struct LibraryView: View {
             Spacer(minLength: 0)
 
             DmSearchField(
-                text: $model.searchText,
+                // 模型不归本视图所有（在 `AppState` 上），没有 `$` 投影，手动包一层。
+                text: Binding(
+                    get: { model.searchText },
+                    set: { model.searchText = $0 }
+                ),
                 placeholder: "搜索标题、艺术家、专辑"
             ) {
                 Task { await model.submitSearch(on: state.sessionManager) }

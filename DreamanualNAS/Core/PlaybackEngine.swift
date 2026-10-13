@@ -47,6 +47,14 @@ final class PlaybackEngine {
         guard playOrder.indices.contains(position) else { return nil }
         return queue[playOrder[position]]
     }
+
+    /// 队列里的下一首（按播放顺序，随机播放也照打乱后的顺序）。队尾回 nil ——
+    /// 沉浸模式的「接下来播放」用它，队尾时那块换成一行占位文案。
+    var nextSong: AudioSong? {
+        guard playOrder.indices.contains(position + 1) else { return nil }
+        return queue[playOrder[position + 1]]
+    }
+
     var hasQueue: Bool { !queue.isEmpty }
 
     private var sessionManager: SessionManager?

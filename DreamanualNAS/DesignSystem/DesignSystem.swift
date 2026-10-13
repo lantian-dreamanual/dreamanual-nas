@@ -174,6 +174,7 @@ struct LucideIcon: View {
         "circle-check": "checkmark.circle.fill",
         "circle-x": "xmark.circle.fill",
         "info": "info.circle",
+        "x": "xmark",
         "triangle-alert": "exclamationmark.triangle",
         "wifi": "wifi",
         "key-round": "key",

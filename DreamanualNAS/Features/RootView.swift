@@ -10,17 +10,25 @@ struct RootView: View {
         Group {
             if state.isConnected {
                 VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        SidebarView()
-                        Rectangle()
-                            .fill(Color.dmLine)
-                            .frame(width: DmLine.hairline)
-                        MainAreaView()
+                    // 沉浸模式收掉侧栏（原型 `.win[data-mode="immersive"] .sider{display:none}`），
+                    // 播放条两态都在 —— 沉浸只是换掉上半屏，播放不中断。
+                    if state.showsImmersive {
+                        ImmersiveView()
+                            .transition(.opacity)
+                    } else {
+                        HStack(spacing: 0) {
+                            SidebarView()
+                            Rectangle()
+                                .fill(Color.dmLine)
+                                .frame(width: DmLine.hairline)
+                            MainAreaView()
+                        }
+                        .frame(maxHeight: .infinity)
                     }
-                    .frame(maxHeight: .infinity)
                     PlayerBarView(engine: state.playback)
                 }
                 .background(Color.dmBg)
+                .animation(.easeOut(duration: DmMotion.base), value: state.showsImmersive)
             } else {
                 ConnectView()
             }
