@@ -4,8 +4,9 @@ import SwiftUI
 /// 系统状态，播放与进度不中断（产品定义第二节「外壳」）。
 ///
 /// 进度条照网易云的展开形态（2026-10-13 用户拍板）：默认 3px 细线贴上沿、
-/// 兼作与内容区的分隔线；悬停 / 拖动**向上**展开成 8px + 12px 大拇指 + 时间气泡，
-/// 展开向上溢出条外、不挤占内容。其余照原型 `.player`：三栏（300 / 弹性 / 200）、
+/// 兼作与内容区的分隔线；悬停 / 拖动**向上**展开成 6px + 10px 大拇指 + 时间气泡，
+/// 展开向上溢出条外、不挤占内容。播放行顶边距 6 / 底边距 10（顶上有线位压着，
+/// 视觉才对称）。其余照原型 `.player`：三栏（300 / 弹性 / 200）、
 /// 播放钮 36 圆、音量条 80×4（填充 `ink-2`）。数据源是 `PlaybackEngine` ——
 /// 没有引擎（未连接）或队列为空时是**空态**：线保持 3px 灰、控件禁用、左侧写「未在播放」。
 struct PlayerBarView: View {
@@ -33,7 +34,10 @@ struct PlayerBarView: View {
                 volume
             }
             .padding(.horizontal, DmSpace.s16)
-            .frame(height: 56)
+            // 底边距比顶边距大 4：顶上有 3px 线位压着，视觉上才对称
+            //（2026-10-13 用户反馈「下边距小」）。
+            .padding(.top, DmSpace.s6)
+            .padding(.bottom, DmSpace.s10)
         }
         .background(Color.dmPanel)
     }
@@ -69,8 +73,8 @@ struct PlayerBarView: View {
                     if isEngaged {
                         Circle()
                             .fill(Color.dmInk)
-                            .frame(width: 12, height: 12)
-                            .offset(x: width * shownFraction - 6)
+                            .frame(width: 10, height: 10)
+                            .offset(x: width * shownFraction - 5)
                     }
                     if let hoverX, !isScrubbing, let engine, engine.hasQueue {
                         // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
@@ -93,7 +97,7 @@ struct PlayerBarView: View {
                             .offset(x: min(max(hoverX, 40), width - 40), y: -26)
                     }
                 }
-                .frame(height: isEngaged ? 8 : 3)
+                .frame(height: isEngaged ? 6 : 3)
             }
         }
         .frame(height: 3)
