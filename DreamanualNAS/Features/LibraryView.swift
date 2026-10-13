@@ -2,10 +2,17 @@ import SwiftUI
 
 // MARK: - 状态
 
-/// 曲库页的状态：维度、筛选、搜索、分页。
+/// 曲库页的状态：数据源、维度、筛选、搜索、分页。
 ///
-/// 维度、筛选、搜索三者共同决定「主区显示什么」，所以先合成一个 `mode` 再分发 ——
-/// 分开判断会有缝：搜到一半点维度、筛选中途清空，都能落进没覆盖的组合里。
+/// 三组控件的分工（原型「听歌 · 曲库」那一屏）：
+/// · **内容区侧栏**定「这一屏看的是哪一份曲目」—— 全部曲目 / 每日随机 /
+///   我的歌单 / 评分 ≥ 4 星，四者都落成同一张表，只是数据源不同；
+/// · **分段控件**定「在曲库快照里按哪个维度浏览」—— 全部曲目 / 艺术家 / 专辑 / 流派；
+/// · **搜索框**与**行内链接**（点艺术家名、专辑名）压过上面两者。
+///
+/// 后两者只在数据源是「全部曲目」时说得通：一份 100 首的随机单里没有「艺术家列表」
+/// 可言。所以点维度或落筛选时，数据源自动回到全部曲目 —— 控件不做隐藏/禁用，
+/// 而是点一下就顺过来，省得用户先去侧栏把来源改回去。
 @MainActor
 @Observable
 final class LibraryModel {
@@ -36,8 +43,31 @@ final class LibraryModel {
         }
     }
 
+    /// 内容区侧栏的数据源。
+    enum Source: Hashable {
+        case all
+        case dailyRandom
+        case topRated
+        case playlist(AudioPlaylist)
+
+        var title: String {
+            switch self {
+            case .all: return "全部曲目"
+            case .dailyRandom: return "每日随机"
+            case .topRated: return "评分 ≥ 4 星"
+            case .playlist(let playlist): return playlist.name
+            }
+        }
+    }
+
+    /// 每日随机取多少首（原型侧栏上写的就是 100）。
+    static let randomCount = 100
+    /// 「评分 ≥ 4 星」的门槛。
+    static let chartRating = 4
+
     var dimension: Dimension = .all
     var searchText = ""
+    private(set) var source: Source = .all
     private(set) var searchKeyword = ""
 
     private(set) var songs: [AudioSong] = []
@@ -45,6 +75,7 @@ final class LibraryModel {
     private(set) var artists: [AudioArtist] = []
     private(set) var albums: [AudioAlbum] = []
     private(set) var genres: [String] = []
+    private(set) var playlists: [AudioPlaylist] = []
     private(set) var filter: SongFilter?
     private(set) var selectedSongID: String?
     private(set) var isLoading = false
@@ -62,11 +93,20 @@ final class LibraryModel {
         case artistList
         case albumList
         case genreList
+        case random
+        case topRated
+        case playlist(String)
     }
 
     private var mode: Mode {
         if !searchKeyword.isEmpty { return .searched(searchKeyword) }
         if let filter { return .filtered(filter) }
+        switch source {
+        case .dailyRandom: return .random
+        case .topRated: return .topRated
+        case .playlist(let playlist): return .playlist(playlist.id)
+        case .all: break
+        }
         switch dimension {
         case .all: return .allSongs
         case .artist: return .artistList
@@ -85,6 +125,9 @@ final class LibraryModel {
         case .artistList: return "艺术家"
         case .albumList: return "专辑"
         case .genreList: return "流派"
+        case .random: return "每日随机"
+        case .topRated: return "评分 ≥ \(Self.chartRating) 星"
+        case .playlist(let id): return playlists.first { $0.id == id }?.name ?? "歌单"
         }
     }
 
@@ -98,12 +141,47 @@ final class LibraryModel {
         case .artistList: return "\(artists.count) 位"
         case .albumList: return "\(albums.count) 张"
         case .genreList: return "\(genres.count) 个"
+        case .random: return "\(songs.count) 首 · 每次进来重新抽"
+        case .topRated: return "\(songs.count) 首 · 按评分降序"
+        case .playlist: return "\(songs.count) 首"
         }
     }
 
     var isFilterActive: Bool { filter != nil }
-    var showsTrackTable: Bool { filter != nil || !searchKeyword.isEmpty || dimension == .all }
-    var hasMore: Bool { songs.count < total }
+
+    /// 侧栏行上的计数：只有拿得到的才写（歌单曲目数要逐个 `getinfo`，
+    /// 侧栏不为此发 N 个请求 —— 点进去看页头）。
+    func count(for source: Source) -> Int? {
+        switch source {
+        case .all: return total > 0 ? total : nil
+        case .dailyRandom: return Self.randomCount
+        case .topRated: return isTopRatedLoaded ? songs.count : nil
+        case .playlist: return nil
+        }
+    }
+
+    /// 高分曲是当前屏的唯一来源，切走了就不知道数了 —— 只在自己这一屏报。
+    private var isTopRatedLoaded: Bool {
+        if case .topRated = mode { return true }
+        return false
+    }
+
+    var showsTrackTable: Bool {
+        switch mode {
+        case .artistList, .albumList, .genreList: return false
+        default: return true
+        }
+    }
+
+    /// 只有两路能翻页：曲库快照与它的字段筛选。搜索每路只取前 `limit` 条、
+    /// 每日随机与高分曲是一次要齐、歌单按 `getinfo` 一把回 —— 都不该出现「还有更多」。
+    var hasMore: Bool {
+        switch mode {
+        case .allSongs, .filtered: return songs.count < total
+        default: return false
+        }
+    }
+
     var isEmptyContent: Bool {
         songs.isEmpty && artists.isEmpty && albums.isEmpty && genres.isEmpty
     }
@@ -112,7 +190,19 @@ final class LibraryModel {
 
     func loadIfNeeded(_ manager: SessionManager?) async {
         guard !hasLoaded else { return }
+        await loadPlaylists(manager)
         await refresh(manager)
+    }
+
+    /// 侧栏的「我的歌单」只有切进听歌页才拉一次，之后常驻。
+    func loadPlaylists(_ manager: SessionManager?) async {
+        guard let manager else { return }
+        do {
+            playlists = try await AudioLibrary.playlists(manager)
+        } catch {
+            // 歌单拉不到不该让整页报错 —— 侧栏少一组行，曲库照看。
+            playlists = []
+        }
     }
 
     func refresh(_ manager: SessionManager?) async {
@@ -134,6 +224,18 @@ final class LibraryModel {
                 setSongs(page)
             case .searched(let keyword):
                 let page = try await AudioLibrary.search(manager, keyword: keyword)
+                guard token == generation else { return }
+                setSongs(page)
+            case .random:
+                let page = try await AudioLibrary.randomSongs(manager, limit: Self.randomCount)
+                guard token == generation else { return }
+                setSongs(page)
+            case .topRated:
+                let page = try await AudioLibrary.topRatedSongs(manager, minRating: Self.chartRating)
+                guard token == generation else { return }
+                setSongs(page)
+            case .playlist(let id):
+                let page = try await AudioLibrary.songs(manager, playlistID: id)
                 guard token == generation else { return }
                 setSongs(page)
             case .artistList:
@@ -160,11 +262,9 @@ final class LibraryModel {
         if token == generation { isLoading = false }
     }
 
-    /// 滚到底再要下一页（列表行分页懒加载）。搜索结果不分页 —— 那三路各只取前
-    /// `limit` 条，`songs.count` 已经等于 `total`，`hasMore` 自然为假。
+    /// 滚到底再要下一页（列表行分页懒加载）。其余的来源都不分页，见 `hasMore`。
     func loadMore(_ manager: SessionManager?) async {
         guard let manager, !isLoading, !isLoadingMore, hasMore else { return }
-        if case .searched = mode { return }
         isLoadingMore = true
         let token = generation
         do {
@@ -186,18 +286,28 @@ final class LibraryModel {
 
     // MARK: 动作
 
+    /// 侧栏切换数据源。拿一份「每日随机」「某个歌单」时维度没有意义，
+    /// 顺手回到全部曲目 —— 免得下次点维度时带着一个说不通的维。
+    func select(source: Source, on manager: SessionManager?) async {
+        self.source = source
+        dimension = .all
+        resetScope()
+        clearContent()
+        await refresh(manager)
+    }
+
     func select(_ dimension: Dimension, on manager: SessionManager?) async {
+        // 点维度 = 回曲库快照：随机单 / 歌单里没有「艺术家列表」这一层。
+        source = .all
         self.dimension = dimension
-        filter = nil
-        searchKeyword = ""
-        searchText = ""
-        selectedSongID = nil
+        resetScope()
         clearContent()
         await refresh(manager)
     }
 
     /// 点艺术家 / 专辑名 / 流派 —— 回到同一张表并代入筛选（原型「曲库 · 已筛选」屏）。
     func apply(_ value: String, on manager: SessionManager?) async {
+        source = .all
         filter = SongFilter(field: dimension.filterField, value: value)
         searchKeyword = ""
         searchText = ""
@@ -214,6 +324,7 @@ final class LibraryModel {
     }
 
     func submitSearch(on manager: SessionManager?) async {
+        source = .all
         searchKeyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         filter = nil
         selectedSongID = nil
@@ -226,6 +337,13 @@ final class LibraryModel {
     }
 
     // MARK: 内部
+
+    private func resetScope() {
+        filter = nil
+        searchKeyword = ""
+        searchText = ""
+        selectedSongID = nil
+    }
 
     private func setSongs(_ page: AudioSongPage) {
         songs = page.songs
@@ -246,7 +364,7 @@ final class LibraryModel {
 
 // MARK: - 页面
 
-/// 听歌 · 曲库：四维浏览 + 搜索 + 筛选，一张表到底。
+/// 听歌 · 曲库：内容区侧栏选数据源，主区一张表到底。
 ///
 /// 「点艺术家 / 专辑名」不新开版式 —— 回到同一张表、代入筛选、页头换字。
 /// 这是原型「曲库 · 已筛选」那一屏的规矩，也是产品定义里「不新增专辑页 / 艺人页」那条。
@@ -255,6 +373,16 @@ struct LibraryView: View {
     @State private var model = LibraryModel()
 
     var body: some View {
+        HStack(spacing: 0) {
+            LibraryRail(model: model, manager: state.sessionManager)
+            main
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.dmPanel)
+        .task { await model.loadIfNeeded(state.sessionManager) }
+    }
+
+    private var main: some View {
         VStack(alignment: .leading, spacing: 0) {
             DmPageHead(model.headTitle, subtitle: model.headSubtitle) {
                 if model.isFilterActive {
@@ -273,8 +401,6 @@ struct LibraryView: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.dmPanel)
-        .task { await model.loadIfNeeded(state.sessionManager) }
     }
 
     private var toolbar: some View {
@@ -343,6 +469,127 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - 内容区侧栏
+
+/// 听歌模块的内容区侧栏（原型 `.msider`）：资料库的四个来源 + 我的歌单。
+///
+/// 这一列是**列表行（浅底轨）**：选中 `accent-soft` 底 + `accent-2` 字，
+/// 与外壳侧栏的实心主色底 + 白字分轨 —— 侧栏行表达「你在哪个模块」，
+/// 这一列表达「这一屏在看哪份曲目」，一屏里只有一行选中，量级与列表行同族。
+private struct LibraryRail: View {
+    let model: LibraryModel
+    let manager: SessionManager?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("资料库")
+                .font(.system(size: DmText.t11, weight: .bold))
+                .kerning(0.66)
+                .foregroundColor(Color.dmInk3)
+                .padding(.horizontal, DmSpace.s16)
+                .padding(.top, DmSpace.s14)
+                .padding(.bottom, DmSpace.s8)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DmSpace.s2) {
+                    LibraryRailRow(
+                        icon: "sparkles",
+                        title: "每日随机",
+                        count: model.count(for: .dailyRandom),
+                        isSelected: model.source == .dailyRandom
+                    ) {
+                        Task { await model.select(source: .dailyRandom, on: manager) }
+                    }
+
+                    LibraryRailRow(
+                        icon: "music",
+                        title: "全部曲目",
+                        count: model.count(for: .all),
+                        isSelected: model.source == .all
+                    ) {
+                        Task { await model.select(source: .all, on: manager) }
+                    }
+
+                    // 分组标题行：与密码管理的新建分类同形 —— 低频操作不占整行。
+                    // 「+ 新建歌单」跟着歌单的写入（`Playlist.create`）一起落，见 README。
+                    Text("我的歌单")
+                        .font(.system(size: DmText.t11, weight: .bold))
+                        .kerning(0.66)
+                        .foregroundColor(Color.dmInk3)
+                        .padding(.horizontal, DmSpace.s8)
+                        .padding(.top, DmSpace.s14)
+                        .padding(.bottom, DmSpace.s4)
+
+                    ForEach(model.playlists) { playlist in
+                        LibraryRailRow(
+                            icon: playlist.isSmart ? "sparkles" : "list-music",
+                            title: playlist.name,
+                            count: model.count(for: .playlist(playlist)),
+                            isSelected: model.source == .playlist(playlist)
+                        ) {
+                            Task { await model.select(source: .playlist(playlist), on: manager) }
+                        }
+                    }
+
+                    LibraryRailRow(
+                        icon: "star",
+                        title: "评分 ≥ \(LibraryModel.chartRating) 星",
+                        count: model.count(for: .topRated),
+                        isSelected: model.source == .topRated
+                    ) {
+                        Task { await model.select(source: .topRated, on: manager) }
+                    }
+                }
+                .padding(DmSpace.s8)
+            }
+        }
+        .frame(width: 200, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.dmLine)
+                .frame(width: DmLine.hairline)
+        }
+    }
+}
+
+/// 侧栏一行：图标 14 / 字 13 / 计数 11，横向 8、纵向 6 —— 照原型 `.tree-row`。
+/// 高度由内边距长出来，不写死。
+private struct LibraryRailRow: View {
+    let icon: String
+    let title: String
+    let count: Int?
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon(icon, size: DmIcon.i14)
+                .foregroundColor(ListRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
+            Text(title)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(ListRowState.foreground(isSelected: isSelected, hovered: isHovered))
+                .lineLimit(1)
+            Spacer(minLength: DmSpace.s4)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: DmText.t11))
+                    .monospacedDigit()
+                    .foregroundColor(ListRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
+            }
+        }
+        .padding(.horizontal, DmSpace.s8)
+        .padding(.vertical, DmSpace.s6)
+        .background(ListRowState.background(isSelected: isSelected, hovered: isHovered && !isSelected))
+        .clipShape(RoundedRectangle(cornerRadius: DmRadius.r6))
+        .contentShape(Rectangle())
+        .trackingHover($isHovered)
+        .onTapGesture(perform: action)
+    }
+}
+
 // MARK: - 曲目表
 
 /// 表宽：标题列自适应，其余八列按原型 `colgroup` 的固定宽。
@@ -354,6 +601,8 @@ enum TrackColumn {
     static let year: CGFloat = 56
     static let duration: CGFloat = 48
     static let track: CGFloat = 48
+    /// 评分在最右：左边是「库的信息」，右边是「我的标记」。
+    static let rating: CGFloat = 68
     static let padH: CGFloat = 10
 }
 
@@ -409,6 +658,7 @@ private struct TrackHeader: View {
             cell("年份", width: TrackColumn.year)
             cell("时长", width: TrackColumn.duration, alignment: .trailing)
             cell("曲序", width: TrackColumn.track, alignment: .trailing)
+            cell("评分", width: TrackColumn.rating, alignment: .trailing)
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
@@ -427,7 +677,7 @@ private struct TrackHeader: View {
         if let width {
             label.frame(width: width, alignment: alignment)
         } else {
-            label.frame(maxWidth: .infinity, alignment: alignment)
+            label.frame(minWidth: 180, maxWidth: .infinity, alignment: alignment)
         }
     }
 }
@@ -460,7 +710,10 @@ struct TrackRow: View {
                     .truncationMode(.middle)
             }
             .padding(.horizontal, TrackColumn.padH)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // 标题列自适应，但**保底 180** —— 固定列合计 536，主区一挤
+            // （窗口收到最小宽以下不会有，但门禁外的人为缩放会）自适应列会
+            // 被压成 0，整列凭空消失（真机踩过）。
+            .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
 
             plain(song.artist, width: TrackColumn.artist)
             plain(song.album, width: TrackColumn.album)
@@ -469,6 +722,10 @@ struct TrackRow: View {
 
             dim(song.durationText, width: TrackColumn.duration, alignment: .trailing)
             dim(song.track.map(String.init) ?? "", width: TrackColumn.track, alignment: .trailing)
+
+            RatingStars(rating: song.rating, isSelected: showsAccentBackground)
+                .padding(.horizontal, TrackColumn.padH)
+                .frame(width: TrackColumn.rating, alignment: .trailing)
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))

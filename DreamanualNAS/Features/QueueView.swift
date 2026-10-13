@@ -4,7 +4,8 @@ import SwiftUI
 ///
 /// 列表结构与曲库一致；首列是**播放顺序**（不是 ID3 曲序），正在播放行 =
 /// 浅底 + 主色字 + 均衡器（第八节浅底轨，均衡器区分选中与正在播放）。
-/// 表头不参与排序 —— 这里的顺序就是播放顺序。评分列等评分写入那批一起落。
+/// 表头不参与排序 —— 这里的顺序就是播放顺序。评分列与曲库同款（只读，
+/// 写入等 `Song.setrating` 那批）。
 struct QueueView: View {
     @Environment(AppState.self) private var state
     let engine: PlaybackEngine
@@ -77,6 +78,7 @@ struct QueueView: View {
             cell("艺术家", width: 96, alignment: .leading)
             cell("专辑", width: 96, alignment: .leading)
             cell("时长", width: 48, alignment: .trailing)
+            cell("评分", width: TrackColumn.rating, alignment: .trailing)
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
@@ -156,6 +158,10 @@ private struct QueueRow: View {
                 .lineLimit(1)
                 .padding(.horizontal, TrackColumn.padH)
                 .frame(width: 48, alignment: .trailing)
+
+            RatingStars(rating: song.rating, isSelected: isPlaying)
+                .padding(.horizontal, TrackColumn.padH)
+                .frame(width: TrackColumn.rating, alignment: .trailing)
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: isPlaying, hovered: isHovered))

@@ -293,7 +293,7 @@ input,select{font:inherit;color:inherit}
 .cb.dis{border-color:var(--line);background:var(--panel);color:var(--ink-3)}
 /* 勾选但不可改（如表格字段里的主键列） */
 .cb.dis.on{background:var(--line-2);border-color:transparent;color:var(--ink-3)}
-/* 评分（星级）：5 颗 10px 星。空星中性描边、实心星主色。未评分的行整格留空，悬停该行才出空星 */
+/* 评分（星级）：5 颗 10px 星。空星中性描边、实心星主色。未评分的行整格留空，悬停该行才出空星（悬停浮出空星 = 「可点」的提示，跟着 setrating 写入那批落；只读阶段不浮） */
 .rate{display:inline-flex;gap:2px;align-items:center;color:var(--ink-3)}
 .rate .ic.f{color:var(--accent-2);fill:currentColor}
 .rate.ghost{visibility:hidden}
@@ -735,12 +735,12 @@ body.anno [data-note]::before{
     <section class="screen on" data-screen="music">
       <div class="page">
         <div class="body">
-          <aside class="msider" data-note="听歌模块的内容区侧栏：每日随机（AudioStation 的 100 首）、全部曲目、歌单。点歌单或每日随机，主区换成同一张表，只是数据源不同。「评分 ≥ 4 星」是 NAS 侧的智能播放列表（Playlist.createsmart，按评分规则自动收歌），评分动作的消费入口 —— 它在 Audio Station 里也能看到、能改规则，不是本机自造的收藏。">
+          <aside class="msider" data-note="听歌模块的内容区侧栏：每日随机（AudioStation 的 100 首）、全部曲目、歌单。点歌单或每日随机，主区换成同一张表，只是数据源不同。「评分 ≥ 4 星」是 NAS 侧的智能播放列表（Playlist.createsmart，按评分规则自动收歌），评分动作的消费入口 —— 它在 Audio Station 里也能看到、能改规则，不是本机自造的收藏。落地时「评分 ≥ 4 星」走 sort_by=rating 降序拉、遇到低于 4 星就停，不必等智能歌单。这一列是列表行（浅底轨）：选中 accent-soft 底 + accent-2 字，与外壳侧栏的实心主色底分轨。">
             <div class="tree-head">资料库</div>
             <div class="mside-body">
               <div class="tree-row"><i data-ic="sparkles" data-sz="14"></i>每日随机<span class="cnt">100</span></div>
               <div class="tree-row on"><i data-ic="music" data-sz="14"></i>全部曲目<span class="cnt">12331</span></div>
-              <div class="mside-head" data-note="新建歌单收成标题行右侧的小「+」，与密码管理的新建分类同形 —— 这是低频操作，不占整行。">
+              <div class="mside-head" data-note="新建歌单收成标题行右侧的小「+」，与密码管理的新建分类同形 —— 这是低频操作，不占整行。「+」跟着歌单写入（Playlist.create）那批落，本轮先不画。歌单行的曲目数要逐个 Playlist.getinfo 才有（列表接口不带），侧栏不为此发 N 个请求 —— 落地时歌单行不显示计数，点进去看页头。">
                 <span class="t">我的歌单</span>
                 <button class="icon-btn" title="新建歌单"><i data-ic="plus" data-sz="14"></i></button>
               </div>

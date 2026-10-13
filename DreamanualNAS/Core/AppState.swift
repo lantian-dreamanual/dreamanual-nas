@@ -143,7 +143,8 @@ final class AppState {
             var switched = false
             for second in 1...25 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                // t+8s 拖进度到 60s；t+14s 切下一首 —— 一轮覆盖两条主路径。
+                // t+8s 拖进度到 60s；t+14s 切下一首；t+18s 切到队列页
+                // —— 一轮覆盖三条主路径（队列页没有别的入口，只能这样进）。
                 if second == 8, engine.duration > 0 {
                     engine.seek(to: 60)
                     sought = true
@@ -152,12 +153,43 @@ final class AppState {
                     engine.next()
                     switched = true
                 }
+                if second == 18 {
+                    toggleQueue()
+                    NSLog("[smoke] 已切到队列页 showsQueue=%@", showsQueue ? "1" : "0")
+                }
                 let tag = sought && second <= 13 ? "（已拖）" : switched && second > 14 ? "（已切）" : ""
                 NSLog("[smoke] t+%d%@ %@", second, tag, engine.smokeStatus())
                 if !engine.isPlaying { break }
             }
+            await smokeLibrarySources(manager)
         } catch {
             NSLog("[smoke] 失败：%@", error.localizedDescription)
+        }
+    }
+
+    /// 四个数据源各取一次（侧栏点得动之前，先把「取数通不通」验掉）。
+    private func smokeLibrarySources(_ manager: SessionManager) async {
+        do {
+            let random = try await AudioLibrary.randomSongs(manager, limit: 100)
+            NSLog("[smoke] 每日随机 %@ 首，首条「%@」", String(random.songs.count), random.songs.first?.title ?? "-")
+
+            let top = try await AudioLibrary.topRatedSongs(manager, minRating: 4)
+            NSLog("[smoke] 评分 ≥ 4 星 %@ 首，最高 %@ 星",
+                  String(top.songs.count), String(top.songs.first?.rating ?? 0))
+
+            let lists = try await AudioLibrary.playlists(manager)
+            NSLog("[smoke] 歌单 %@ 个：%@", String(lists.count),
+                  lists.map { "\($0.name)(\($0.type))" }.joined(separator: " / "))
+            // 取歌要逐首补标签，挑个小的（日语 4 首）验通路，别拿大歌单拖冒烟。
+            if let target = lists.first(where: { $0.name == "日语" }) ?? lists.first {
+                let page = try await AudioLibrary.songs(manager, playlistID: target.id)
+                NSLog("[smoke] 歌单「%@」%@ 首，首条「%@」艺术家=%@",
+                      target.name, String(page.songs.count),
+                      page.songs.first?.title ?? "-",
+                      page.songs.first?.artist ?? "-")
+            }
+        } catch {
+            NSLog("[smoke] 数据源自检失败：%@", error.localizedDescription)
         }
     }
 

@@ -94,6 +94,19 @@ struct AudioAlbum: Identifiable, Equatable {
     var yearText: String { year.map(String.init) ?? "" }
 }
 
+/// 歌单。`type` 是 `normal` / `smart`（智能歌单，按规则自动收歌）；
+/// `__SYNO_` 开头的是系统歌单，界面上不出现。
+struct AudioPlaylist: Identifiable, Equatable, Hashable {
+    let id: String
+    let name: String
+    let type: String
+
+    /// 系统歌单靠 **name** 前缀判 —— `id` 的形态是 `playlist_personal_normal/<名字>`
+    /// （实测，「共享歌曲」的 id 也是这个前缀拼出来的），挂在 id 上永远判不中。
+    var isSystem: Bool { name.hasPrefix("__SYNO_") }
+    var isSmart: Bool { type == "smart" }
+}
+
 /// 单字段筛选的四个字段 —— `Song.search` 认这几个，**一次只认一个**。
 enum SongField: String, CaseIterable {
     case title
@@ -136,12 +149,23 @@ struct AudioSongPage {
 ///    调用点必须自己拦住空关键词。
 enum AudioLibrary {
 
+    /// 冒烟自检的日志开关（`DM_SMOKE=1`）：歌单曲目的字段带没带全，只能看真机应答。
+    private static let smoke = ProcessInfo.processInfo.environment["DM_SMOKE"] == "1"
+
+    private static func smokeLog(_ text: String) {
+        guard smoke else { return }
+        NSLog("[library] %@", text)
+    }
+
     /// 一页 1000 首约 1.1 秒，整库 12331 首拉完要 14.7 秒 —— 首屏拉一页，
     /// 滚到底再要下一页。
     static let pageSize = 1000
 
     /// 一次要齐三类附加字段。**逗号串，不是数组。**
     private static let additional = "song_tag,song_audio,song_rating"
+
+    /// 歌单补标签的并发批宽。一批齐了再发下一批。
+    private static let enrichBatch = 8
 
     private static let songAPI = "SYNO.AudioStation.Song"
 
@@ -222,6 +246,159 @@ enum AudioLibrary {
         }
         merged.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         return AudioSongPage(songs: merged, total: merged.count)
+    }
+
+    // MARK: 每日随机
+
+    /// 每日随机：`sort_by=random` 是服务端原生随机（实测连发 4 次回 4 种顺序、
+    /// 都异于默认）。⚠️ 只有 `random` 这一个值有效，`shuffle` / `random_song`
+    /// 都被静默吞掉、退回默认顺序、且不报错。
+    static func randomSongs(_ manager: SessionManager, limit: Int = 100) async throws -> AudioSongPage {
+        let data = try await manager.call(
+            kind: .audio,
+            api: songAPI,
+            version: 3,
+            method: "list",
+            params: [
+                "library": "all",
+                "offset": "0",
+                "limit": String(limit),
+                "sort_by": "random",
+                "additional": additional,
+            ]
+        )
+        return songPage(data)
+    }
+
+    // MARK: 评分 ≥ N 星
+
+    /// 高分曲：**评分筛不了**（`rating=` / `rating_from=` 全被静默忽略，`total`
+    /// 始终是全库数），但 `sort_by=rating&sort_direction=desc` 是被认的。
+    /// 全库几乎都是 0 分 → 高分的都在最前，按评分降序翻页、遇到低于门槛就停，
+    /// 一次都不用拉全库。返回的 `total` 是**收上来的条数**，不是服务端的全库数
+    /// —— 上面那个 `total` 对这一路没有意义，照搬会让「还有更多」永远为真。
+    static func topRatedSongs(
+        _ manager: SessionManager,
+        minRating: Int = 4
+    ) async throws -> AudioSongPage {
+        var collected: [AudioSong] = []
+        var offset = 0
+        while true {
+            let data = try await manager.call(
+                kind: .audio,
+                api: songAPI,
+                version: 3,
+                method: "list",
+                params: [
+                    "library": "all",
+                    "offset": String(offset),
+                    "limit": String(pageSize),
+                    "sort_by": "rating",
+                    "sort_direction": "desc",
+                    "additional": additional,
+                ]
+            )
+            let page = songPage(data)
+            let qualifying = page.songs.prefix { $0.rating >= minRating }
+            collected.append(contentsOf: qualifying)
+            // 这一页里出现了不够星的 → 后面只会更低，收工。
+            if qualifying.count < page.songs.count { break }
+            if page.songs.count < pageSize { break }
+            offset += page.songs.count
+            if offset >= page.total { break }
+        }
+        return AudioSongPage(songs: collected, total: collected.count)
+    }
+
+    // MARK: 歌单
+
+    /// 歌单列表。条目只有 `id` / `library` / `name` / `sharing_status` / `type`，
+    /// **不带曲目数**（`Playlist.list` 给 `additional=songs` 也不展开）。
+    /// `__SYNO_` 开头的是系统歌单（如「共享歌曲」），不进「我的歌单」。
+    static func playlists(_ manager: SessionManager) async throws -> [AudioPlaylist] {
+        let data = try await manager.call(
+            kind: .audio,
+            api: "SYNO.AudioStation.Playlist",
+            version: 2,
+            method: "list",
+            params: ["offset": "0", "limit": String(pageSize)]
+        )
+        let list = ((data as? [String: Any])?["playlists"] as? [[String: Any]]) ?? []
+        return list.compactMap { raw in
+            let id = jsonString(raw["id"])
+            let name = jsonString(raw["name"])
+            guard !id.isEmpty, !name.isEmpty else { return nil }
+            return AudioPlaylist(id: id, name: name, type: jsonString(raw["type"]))
+        }
+        .filter { !$0.isSystem }
+    }
+
+    /// 歌单里的曲目。`Playlist.getinfo` + `additional=songs` 只回**壳** ——
+    /// 每首只有 `id` / `path` / `title` / `type`，把三类附加字段一起要也**不展开**
+    /// （实测三种写法首条顶层键完全一样），批量补的路也全灭：
+    /// `Song.getinfo` 逗号串 / 重复参数都只回 1 条，`id[]` / `id[0]` 回 101，
+    /// `Song.list ids=` 被静默忽略退回全库。
+    ///
+    /// 所以标签要**逐首** `Song.getinfo` 补（8 首一批并发）。补不到的行不丢
+    /// —— 退回壳条目，表格里艺人 / 专辑留空，标题总在。
+    static func songs(
+        _ manager: SessionManager,
+        playlistID: String
+    ) async throws -> AudioSongPage {
+        let data = try await manager.call(
+            kind: .audio,
+            api: "SYNO.AudioStation.Playlist",
+            version: 2,
+            method: "getinfo",
+            params: [
+                "id": playlistID,
+                "offset": "0",
+                "limit": String(pageSize),
+                "additional": "songs",
+            ]
+        )
+        let dict = (data as? [String: Any]) ?? [:]
+        // 曲目挂在 `data.playlists[0].additional.songs`（实测结构，不是顶层）。
+        let box = ((dict["playlists"] as? [[String: Any]])?.first?["additional"] as? [String: Any]) ?? [:]
+        let list = (box["songs"] as? [[String: Any]]) ?? []
+        let total = jsonInt(box["songs_total"]) ?? list.count
+
+        var enriched = [[String: Any]?](repeating: nil, count: list.count)
+        for start in stride(from: 0, to: list.count, by: enrichBatch) {
+            let range = start..<min(start + enrichBatch, list.count)
+            await withTaskGroup(of: (Int, [String: Any]?).self) { group in
+                for index in range {
+                    let id = jsonString(list[index]["id"])
+                    group.addTask { [manager] in
+                        guard !id.isEmpty else { return (index, nil) }
+                        return (index, try? await Self.songInfo(manager, id: id))
+                    }
+                }
+                for await (index, raw) in group {
+                    enriched[index] = raw
+                }
+            }
+        }
+        smokeLog("歌单壳 \(list.count) 条 / total \(total)，标签补齐 \(enriched.compactMap { $0 }.count) 条")
+        let songs = list.enumerated().compactMap { index, shell -> AudioSong? in
+            AudioSong(enriched[index] ?? shell)
+        }
+        return AudioSongPage(songs: songs, total: max(total, songs.count))
+    }
+
+    /// 单首详情。应答结构是 `data.songs`（数组，只装一条）。
+    private static func songInfo(
+        _ manager: SessionManager,
+        id: String
+    ) async throws -> [String: Any]? {
+        let data = try await manager.call(
+            kind: .audio,
+            api: songAPI,
+            version: 3,
+            method: "getinfo",
+            params: ["id": id, "additional": additional]
+        )
+        return ((data as? [String: Any])?["songs"] as? [[String: Any]])?.first
     }
 
     // MARK: 艺术家 / 专辑 / 流派

@@ -118,26 +118,36 @@ enum ListRowState {
 struct LucideIcon: View {
     let name: String
     let size: CGFloat
+    /// 实心态（原型 `data-fill="1"`）：评分星用得到，空星描边、实心星充满。
+    var filled: Bool = false
 
-    init(_ name: String, size: CGFloat) {
+    init(_ name: String, size: CGFloat, filled: Bool = false) {
         self.name = name
         self.size = size
+        self.filled = filled
     }
 
     var body: some View {
         Group {
-            if let image = NSImage(named: "lucide-\(name)") {
+            if let image = NSImage(named: filled ? "lucide-\(name)-fill" : "lucide-\(name)") {
                 Image(nsImage: image)
                     .resizable()
                     .renderingMode(.template)
                     .interpolation(.high)
                     .frame(width: size, height: size)
             } else {
-                Image(systemName: Self.symbolFallback[name] ?? "questionmark")
+                Image(systemName: Self.symbol(for: name, filled: filled))
                     .font(.system(size: size * 0.9, weight: .regular))
                     .frame(width: size, height: size)
             }
         }
+    }
+
+    /// 兜底符号：实心态在原名后接 `.fill`（已是 `.fill` 的不再叠）。
+    private static func symbol(for name: String, filled: Bool) -> String {
+        let base = symbolFallback[name] ?? "questionmark"
+        guard filled, !base.hasSuffix(".fill") else { return base }
+        return "\(base).fill"
     }
 
     private static let symbolFallback: [String: String] = [
@@ -147,6 +157,7 @@ struct LucideIcon: View {
         "gauge": "gauge.medium",
         "settings": "gearshape",
         "music": "music.note",
+        "sparkles": "sparkles",
         "server": "externaldrive.connected.to.line.below",
         "power": "power",
         "search": "magnifyingglass",
@@ -168,6 +179,35 @@ struct LucideIcon: View {
         "link": "link",
         "refresh-cw": "arrow.clockwise",
     ]
+}
+
+// ============ 评分 ============
+
+/// 评分（0–5）：5 颗 10px 星，实心主色 `accent-2`、空星中性 `ink-3`。
+///
+/// **未评分整格留空**（`rating = 0` 时整体隐身）—— 不铺一列空星：曲库一屏
+/// 上百行、绝大多数是 0 分，满屏空星只是噪声。原型 `.rate.ghost` 那条「悬停该行
+/// 才浮出空星」是给「可点」留的提示，等写入（`Song.setrating`）那一批再接。
+struct RatingStars: View {
+    let rating: Int
+    /// 选中行：空星跟着正文走 `accent`，实心星仍取 `accent-2`。
+    var isSelected: Bool = false
+
+    var body: some View {
+        HStack(spacing: DmSpace.s2) {
+            ForEach(1...5, id: \.self) { index in
+                LucideIcon("star", size: DmIcon.i10, filled: index <= rating)
+                    .foregroundColor(color(filled: index <= rating))
+            }
+        }
+        .opacity(rating > 0 ? 1 : 0)
+        .accessibilityLabel(rating > 0 ? "评分 \(rating) 星" : "未评分")
+    }
+
+    private func color(filled: Bool) -> Color {
+        if filled { return Color.dmAccent2 }
+        return isSelected ? Color.dmAccent : Color.dmInk3
+    }
 }
 
 // ============ 共用视图 ============
@@ -651,14 +691,23 @@ extension DmPageHead where Trailing == EmptyView {
 
 /// 「正在播放」的行标 —— 三根静态小条（原型 `.eq`：3 宽、高 6/12/9、accent-2）。
 /// 正在播放与选中共用底色，靠它区分（第八节「选中与悬停」浅底轨）。
+///
+/// 条子用 `Capsule` 而不是 `RoundedRectangle(cornerRadius:)`：3px 宽的条子圆角 1px
+/// 落在尺度档之外（最小档 4），胶囊形在这里等价，也不留裸值。
 struct EqualizerBars: View {
     var color: Color = Color.dmAccent2
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 6)
-            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 12)
-            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 9)
+        HStack(alignment: .bottom, spacing: DmSpace.s2) {
+            bar(height: 6)
+            bar(height: 12)
+            bar(height: 9)
         }
+    }
+
+    private func bar(height: CGFloat) -> some View {
+        Capsule()
+            .fill(color)
+            .frame(width: 3, height: height)
     }
 }
