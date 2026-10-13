@@ -3,10 +3,11 @@ import SwiftUI
 /// 底部常驻播放条：通栏挂在窗口底部，不属于任何模块 —— 切到文件管理或
 /// 系统状态，播放与进度不中断（产品定义第二节「外壳」）。
 ///
-/// 规格照原型 `.player`：三栏（300 / 弹性 / 200）、进度条贴上沿拉满整窗宽
-/// （4px，悬停 8px + 拇指 + 气泡）、播放钮 36 圆、音量条 80×4（填充 `ink-2`）。
-/// 数据源是 `PlaybackEngine` —— 没有引擎（未连接）或队列为空时是**空态**：
-/// 进度条压平、控件禁用、左侧写「未在播放」。
+/// 进度条照网易云的展开形态（2026-10-13 用户拍板）：默认 3px 细线贴上沿、
+/// 兼作与内容区的分隔线；悬停 / 拖动**向上**展开成 8px + 12px 大拇指 + 时间气泡，
+/// 展开向上溢出条外、不挤占内容。其余照原型 `.player`：三栏（300 / 弹性 / 200）、
+/// 播放钮 36 圆、音量条 80×4（填充 `ink-2`）。数据源是 `PlaybackEngine` ——
+/// 没有引擎（未连接）或队列为空时是**空态**：线保持 3px 灰、控件禁用、左侧写「未在播放」。
 struct PlayerBarView: View {
     @Environment(AppState.self) private var state
     let engine: PlaybackEngine?
@@ -20,10 +21,8 @@ struct PlayerBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.dmLine2)
-                .frame(height: DmLine.hairline)
-
+            // 进度线就是播放条的顶线（不再另画发丝），线位只占 3px：
+            // 行高 56 装 44 封面，上下各余 6，边距对称。
             progressLine
 
             HStack(spacing: DmSpace.s16) {
@@ -54,56 +53,72 @@ struct PlayerBarView: View {
         return String(format: "%d:%02d", m, s)
     }
 
+    /// 进度线本体：占位 3px，可视轨道悬停时长到 8px、沿 `.bottom` 对齐**向上溢出**
+    ///（ZStack 子视图超出 frame 不参与布局，所以展开不挤占内容）。拇指 12
+    /// 居中在轨道上；气泡挂在轨道中心上方，悬停时浮到内容区上。
     private var progressLine: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.dmPanel3)
-                Rectangle()
-                    .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
-                    .frame(width: width * shownFraction)
-                if isEngaged {
-                    Circle()
-                        .fill(Color.dmInk)
-                        .frame(width: 12, height: 12)
-                        .offset(x: width * shownFraction - 6)
+        ZStack(alignment: .bottom) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.dmPanel3)
+                    Rectangle()
+                        .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
+                        .frame(width: width * shownFraction)
+                    if isEngaged {
+                        Circle()
+                            .fill(Color.dmInk)
+                            .frame(width: 12, height: 12)
+                            .offset(x: width * shownFraction - 6)
+                    }
+                    if let hoverX, !isScrubbing, let engine, engine.hasQueue {
+                        // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
+                        let hoverTime = Double(hoverX / max(width, 1)) * engine.duration
+                        Text("\(timeText(hoverTime)) / \(timeText(engine.duration))")
+                            .font(.system(size: DmText.t11))
+                            .monospacedDigit()
+                            .foregroundColor(Color.dmInk)
+                            .padding(.horizontal, DmSpace.s8)
+                            .padding(.vertical, DmSpace.s2)
+                            .background(
+                                RoundedRectangle(cornerRadius: DmRadius.r6)
+                                    .fill(Color.dmPanel3)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: DmRadius.r6)
+                                            .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+                                    )
+                            )
+                            .fixedSize()
+                            .offset(x: min(max(hoverX, 40), width - 40), y: -26)
+                    }
                 }
-                if let hoverX, !isScrubbing, let engine, engine.hasQueue {
-                    // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
-                    let hoverTime = Double(hoverX / max(width, 1)) * engine.duration
-                    Text("\(timeText(hoverTime)) / \(timeText(engine.duration))")
-                        .font(.system(size: DmText.t11))
-                        .monospacedDigit()
-                        .foregroundColor(Color.dmInk)
-                        .padding(.horizontal, DmSpace.s8)
-                        .padding(.vertical, DmSpace.s2)
-                        .background(
-                            RoundedRectangle(cornerRadius: DmRadius.r6)
-                                .fill(Color.dmPanel3)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: DmRadius.r6)
-                                        .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
-                                )
-                        )
-                        .fixedSize()
-                        .offset(x: min(max(hoverX, 40), width - 40), y: -26)
-                }
+                .frame(height: isEngaged ? 8 : 3)
             }
-            .frame(height: isEngaged ? 8 : DmSpace.s4)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point): hoverX = point.x
-                case .ended: hoverX = nil
-                }
-            }
-            .animation(.easeOut(duration: DmMotion.fast), value: isEngaged)
-            .gesture(seekGesture(width: width))
-            .disabled(!(engine?.hasQueue ?? false))
         }
-        .frame(height: 8)
+        .frame(height: 3)
+        .overlay(interactionZone)
+        .animation(.easeOut(duration: DmMotion.fast), value: isEngaged)
+    }
+
+    /// 命中区：12px 高、以 overlay 挂在 3px 线位上（不参与布局），上探出条外
+    /// 7.5px、下探进行内 4.5px —— 好命中、也接得住从内容区边缘划过来的指针，
+    /// 又不偷到封面的可点区域（封面距线位 6px 起）。
+    private var interactionZone: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point): hoverX = point.x
+                    case .ended: hoverX = nil
+                    }
+                }
+                .gesture(seekGesture(width: geo.size.width))
+                .disabled(!(engine?.hasQueue ?? false))
+        }
+        .frame(height: 12)
+        .offset(y: -3)
     }
 
     private func seekGesture(width: CGFloat) -> some Gesture {

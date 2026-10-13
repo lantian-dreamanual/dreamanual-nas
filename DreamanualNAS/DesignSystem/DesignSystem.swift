@@ -345,32 +345,35 @@ enum DmSurface {
     }
 }
 
-/// 品牌标记：应用图标位的占位件。两档 —— 侧栏品牌区 26（圆角 `r-8`、图形 14）、
-/// 连接页 48（圆角 `r-12`、图形 24），几何与密码管理 `.lock-mark` 同。
-///
-/// 底走强调色渐变、图形取 `on-accent`（深字方案）。§十 的 App 图标定稿后，
-/// 这里换成图标原图 —— 视频下载与密码管理的品牌位都是直接放图标原图，
-/// 换图标时窗口跟着换，不再描一份。
+/// 品牌标记：直接放图标原图（brand.svg 进 bundle，AppKit 原生读 SVG）。
+/// 两档 —— 侧栏品牌区 26（圆角 `r-8`）、连接页 48（圆角 `r-12`），
+/// 几何与密码管理 `.lock-mark` 同。换图标只动 Resources/brand.svg + AppIcon.icns。
 struct DmBrandMark: View {
     let size: CGFloat
 
     private var radius: CGFloat { size >= 48 ? DmRadius.r12 : DmRadius.r8 }
-    private var glyph: CGFloat { size >= 48 ? DmIcon.i24 : DmIcon.i14 }
+
+    private var artwork: NSImage? {
+        guard let url = Bundle.main.url(forResource: "brand", withExtension: "svg") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: radius)
-            .fill(
-                LinearGradient(
-                    colors: [Color.dmAccentFill2, Color.dmAccentFill],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(width: size, height: size)
-            .overlay(
-                LucideIcon("server", size: glyph)
-                    .foregroundColor(Color.dmOnAccent)
-            )
+        Group {
+            if let image = artwork {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            } else {
+                // bundle 里缺资源时退回强调色实底，不至于白块。
+                RoundedRectangle(cornerRadius: radius)
+                    .fill(Color.dmAccentFill)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: radius))
     }
 }
 

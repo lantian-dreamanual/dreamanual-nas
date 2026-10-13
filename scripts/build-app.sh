@@ -49,6 +49,7 @@ if [ -f "$BUILD_DIR/Assets.car" ]; then
   cp "$BUILD_DIR/Assets.car" "$APP_NAME/Contents/Resources/Assets.car"
 fi
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
+cp DreamanualNAS/Resources/brand.svg "$APP_NAME/Contents/Resources/brand.svg"
 echo "app 组装完成：$APP_NAME"
 
 echo "========== 3/3 签名 =========="

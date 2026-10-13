@@ -47,10 +47,11 @@ nas/
 │   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / 评分星 / 封面 / Toast / LucideIcon
 │   ├── Core/
 │   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
-│   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码
+│   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码 / 取字节（封面）
 │   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
 │   │   ├── KeychainStore.swift    口令只进系统钥匙串
-│   │   ├── AudioLibrary.swift     曲库数据层（四维 / 搜索 / 筛选 / 分页 / 歌单 / 评分读写）
+│   │   ├── AudioLibrary.swift     曲库数据层（四维 / 搜索 / 筛选 / 分页 / 歌单 / 评分读写 / 封面）
+│   │   ├── CoverStore.swift       封面缓存（键按专辑 + 艺术家，负结果也缓存，并发上限 4）
 │   │   ├── PlaybackEngine.swift   播放引擎（队列 / 播放顺序 / 拖进度 / 音量）
 │   │   ├── StreamLoader.swift     取流装载器（自定义 scheme + Range + TLS 策略）
 │   │   └── AppState.swift         连接状态机 + 模块切换
@@ -59,16 +60,20 @@ nas/
 │       ├── LibraryView.swift      曲库页（四维浏览 + 搜索 + 筛选）
 │       ├── QueueView.swift        队列页（播放顺序 + 正在播标记）
 │       ├── RootView.swift         外壳（侧栏 + 主区）
-│       └── PlayerBarView.swift    底部常驻播放条（进度条 + 控制钮 + 音量）
+│       └── PlayerBarView.swift    底部常驻播放条（进度线悬停上展 + 控制钮 + 音量）
+├── Resources/
+│   └── brand.svg        图标源文件（品牌标记直接读它；换图标同时换根目录 AppIcon.icns）
 ├── scripts/
 │   ├── check-tokens.mjs    令牌门禁（生成物一致 + 引用完整）
-│   └── build-app.sh        编译 → 组装 .app → 签名
+│   ├── build-app.sh        编译 → 组装 .app → 签名
+│   └── gen-icon.swift      brand.svg → AppIcon.iconset → icns（一次性，改图标时重跑）
 ├── design/
 │   └── 界面原型.html    整体界面与功能位置（浏览器直接打开，含组件板与标注）
 ├── docs/
 │   ├── 产品定义.md      做什么、不做什么、界面结构
 │   └── 接口结论.md      接口怎么调、踩过的坑（脱敏版）
 ├── project.yml          XcodeGen 工程定义
+├── AppIcon.icns         应用图标（gen-icon.swift 从 brand.svg 生成）
 ├── LICENSE
 └── README.md
 ```
