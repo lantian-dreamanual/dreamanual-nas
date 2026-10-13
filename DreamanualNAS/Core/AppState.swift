@@ -231,6 +231,8 @@ final class AppState {
             let random = try await AudioLibrary.randomSongs(manager, limit: 100)
             NSLog("[smoke] 每日随机 %@ 首，首条「%@」", String(random.songs.count), random.songs.first?.title ?? "-")
 
+            await smokeCovers(manager, songs: Array(random.songs.prefix(12)))
+
             let top = try await AudioLibrary.topRatedSongs(manager, minRating: 4)
             NSLog("[smoke] 评分 ≥ 4 星 %@ 首，最高 %@ 星",
                   String(top.songs.count), String(top.songs.first?.rating ?? 0))
@@ -248,6 +250,29 @@ final class AppState {
             }
         } catch {
             NSLog("[smoke] 数据源自检失败：%@", error.localizedDescription)
+        }
+    }
+
+    /// 封面自检：按专辑取图，最多试 3 张不同的专辑。
+    ///
+    /// 这条路的参数名踩过坑（拿歌曲 `id` 去要一律 404），只有真机回图能证明走对了；
+    /// 顺带验缓存 —— 同一张专辑第二次要图应当直接命中、不再发请求。
+    private func smokeCovers(_ manager: SessionManager, songs: [AudioSong]) async {
+        var keys = Set<String>()
+        for song in songs where !song.album.isEmpty {
+            let key = "\(song.album)\u{1}\(song.albumArtist)"
+            guard keys.insert(key).inserted else { continue }
+            let data = await CoverStore.shared.cover(manager: manager, album: song.album, artist: song.albumArtist)
+            NSLog("[smoke] 封面「%@」/%@ → %@",
+                  song.album,
+                  song.albumArtist.isEmpty ? "-" : song.albumArtist,
+                  data.map { "\($0.count) 字节" } ?? "无图")
+            if keys.count >= 3 { break }
+        }
+        if let first = songs.first(where: { !$0.album.isEmpty }) {
+            let again = await CoverStore.shared.cover(manager: manager, album: first.album, artist: first.albumArtist)
+            NSLog("[smoke] 封面「%@」二次 → %@（走缓存）",
+                  first.album, again.map { "\($0.count) 字节" } ?? "无图")
         }
     }
 
@@ -310,6 +335,8 @@ final class AppState {
         playback?.detach()
         playback = nil
         showsQueue = false
+        // 封面缓存按专辑名做键、不区分是哪个库，换机器要清掉。
+        await CoverStore.shared.clear()
         if let manager = sessionManager {
             await manager.stopKeepAlive()
             await manager.logoutAll()

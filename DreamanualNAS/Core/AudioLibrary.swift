@@ -326,6 +326,28 @@ enum AudioLibrary {
         return AudioSongPage(songs: collected, total: collected.count)
     }
 
+    // MARK: 封面
+
+    /// 专辑封面（`cover.cgi`，回 480×480 JPEG）。
+    ///
+    /// 🔴 参数只认 **`album_name` + `album_artist_name`** —— 拿歌曲 `id` 或文件
+    /// 路径去要一律 404 回 HTML 错误页（接口结论 §二踩过：12 首逐首用 id 全 404，
+    /// 当时误判成「这些文件没有内嵌封面」）。所以这一路按**专辑**问，同一张专辑
+    /// 的歌共用一张图，缓存键就是这两个字段（见 `CoverStore`）。
+    static func cover(_ manager: SessionManager, album: String, artist: String) async throws -> Data {
+        try await manager.data(
+            kind: .audio,
+            api: "SYNO.AudioStation.Cover",
+            version: 3,
+            method: "getcover",
+            params: [
+                "album_name": album,
+                "album_artist_name": artist,
+                "size": "small",
+            ]
+        )
+    }
+
     // MARK: 评分写入
 
     /// 写评分（0–5，0 = 清除）。**只有 v2** —— v1 回 103（方法不存在）。

@@ -199,6 +199,54 @@ final class SynologyClient: @unchecked Sendable {
         return try await send(request, api: params["api"] ?? path, method: params["method"] ?? "")
     }
 
+    /// 取原始字节。封面 / 缩略图这类接口回的是图片，不是 `{success, data}` 信封
+    /// —— 走 `send` 那套会把 JPEG 当 JSON 解、判成 badResponse。
+    ///
+    /// 失败判据不能只看状态码：业务错误依旧是「HTTP 200 + JSON 信封」，所以认
+    /// **`Content-Type` 是 `image/`** 才算拿到图，其余一律当失败，并顺手把信封里
+    /// 的业务码挖出来（不然那个码就丢在字节里了）。
+    func getData(path: String, params: [String: String], credentials: SynologyCredentials?) async throws -> Data {
+        var fields = params
+        if let credentials { fields["_sid"] = credentials.sid }
+        var comps = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        comps?.percentEncodedQuery = Self.formEncode(fields)
+        guard let url = comps?.url else {
+            throw QuickConnectError.badResponse("拼不出 URL：\(path)")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if let credentials {
+            request.setValue(credentials.token, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw QuickConnectError.network(error.localizedDescription)
+        }
+
+        let http = response as? HTTPURLResponse
+        let mime = http?.value(forHTTPHeaderField: "Content-Type") ?? ""
+        if let http, (200..<300).contains(http.statusCode), mime.lowercased().hasPrefix("image/") {
+            return data
+        }
+        if let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let error = envelope["error"] as? [String: Any] {
+            throw SynologyError(
+                code: (error["code"] as? Int) ?? -1,
+                api: params["api"] ?? path,
+                method: params["method"] ?? "",
+                errors: (error["errors"] as? [[String: Any]]) ?? []
+            )
+        }
+        throw QuickConnectError.network(
+            "HTTP \(http?.statusCode ?? -1) · \(mime.isEmpty ? "无 Content-Type" : mime)"
+        )
+    }
+
     /// 自己拼表单：`URLComponents` 默认那套会把口令里的 `+` 原样发出，
     /// 服务端按表单规则解成空格 —— 口令里带 `+` 就登不上，且报错看不出原因。
     /// 这里按 RFC 3986 只留 unreserved 字符，其余全部百分号转义。

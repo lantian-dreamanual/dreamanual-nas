@@ -10,7 +10,9 @@
 > 要带 `X-SYNO-TOKEN`），真机验证过播放 / 拖进度 / 切歌（`DM_SMOKE=1` 冒烟通路）。
 > **内容区侧栏已接**：每日随机 / 全部曲目 / 我的歌单 / 评分 ≥ 4 星（这台库还没评过分，此入口现为空）。
 > **评分写入已接**（真机验证过写 5 / 写 3 / 复原 0 三步回读一致）：曲库表 / 队列表 / 播放条三处都能点星，写后回读校验，写失败弹 Toast。
-> 封面缩略图、表头排序与字段配置、文件管理、系统状态还没接。
+> **封面缩略图已接**（真机验证）：曲库表 / 队列表标题列内嵌 28px、播放条 44px，按专辑取图（`cover.cgi` 只认
+> `album_name` + `album_artist_name`）、同专辑缓存、无图退占位。
+> 表头排序与字段配置、文件管理、系统状态还没接。
 
 ## 功能
 
@@ -42,7 +44,7 @@ nas/
 │   ├── DreamanualNASApp.swift   入口：固定深色 + 窗口
 │   ├── DesignSystem/
 │   │   ├── DreamanualTheme.nas.swift   生成物副本（勿手改，门禁对账 design/dist）
-│   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / 评分星 / Toast / LucideIcon
+│   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / 评分星 / 封面 / Toast / LucideIcon
 │   ├── Core/
 │   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
 │   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码

@@ -747,6 +747,57 @@ extension DmPageHead where Trailing == EmptyView {
     }
 }
 
+// ============ 封面缩略图 ============
+
+/// 封面缩略图。尺寸由所在位置定（曲库表行内 28、播放条 44），
+/// 圆角一律 `r-8`、图形跟尺寸走（12 / 20）。
+///
+/// **没有图时退回占位**：`panel-2` 底 + `music` 图形取 `ink-3` —— 专辑没有内嵌
+/// 封面、或还没取回来，都是这一格。原型的渐变底是占位美术，不落进实现。
+///
+/// 取图异步、按「专辑 + 专辑艺术家」缓存（`CoverStore`），同一张专辑只问服务端
+/// 一次。曲库表里每行一个实例，靠列表的惰性渲染兜住量 —— 滚出来的行才发请求。
+struct DmCover: View {
+    @Environment(AppState.self) private var state
+
+    let album: String
+    let artist: String
+    let size: CGFloat
+
+    @State private var image: NSImage?
+
+    private var iconSize: CGFloat { size >= 44 ? DmIcon.i20 : DmIcon.i12 }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .fill(Color.dmPanel2)
+            LucideIcon("music", size: iconSize)
+                .foregroundColor(Color.dmInk3)
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(RoundedRectangle(cornerRadius: DmRadius.r8))
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: size, height: size)
+        .animation(.easeOut(duration: DmMotion.fast), value: image == nil)
+        // 换歌 / 换专辑重取一次；同一张专辑在缓存里，不会重复发请求。
+        .task(id: "\(album)\u{1}\(artist)") { await load() }
+    }
+
+    private func load() async {
+        guard !album.isEmpty, let manager = state.sessionManager else {
+            image = nil
+            return
+        }
+        let data = await CoverStore.shared.cover(manager: manager, album: album, artist: artist)
+        image = data.flatMap(NSImage.init(data:))
+    }
+}
+
 // ============ 均衡器标记 ============
 
 /// 「正在播放」的行标 —— 三根静态小条（原型 `.eq`：3 宽、高 6/12/9、accent-2）。

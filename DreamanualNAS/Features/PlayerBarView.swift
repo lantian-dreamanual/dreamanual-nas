@@ -124,13 +124,11 @@ struct PlayerBarView: View {
 
     private var nowPlaying: some View {
         HStack(spacing: DmSpace.s10) {
-            RoundedRectangle(cornerRadius: DmRadius.r6)
-                .fill(Color.dmPanel2)
-                .frame(width: 44, height: 44)
-                .overlay(
-                    LucideIcon("music", size: DmIcon.i20)
-                        .foregroundColor(Color.dmInk3)
-                )
+            DmCover(
+                album: engine?.currentSong?.album ?? "",
+                artist: engine?.currentSong?.albumArtist ?? "",
+                size: 44
+            )
             VStack(alignment: .leading, spacing: DmSpace.s2) {
                 if let song = engine?.currentSong {
                     Text(song.title)

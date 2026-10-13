@@ -143,13 +143,16 @@ private struct QueueRow: View {
             .frame(width: 56, alignment: .leading)
             .padding(.horizontal, TrackColumn.padH)
 
-            Text(song.title)
-                .font(.system(size: DmText.t13, weight: .medium))
-                .foregroundColor(ListRowState.primaryForeground(isSelected: isPlaying))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, TrackColumn.padH)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: DmSpace.s8) {
+                DmCover(album: song.album, artist: song.albumArtist, size: 28)
+                Text(song.title)
+                    .font(.system(size: DmText.t13, weight: .medium))
+                    .foregroundColor(ListRowState.primaryForeground(isSelected: isPlaying))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, TrackColumn.padH)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             plain(song.artist, width: 96)
             plain(song.album, width: 96)

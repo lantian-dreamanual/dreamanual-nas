@@ -74,6 +74,32 @@ actor SessionManager {
         }
     }
 
+    /// 取原始字节的非 JSON 接口（封面 / 缩略图）。与 `call` 同构 —— 会话失效
+    /// 同样丢掉重登、重放这一条。
+    func data(
+        kind: Kind,
+        api: String,
+        version: Int,
+        method: String,
+        params: [String: String] = [:],
+        path: String? = nil
+    ) async throws -> Data {
+        var fields = params
+        fields["api"] = api
+        fields["version"] = String(version)
+        fields["method"] = method
+
+        let target = try await entryPath(for: api, overriding: path)
+        let creds = try await credentials(for: kind)
+        do {
+            return try await client.getData(path: target, params: fields, credentials: creds)
+        } catch let error as SynologyError where error.isSessionInvalid {
+            sessions[kind] = nil
+            let refreshed = try await credentials(for: kind)
+            return try await client.getData(path: target, params: fields, credentials: refreshed)
+        }
+    }
+
     /// 这一条请求该走哪条路径。文件与系统类的接口都在 `entry.cgi` 上，地图里
     /// 查不到（或地图本身拉不下来）时退回去。
     private func entryPath(for api: String, overriding path: String?) async throws -> String {
