@@ -11,8 +11,12 @@ import SwiftUI
 /// 左封面 280、右信息栏 380，间距 56（容器级留白，第 5 节按布局值保留）。
 ///
 /// 歌词区两态（第八节「沉浸模式」）：**有歌词**就逐行渲染、当前行高亮并跟着进度
-/// 居中滚；**没有歌词**不留白板，换成「未匹配到歌词 + 接下来播放」—— 库里带内嵌
-/// 歌词的只有约 0.3%，所以「没有歌词」是常态，不配警告色。
+/// 居中滚、离当前行越远越淡；**没有歌词**不留白板，换成「未匹配到歌词 + 接下来
+/// 播放」—— 库里带内嵌歌词的只有约 0.3%，所以「没有歌词」是常态，不配警告色。
+///
+/// 🔴 这一屏是**远看**的：字号整体比常规页面大一档到两档（歌名 34、歌词 17/20），
+/// 常规页的 13/12 在这一屏看着费劲（2026-10-13 用户点名）。要改这一屏的字号，
+/// 照「第八节 · 沉浸模式」那张表改，别按常规页面对齐。
 struct ImmersiveView: View {
     @Environment(AppState.self) private var state
 
@@ -53,7 +57,7 @@ struct ImmersiveView: View {
             .padding(DmSpace.s24)
         } else {
             Text("队列空了")
-                .font(.system(size: DmText.t13))
+                .font(.system(size: DmText.t15))
                 .foregroundColor(Color.dmInk3)
         }
     }
@@ -122,8 +126,8 @@ struct ImmersiveView: View {
     private func info(_ song: AudioSong) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(song.title)
-                .font(.system(size: DmText.t28, weight: .bold))
-                .kerning(-0.56)
+                .font(.system(size: DmText.t34, weight: .bold))
+                .kerning(-0.68)
                 .foregroundColor(Color.dmInk)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -133,15 +137,15 @@ struct ImmersiveView: View {
                     Task { await state.showSongs(byArtist: song.artist) }
                 } label: {
                     Text(song.artist)
-                        .font(.system(size: DmText.t15))
+                        .font(.system(size: DmText.t17))
                         .foregroundColor(Color.dmAccent2)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, DmSpace.s6)
+                .padding(.top, DmSpace.s8)
             }
 
             Text(metaLine(song))
-                .font(.system(size: DmText.t12))
+                .font(.system(size: DmText.t13))
                 .foregroundColor(Color.dmInk3)
                 .lineLimit(1)
                 .padding(.top, DmSpace.s8)
@@ -180,25 +184,38 @@ struct ImmersiveView: View {
         return lyrics.activeIndex(at: engine.currentTime)
     }
 
+    /// 离当前行越远越淡（2026-10-13 用户点名：远处的行别跟当前行抢视线）：
+    /// 每往外一行掉 0.25、压到 0.2 为止，当前行满档。整篇没有时间轴（`activeLine`
+    /// 为 nil）时不衰减 —— 那时没有「当前行」可参照，一行都不该被压暗。
+    private func lyricOpacity(_ index: Int) -> Double {
+        guard let activeLine else { return 1 }
+        return max(0.2, 1 - 0.25 * Double(abs(index - activeLine)))
+    }
+
     private func lyricsList(_ lyrics: Lyrics) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: DmSpace.s10) {
+                VStack(alignment: .leading, spacing: DmSpace.s12) {
                     ForEach(lyrics.lines.indices, id: \.self) { index in
                         Text(lyrics.lines[index].text)
                             .font(.system(
-                                size: index == activeLine ? DmText.t14 : DmText.t13,
+                                size: index == activeLine ? DmText.t20 : DmText.t17,
                                 weight: index == activeLine ? .semibold : .regular
                             ))
                             .foregroundColor(index == activeLine ? Color.dmAccent2 : Color.dmInk3)
+                            .opacity(lyricOpacity(index))
                             .fixedSize(horizontal: false, vertical: true)
+                            // 行盒下限 30（放在 fixedSize 之后才有意义）：单行歌词都占
+                            // 同一档高，当前行在 17 / 20 之间换档时整块不跟着抖
+                            //（20 的自然行高不到 30、撑不破；折行的行按实际高度走）。
+                            .frame(minHeight: 30, alignment: .leading)
                             .id(index)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, DmSpace.s4)
             }
-            .frame(height: 250)
+            .frame(height: 300)
             .padding(.top, DmSpace.s24)
             .onChange(of: activeLine) { _, line in
                 guard lyrics.hasTimeline, let line else { return }
@@ -213,10 +230,10 @@ struct ImmersiveView: View {
     private var nextUp: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: DmSpace.s8) {
-                LucideIcon("info", size: DmIcon.i12)
+                LucideIcon("info", size: DmIcon.i14)
                     .foregroundColor(Color.dmInk3)
                 Text("未匹配到歌词")
-                    .font(.system(size: DmText.t12))
+                    .font(.system(size: DmText.t13))
                     .foregroundColor(Color.dmInk3)
             }
 
@@ -227,8 +244,8 @@ struct ImmersiveView: View {
                 .padding(.top, DmSpace.s16)
 
             Text(engine?.nextSong == nil ? "队列到此为止" : "接下来播放")
-                .font(.system(size: DmText.t11))
-                .kerning(0.88)
+                .font(.system(size: DmText.t12))
+                .kerning(0.96)
                 .foregroundColor(Color.dmInk3)
                 .padding(.top, DmSpace.s16)
 
@@ -237,7 +254,7 @@ struct ImmersiveView: View {
                     .padding(.top, DmSpace.s10)
             } else {
                 Text("这一首是队列的最后一首")
-                    .font(.system(size: DmText.t12))
+                    .font(.system(size: DmText.t13))
                     .foregroundColor(Color.dmInk3)
                     .padding(.top, DmSpace.s10)
             }
@@ -260,11 +277,11 @@ struct ImmersiveView: View {
 
                 VStack(alignment: .leading, spacing: DmSpace.s2) {
                     Text(next.title)
-                        .font(.system(size: DmText.t15, weight: .semibold))
+                        .font(.system(size: DmText.t17, weight: .semibold))
                         .foregroundColor(Color.dmInk)
                         .lineLimit(1)
                     Text([next.artist, next.album].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: DmText.t12))
+                        .font(.system(size: DmText.t13))
                         .foregroundColor(Color.dmInk3)
                         .lineLimit(1)
                 }
@@ -272,7 +289,7 @@ struct ImmersiveView: View {
                 Spacer(minLength: 0)
 
                 Text(next.durationText)
-                    .font(.system(size: DmText.t12))
+                    .font(.system(size: DmText.t13))
                     .monospacedDigit()
                     .foregroundColor(Color.dmInk3)
             }
