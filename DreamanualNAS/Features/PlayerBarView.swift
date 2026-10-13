@@ -5,10 +5,11 @@ import SwiftUI
 ///
 /// 进度条照网易云的展开形态（2026-10-13 用户拍板）：默认 3px 细线贴上沿、
 /// 兼作与内容区的分隔线；悬停 / 拖动**向上**展开成 6px + 10px 大拇指 + 时间气泡，
-/// 展开向上溢出条外、不挤占内容。播放行顶边距 6 / 底边距 10（顶上有线位压着，
-/// 视觉才对称）。其余照原型 `.player`：三栏（300 / 弹性 / 200）、
-/// 播放钮 36 圆、音量条 80×4（填充 `ink-2`）。数据源是 `PlaybackEngine` ——
-/// 没有引擎（未连接）或队列为空时是**空态**：线保持 3px 灰、控件禁用、左侧写「未在播放」。
+/// 展开向上溢出条外、不挤占内容。播放行**四周一圈 16**（与横向同档），进度线挂
+/// overlay、不占布局 —— 线位算在布局里的话，顶上会比底下多出 3px。其余照原型
+/// `.player`：三栏（300 / 弹性 / 200）、播放钮 36 圆、音量条 80×4（填充 `ink-2`）。
+/// 数据源是 `PlaybackEngine` —— 没有引擎（未连接）或队列为空时是**空态**：
+/// 线保持 3px 灰、控件禁用、左侧写「未在播放」。
 struct PlayerBarView: View {
     @Environment(AppState.self) private var state
     let engine: PlaybackEngine?
@@ -21,24 +22,21 @@ struct PlayerBarView: View {
     @State private var isPlayHovered = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 进度线就是播放条的顶线（不再另画发丝），线位只占 3px：
-            // 行高 56 装 44 封面，上下各余 6，边距对称。
-            progressLine
-
-            HStack(spacing: DmSpace.s16) {
-                nowPlaying
-                Spacer(minLength: 0)
-                controls
-                Spacer(minLength: 0)
-                volume
-            }
-            .padding(.horizontal, DmSpace.s16)
-            // 底边距比顶边距大 4：顶上有 3px 线位压着，视觉上才对称
-            //（2026-10-13 用户反馈「下边距小」）。
-            .padding(.top, DmSpace.s6)
-            .padding(.bottom, DmSpace.s10)
+        HStack(spacing: DmSpace.s16) {
+            nowPlaying
+            Spacer(minLength: 0)
+            controls
+            Spacer(minLength: 0)
+            volume
         }
+        // 四周一圈 16：条沿到内容，上下与左右同档。
+        // 🔴 进度线挂 overlay、不参与布局（2026-10-13 第四轮）。线位算在布局里的
+        // 两版（上下对称 6/6、后来 6/10）都被点名「上下不一样」：顶上那条 3px 线
+        // 是看得出厚度的一截，用户把「线 + 上内边距」当上边距在与下面比。挂 overlay
+        // 之后线落在上内边距里，「条沿 → 内容」的距离就是内边距本身，与底部同档。
+        .padding(.horizontal, DmSpace.s16)
+        .padding(.vertical, DmSpace.s16)
+        .overlay(alignment: .top) { progressLine }
         .background(Color.dmPanel)
     }
 
@@ -57,11 +55,11 @@ struct PlayerBarView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// 进度线本体：占位 3px；悬停时长到 6px 且**整体抬到条沿外**（轨道 [-6,0]，
-    /// 拇指骑在沿上）—— 展开只向上、条内几何不动。🔴 两个布局坑（2026-10-13
-    /// 用户两轮抓出来的）：① GeometryReader 把超框子视图居中放，轨道要在 GR
-    /// 里钉底再抬；② 气泡不能当轨道 ZStack 的布局子视图（Text 撑高 ZStack、
-    /// 轨道跟着居中漂），要挂 overlay。
+    /// 进度线本体：线位 3px（挂 `overlay(alignment: .top)`，不占播放行布局）；
+    /// 悬停时长到 6px 且**整体抬到条沿外**（轨道 [-6,0]，拇指骑在沿上）——
+    /// 展开只向上、条内几何不动。🔴 两个布局坑（2026-10-13 用户两轮抓出来的）：
+    /// ① GeometryReader 把超框子视图居中放，轨道要在 GR 里钉底再抬；② 气泡不能当
+    /// 轨道 ZStack 的布局子视图（Text 撑高 ZStack、轨道跟着居中漂），要挂 overlay。
     private var progressLine: some View {
         GeometryReader { geo in
             let width = geo.size.width
@@ -115,7 +113,7 @@ struct PlayerBarView: View {
 
     /// 命中区：12px 高、以 overlay 挂在 3px 线位上（不参与布局），上探出条外
     /// 7.5px、下探进行内 4.5px —— 好命中、也接得住从内容区边缘划过来的指针，
-    /// 又不偷到封面的可点区域（封面距线位 6px 起）。
+    /// 又不偷到封面的可点区域（封面距条沿 16px 起）。
     private var interactionZone: some View {
         GeometryReader { geo in
             Color.clear
