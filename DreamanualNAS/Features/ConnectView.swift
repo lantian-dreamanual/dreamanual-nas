@@ -5,7 +5,7 @@ import SwiftUI
 /// 形态对着密码管理的解锁页（`.lock-card`）落：整屏 `bg`、卡片居中、卡内一律左对齐
 /// （标记 → 标题 → 分段 → 字段 → 主按钮 → 状态行）。卡片取 `panel-2` + `line` 1px
 /// + `r-16` + `shadow-card`，与 `.lock-card` 同一套角色；宽度按本页内容收到 420。
-/// 两种连接方式走分段切换，口令连上即存钥匙串。
+/// 两种连接方式走分段切换，口令连上即存本机凭据文件（0600，见 CredentialStore）。
 struct ConnectView: View {
     @Environment(AppState.self) private var state
 

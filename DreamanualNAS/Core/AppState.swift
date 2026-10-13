@@ -135,18 +135,17 @@ final class AppState {
 
     // MARK: - 连接
 
-    /// 启动时自动连一次（钥匙串里真有那条凭据才动）。
+    /// 启动时自动连一次（本机凭据文件里真有那条才动）。
     ///
-    /// 钥匙串的读可能弹系统授权框 —— 每次重新编译，ad-hoc 签名跟着变，macOS
-    /// 要求重新授权读取 `dreamanual-nas` 条目；`SecItemCopyMatching` 在框被点掉
-    /// 之前不返回。所以读取不能留在 `@MainActor` 上：挂在主线程时弹窗期间整个
-    /// 窗口都不渲染（2026-10-12 实测：进程活着、窗口 0×0、卡死在启动帧）。
+    /// 读文件不弹任何系统框；只有文件还没有、要走钥匙串迁移那一次可能弹
+    /// 授权框。所以读取依然不能留在 `@MainActor` 上：挂在主线程时弹窗期间
+    /// 整个窗口都不渲染（2026-10-12 实测：进程活着、窗口 0×0、卡死启动帧）。
     func restoreAndAutoConnect() async {
         guard isConnected == false, phase.isBusy == false else { return }
         let endpoint = endpointKey
         let user = trimmedUsername
         let saved = await Task.detached(priority: .userInitiated) {
-            KeychainStore.password(endpointID: endpoint, username: user)
+            CredentialStore.load(endpointID: endpoint, username: user)
         }.value
         guard let password = saved else { return }
         await connect(password: password)
@@ -276,7 +275,7 @@ final class AppState {
         }
     }
 
-    /// - Parameter password: 口令只在内存里传，落盘只落钥匙串。
+    /// - Parameter password: 口令只在内存里传，落盘只落本机凭据文件（0600）。
     func connect(password: String) async {
         guard phase.isBusy == false else { return }
         phase = .resolving
@@ -319,15 +318,11 @@ final class AppState {
             lastConnectedAt = Date()
             phase = .connected
 
-            // 连上即存：口令只进钥匙串，下次启动自动重连。写也走后台 ——
-            // 同一条授权框没点掉时写入一样会挂住主线程。
-            // 🔴 口令没变就不重写：save 是删了重建，会把条目上的访问授权
-            //（security -A、历次「始终允许」）一并清掉，重编译后又要授权。
-            let account = KeychainStore.accountKey(endpointID: endpointKey, username: user)
+            // 连上即存：口令落本机文件（0600），下次启动自动重连。写也走后台，
+            // 不占主线程。
+            let key = endpointKey
             Task.detached(priority: .utility) {
-                if KeychainStore.password(account: account) != password {
-                    KeychainStore.save(password: password, account: account)
-                }
+                CredentialStore.save(password: password, endpointID: key, username: user)
             }
         } catch {
             phase = .failed(error.localizedDescription)
@@ -350,7 +345,7 @@ final class AppState {
         phase = .idle
     }
 
-    /// 钥匙串条目的键：QuickConnect ID 与直连地址是两个不同的「端点身份」，
+    /// 凭据条目的键：QuickConnect ID 与直连地址是两个不同的「端点身份」，
     /// 各自记各自的凭据，切换连接方式不会互相覆盖。
     private var endpointKey: String {
         if let direct = DirectAddress.parse(directAddress) { return "direct:\(direct.host):\(direct.port)" }
