@@ -756,16 +756,22 @@ extension DmPageHead where Trailing == EmptyView {
 /// 封面缩略图。尺寸由所在位置定（曲库表行内 28、播放条 44），
 /// 圆角一律 `r-8`、图形跟尺寸走（12 / 20）。
 ///
-/// **没有图时退回占位**：`panel-2` 底 + `music` 图形取 `ink-3` —— 专辑没有内嵌
-/// 封面、或还没取回来，都是这一格。原型的渐变底是占位美术，不落进实现。
+/// **没有图时退回占位**：`panel-2` 底 + `music` 图形取 `ink-3` —— 专辑没有封面图、
+/// 或还没取回来，都是这一格。原型的渐变底是占位美术，不落进实现。
 ///
-/// 取图异步、按「专辑 + 专辑艺术家」缓存（`CoverStore`），同一张专辑只问服务端
-/// 一次。曲库表里每行一个实例，靠列表的惰性渲染兜住量 —— 滚出来的行才发请求。
+/// 取图异步、按「歌所在的目录 + 档位」缓存（`CoverStore`），同一张专辑只问服务端
+/// 一次。**必须传 `folder`**（`song.folder`）：库里同名但不同源的专辑会缺
+/// `album_artist` 标签、被 DSM 并成一张，按专辑名取图会串台（2026-10-13 实测，
+/// 见 `AudioLibrary.folderCover`）。曲库表里每行一个实例，靠列表的惰性渲染兜住量
+/// —— 滚出来的行才发请求。
 struct DmCover: View {
     @Environment(AppState.self) private var state
 
     let album: String
     let artist: String
+    /// 歌所在目录。取图的首选依据 —— **不给默认值**，逼调用点传 `song.folder`：
+    /// 省掉它就等于退回「按专辑名取图」，正是串台那条老路。
+    let folder: String
     let size: CGFloat
 
     @State private var image: NSImage?
@@ -789,15 +795,23 @@ struct DmCover: View {
         .frame(width: size, height: size)
         .animation(.easeOut(duration: DmMotion.fast), value: image == nil)
         // 换歌 / 换专辑重取一次；同一张专辑在缓存里，不会重复发请求。
-        .task(id: "\(album)\u{1}\(artist)") { await load() }
+        .task(id: "\(folder)\u{1}\(album)\u{1}\(artist)") { await load() }
     }
 
     private func load() async {
-        guard !album.isEmpty, let manager = state.sessionManager else {
+        guard !(album.isEmpty && folder.isEmpty), let manager = state.sessionManager else {
             image = nil
             return
         }
-        let data = await CoverStore.shared.cover(manager: manager, album: album, artist: artist)
+        let data = await CoverStore.shared.cover(
+            manager: manager,
+            album: album,
+            artist: artist,
+            folder: folder,
+            // 行内 28 / 播放条 44 都走缩略图；再大（沉浸屏那类）才要原图。
+            // 这个组件目前的落点最大 44，留着档位判断免得以后加了尺寸忘了改。
+            highRes: size >= 200
+        )
         image = data.flatMap(NSImage.init(data:))
     }
 }

@@ -307,7 +307,7 @@ struct ImmersiveView: View {
 
     private var coverTaskKey: String {
         guard let song, !song.album.isEmpty else { return "" }
-        return "\(song.album)\u{1}\(song.albumArtist)"
+        return "\(song.folder)\u{1}\(song.album)\u{1}\(song.albumArtist)"
     }
 
     private func loadCover() async {
@@ -318,7 +318,10 @@ struct ImmersiveView: View {
         let data = await CoverStore.shared.cover(
             manager: manager,
             album: song.album,
-            artist: song.albumArtist
+            artist: song.albumArtist,
+            folder: song.folder,
+            // 280 见方的封面卡：要原图，120×120 的缩略图放大到这个尺寸会糊。
+            highRes: true
         )
         coverImage = data.flatMap(NSImage.init(data:))
     }

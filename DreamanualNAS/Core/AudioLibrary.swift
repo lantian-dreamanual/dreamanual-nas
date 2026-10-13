@@ -79,6 +79,13 @@ struct AudioSong: Identifiable, Equatable {
     }
 
     var yearText: String { year.map(String.init) ?? "" }
+
+    /// 歌所在目录。曲库的约定是一张专辑一个目录（`/music/<歌手>/<年.专辑>/`），
+    /// 封面就放在这个目录里 —— 取图用它比问专辑名可靠，理由见 `folderCover`。
+    var folder: String {
+        guard let slash = path.lastIndex(of: "/") else { return "" }
+        return String(path[path.startIndex..<slash])
+    }
 }
 
 struct AudioArtist: Identifiable, Equatable {
@@ -328,12 +335,13 @@ enum AudioLibrary {
 
     // MARK: 封面
 
-    /// 专辑封面（`cover.cgi`，回 480×480 JPEG）。
+    /// 专辑封面（`cover.cgi`，回 480×480 JPEG）。**现在只当兜底** —— 首选走
+    /// `folderCover`（歌自己目录里那张图），理由见那个方法的注释。
     ///
     /// 🔴 参数只认 **`album_name` + `album_artist_name`** —— 拿歌曲 `id` 或文件
     /// 路径去要一律 404 回 HTML 错误页（接口结论 §二踩过：12 首逐首用 id 全 404，
     /// 当时误判成「这些文件没有内嵌封面」）。所以这一路按**专辑**问，同一张专辑
-    /// 的歌共用一张图，缓存键就是这两个字段（见 `CoverStore`）。
+    /// 的歌共用一张图。
     static func cover(_ manager: SessionManager, album: String, artist: String) async throws -> Data {
         try await manager.data(
             kind: .audio,
@@ -347,6 +355,66 @@ enum AudioLibrary {
             ]
         )
     }
+
+    /// 歌所在目录里的封面图（`cover.jpg` 之类）。取不到回 `nil`，交给调用方兜底。
+    ///
+    /// 🔴 **为什么要走这条路（2026-10-13 用户真机抓到串台）**：`getcover` 是按
+    /// 「专辑名 + 专辑艺术家」在 DSM 的专辑库里找图，而库里同名但不同源的专辑只要
+    /// 都缺 `album_artist` 标签，DSM 就把它们并成**一个专辑实体** —— 实测专辑名
+    /// 「0」下并了 Low Roar（2014.0）/ Superfly（2020.0）/ 林忆莲（2024.0）三家
+    /// 五首，于是别人的歌全挂着同一张图（用户原话：「封面都变成了林忆莲的专辑
+    /// 封面」）。这不是取图接口的错，是那几张专辑在 DSM 眼里就是同一张。
+    /// 曲库的目录约定是一张专辑一个目录，封面是目录里的图片文件，**从歌自己所在
+    /// 的目录取图**完全不受专辑合并影响（实测三张同名专辑各自 `cover.jpg` 的
+    /// md5 互不相同，随机 20 个专辑目录 20/20 有图）。
+    ///
+    /// - Parameter highRes: 大图场景（沉浸屏 280 见方）取原图 —— `Thumb` 只给
+    ///   120×120，放大到 280 会糊。原图走 `Download` 的 **`mode=open`**：
+    ///   `mode=download` 回的字节一样，但 `Content-Type` 是
+    ///   `application/octet-stream`，按 MIME 判类型的代码会判错。
+    static func folderCover(
+        _ manager: SessionManager,
+        folder: String,
+        highRes: Bool
+    ) async throws -> Data? {
+        guard !folder.isEmpty else { return nil }
+        let listing = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.List",
+            version: 2,
+            method: "list",
+            // 🔴 `folder_path` 必须给**纯字符串**，给 JSON 数组回一整页 HTML。
+            params: ["folder_path": folder, "limit": "100"]
+        )
+        let files = ((listing as? [String: Any])?["files"] as? [[String: Any]]) ?? []
+        // 文件名不固定（这台机上是 cover.jpg），按扩展名挑第一个图片文件；
+        // `.DS_Store` 这类隐藏文件跳过。
+        guard let image = files.first(where: { item in
+            let name = (item["name"] as? String) ?? ""
+            return !name.hasPrefix(".")
+                && coverExtensions.contains((name as NSString).pathExtension.lowercased())
+        }), let path = image["path"] as? String else { return nil }
+
+        if highRes {
+            return try await manager.data(
+                kind: .file,
+                api: "SYNO.FileStation.Download",
+                version: 2,
+                method: "download",
+                params: ["path": path, "mode": "open"]
+            )
+        }
+        return try await manager.data(
+            kind: .file,
+            api: "SYNO.FileStation.Thumb",
+            version: 2,
+            method: "get",
+            params: ["path": path, "size": "small", "rotate": "0"]
+        )
+    }
+
+    /// 目录里算封面图的扩展名。
+    private static let coverExtensions: Set<String> = ["jpg", "jpeg", "png", "webp"]
 
     // MARK: 评分写入
 

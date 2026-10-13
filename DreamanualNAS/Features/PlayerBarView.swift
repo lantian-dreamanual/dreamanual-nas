@@ -163,6 +163,7 @@ struct PlayerBarView: View {
                     DmCover(
                         album: engine?.currentSong?.album ?? "",
                         artist: engine?.currentSong?.albumArtist ?? "",
+                        folder: engine?.currentSong?.folder ?? "",
                         size: 44
                     )
                     trackLabels

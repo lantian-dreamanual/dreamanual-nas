@@ -337,9 +337,14 @@ final class AppState {
     private func smokeCovers(_ manager: SessionManager, songs: [AudioSong]) async {
         var keys = Set<String>()
         for song in songs where !song.album.isEmpty {
-            let key = "\(song.album)\u{1}\(song.albumArtist)"
+            let key = "\(song.folder)\u{1}\(song.album)\u{1}\(song.albumArtist)"
             guard keys.insert(key).inserted else { continue }
-            let data = await CoverStore.shared.cover(manager: manager, album: song.album, artist: song.albumArtist)
+            let data = await CoverStore.shared.cover(
+                manager: manager,
+                album: song.album,
+                artist: song.albumArtist,
+                folder: song.folder
+            )
             NSLog("[smoke] 封面「%@」/%@ → %@",
                   song.album,
                   song.albumArtist.isEmpty ? "-" : song.albumArtist,
@@ -347,7 +352,12 @@ final class AppState {
             if keys.count >= 3 { break }
         }
         if let first = songs.first(where: { !$0.album.isEmpty }) {
-            let again = await CoverStore.shared.cover(manager: manager, album: first.album, artist: first.albumArtist)
+            let again = await CoverStore.shared.cover(
+                manager: manager,
+                album: first.album,
+                artist: first.albumArtist,
+                folder: first.folder
+            )
             NSLog("[smoke] 封面「%@」二次 → %@（走缓存）",
                   first.album, again.map { "\($0.count) 字节" } ?? "无图")
         }

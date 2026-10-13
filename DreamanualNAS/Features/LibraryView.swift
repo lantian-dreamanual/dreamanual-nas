@@ -749,7 +749,7 @@ struct TrackRow: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: DmSpace.s8) {
-                DmCover(album: song.album, artist: song.albumArtist, size: 28)
+                DmCover(album: song.album, artist: song.albumArtist, folder: song.folder, size: 28)
                 if isPlaying {
                     EqualizerBars()
                 }

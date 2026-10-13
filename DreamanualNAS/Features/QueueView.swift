@@ -144,7 +144,7 @@ private struct QueueRow: View {
             .padding(.horizontal, TrackColumn.padH)
 
             HStack(spacing: DmSpace.s8) {
-                DmCover(album: song.album, artist: song.albumArtist, size: 28)
+                DmCover(album: song.album, artist: song.albumArtist, folder: song.folder, size: 28)
                 Text(song.title)
                     .font(.system(size: DmText.t13, weight: .medium))
                     .foregroundColor(ListRowState.primaryForeground(isSelected: isPlaying))
