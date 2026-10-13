@@ -711,9 +711,12 @@ private struct TrackHeader: View {
     }
 }
 
-/// 一行曲目 —— **列表行（浅底轨）**：选中 `accent-soft` 底 + `accent-2` 字、
-/// 次要格 `accent`；悬停 `panel-2` 底 + `ink` 字。正在播的行同浅底、
-/// 标题前挂均衡器（与选中靠图标区分）。列与列宽对着原型 `colgroup`。
+/// 一行曲目 —— **列表行（浅底轨）**，且是唯一同时承担「正在播」与「选中」
+/// 两个标记的行：**正在播独占 accent 档**（`accent-soft` 底 + `accent-2` 字、
+/// 次要格 `accent`、标题前挂均衡器）；**选中降一档**（2026-10-13 用户拍板）——
+/// 与正在播同档会看着像两首同时在播，选中改成悬停同款底（`panel-2`）、
+/// 字保持默认态。选中本身留着（以后多选拖歌单要用）。悬停只给两态都没有
+/// 的行抬底 —— 选中行本来就停在悬停底上。列与列宽对着原型 `colgroup`。
 struct TrackRow: View {
     let song: AudioSong
     let isSelected: Bool
@@ -725,8 +728,23 @@ struct TrackRow: View {
 
     @State private var isHovered = false
 
-    /// 底色：选中与正在播共用浅底（同一档），悬停只在两态都没有时抬一档。
-    private var showsAccentBackground: Bool { isSelected || isPlaying }
+    /// 显式 init：@State 私有属性会让成员级 init 变 private，跨文件
+    /// （`tools` 台架 / 单视图核对）构造不了。
+    init(
+        song: AudioSong,
+        isSelected: Bool,
+        isPlaying: Bool = false,
+        onSelect: @escaping () -> Void,
+        onPlay: (() -> Void)? = nil,
+        onRate: ((Int) -> Void)? = nil
+    ) {
+        self.song = song
+        self.isSelected = isSelected
+        self.isPlaying = isPlaying
+        self.onSelect = onSelect
+        self.onPlay = onPlay
+        self.onRate = onRate
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -737,7 +755,7 @@ struct TrackRow: View {
                 }
                 Text(song.title)
                     .font(.system(size: DmText.t13, weight: .medium))
-                    .foregroundColor(ListRowState.primaryForeground(isSelected: showsAccentBackground))
+                    .foregroundColor(ListRowState.primaryForeground(isSelected: isPlaying))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -759,7 +777,7 @@ struct TrackRow: View {
             // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
             RatingStars(
                 rating: song.rating,
-                isSelected: showsAccentBackground,
+                isSelected: isPlaying,
                 revealsEmpty: isHovered && onRate != nil,
                 onRate: onRate
             )
@@ -767,7 +785,9 @@ struct TrackRow: View {
             .frame(width: TrackColumn.rating, alignment: .trailing)
         }
         .frame(height: 34)
-        .background(ListRowState.background(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
+        // 选中 = 悬停同款底（常亮）：把「悬停或选中」一起喂给 hovered，
+        // 字色另喂真实的 isHovered —— 选中行不悬停时字保持默认态。
+        .background(ListRowState.background(isSelected: isPlaying, hovered: (isHovered || isSelected) && !isPlaying))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
         }
@@ -783,7 +803,7 @@ struct TrackRow: View {
     private func plain(_ text: String, width: CGFloat) -> some View {
         Text(text)
             .font(.system(size: DmText.t13))
-            .foregroundColor(ListRowState.foreground(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
+            .foregroundColor(ListRowState.foreground(isSelected: isPlaying, hovered: isHovered && !isPlaying))
             .lineLimit(1)
             .truncationMode(.tail)
             .padding(.horizontal, TrackColumn.padH)
@@ -794,7 +814,7 @@ struct TrackRow: View {
     private func dim(_ text: String, width: CGFloat, alignment: Alignment = .leading) -> some View {
         Text(text)
             .font(.system(size: DmText.t12))
-            .foregroundColor(ListRowState.secondaryForeground(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
+            .foregroundColor(ListRowState.secondaryForeground(isSelected: isPlaying, hovered: isHovered && !isPlaying))
             .lineLimit(1)
             .monospacedDigit()
             .padding(.horizontal, TrackColumn.padH)
