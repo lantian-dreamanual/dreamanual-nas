@@ -57,48 +57,49 @@ struct PlayerBarView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// 进度线本体：占位 3px，可视轨道悬停时长到 8px、沿 `.bottom` 对齐**向上溢出**
-    ///（ZStack 子视图超出 frame 不参与布局，所以展开不挤占内容）。拇指 12
-    /// 居中在轨道上；气泡挂在轨道中心上方，悬停时浮到内容区上。
+    /// 进度线本体：占位 3px，可视轨道悬停时长到 6px。🔴 轨道要在 GR 里再钉一次
+    /// `.frame(maxHeight: .infinity, alignment: .bottom)` —— GeometryReader 把超框
+    /// 子视图**居中**放，不钉底就是「上下各溢一半」（2026-10-13 用户抓出来的：
+    /// 外层 ZStack 的 bottom 对齐管不到 GR 内部）。钉底后向上溢出、不挤占内容。
+    /// 拇指 10 居中在轨道上；气泡挂在轨道中心上方，悬停时浮到内容区上。
     private var progressLine: some View {
-        ZStack(alignment: .bottom) {
-            GeometryReader { geo in
-                let width = geo.size.width
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.dmPanel3)
-                    Rectangle()
-                        .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
-                        .frame(width: width * shownFraction)
-                    if isEngaged {
-                        Circle()
-                            .fill(Color.dmInk)
-                            .frame(width: 10, height: 10)
-                            .offset(x: width * shownFraction - 5)
-                    }
-                    if let hoverX, !isScrubbing, let engine, engine.hasQueue {
-                        // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
-                        let hoverTime = Double(hoverX / max(width, 1)) * engine.duration
-                        Text("\(timeText(hoverTime)) / \(timeText(engine.duration))")
-                            .font(.system(size: DmText.t11))
-                            .monospacedDigit()
-                            .foregroundColor(Color.dmInk)
-                            .padding(.horizontal, DmSpace.s8)
-                            .padding(.vertical, DmSpace.s2)
-                            .background(
-                                RoundedRectangle(cornerRadius: DmRadius.r6)
-                                    .fill(Color.dmPanel3)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: DmRadius.r6)
-                                            .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
-                                    )
-                            )
-                            .fixedSize()
-                            .offset(x: min(max(hoverX, 40), width - 40), y: -26)
-                    }
+        GeometryReader { geo in
+            let width = geo.size.width
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.dmPanel3)
+                Rectangle()
+                    .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
+                    .frame(width: width * shownFraction)
+                if isEngaged {
+                    Circle()
+                        .fill(Color.dmInk)
+                        .frame(width: 10, height: 10)
+                        .offset(x: width * shownFraction - 5)
                 }
-                .frame(height: isEngaged ? 6 : 3)
+                if let hoverX, !isScrubbing, let engine, engine.hasQueue {
+                    // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
+                    let hoverTime = Double(hoverX / max(width, 1)) * engine.duration
+                    Text("\(timeText(hoverTime)) / \(timeText(engine.duration))")
+                        .font(.system(size: DmText.t11))
+                        .monospacedDigit()
+                        .foregroundColor(Color.dmInk)
+                        .padding(.horizontal, DmSpace.s8)
+                        .padding(.vertical, DmSpace.s2)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(Color.dmPanel3)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: DmRadius.r6)
+                                        .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+                                )
+                        )
+                        .fixedSize()
+                        .offset(x: min(max(hoverX, 40), width - 40), y: -24)
+                }
             }
+            .frame(height: isEngaged ? 6 : 3)
+            .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(height: 3)
         .overlay(interactionZone)

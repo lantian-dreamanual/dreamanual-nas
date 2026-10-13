@@ -7,6 +7,14 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DreamanualAppearance.apply()
+        // 🔴 Dock 图标显式钉一次：Finder / 启动台能从 CFBundleIconFile 解析出
+        // AppIcon.icns，但**运行中的进程**偶发只画通用白板（2026-10-13 用户抓的，
+        // icns 本体、签名、LS 注册都核对过没毛病）。手动设 applicationIconImage
+        // 强制 Dock 换图，跟缓存状态解耦。
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
+        }
     }
 }
 
