@@ -40,6 +40,11 @@ struct DreamanualNASApp: App {
                     if let keyword = ProcessInfo.processInfo.environment["DM_IMMERSIVE"] {
                         await state.smokeImmersive(keyword: keyword)
                     }
+                    // DM_LIBRARY=<指令>：把曲库页摆到指定排序 / 列显隐 / 菜单展开
+                    // 状态，供真机截图核对（同理由：AI 点不了 UI）。
+                    if let command = ProcessInfo.processInfo.environment["DM_LIBRARY"] {
+                        await state.smokeLibrary(command)
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。

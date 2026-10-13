@@ -302,6 +302,61 @@ final class AppState {
         }
     }
 
+    /// `DM_LIBRARY=<指令>` 时由入口调用：把曲库页摆到指定状态，供真机截图核对。
+    ///
+    /// 表头点不出排序箭头、字段菜单的勾选框也点不开 —— AI 环境没有辅助功能权限，
+    /// 点击会被静默丢弃（理由同 `DM_IMMERSIVE`）。指令逗号分隔：
+    /// `sort=<字段>:asc|desc` 设排序、`hide=<字段>` 藏一列、`menu` 展开字段菜单、
+    /// `reset` 回默认（不排、八列全开）。**核对完记得 `reset`**，别把冒烟留下的
+    /// 偏好存进用户的 `UserDefaults`。
+    func smokeLibrary(_ command: String) async {
+        guard isConnected, let manager = sessionManager else {
+            NSLog("[library] 未连接，跳过（phase=%@）", String(describing: phase))
+            return
+        }
+        await library.loadIfNeeded(manager)
+
+        for raw in command.split(separator: ",") {
+            let token = raw.trimmingCharacters(in: .whitespaces)
+            if token.isEmpty { continue }
+            if token == "menu" {
+                library.showsFieldMenu = true
+            } else if token == "reset" {
+                library.resetColumns()
+                await library.applySort(nil, on: manager)
+            } else if token.hasPrefix("sort=") {
+                let spec = token.dropFirst("sort=".count).split(separator: ":")
+                guard let field = TrackField(rawValue: String(spec[0])) else {
+                    NSLog("[library] 认不出字段「%@」", String(spec[0]))
+                    continue
+                }
+                let ascending = spec.count < 2 || spec[1] != "desc"
+                await library.applySort(SongSort(field: field, ascending: ascending), on: manager)
+            } else if token.hasPrefix("hide=") {
+                let name = String(token.dropFirst("hide=".count))
+                guard let field = TrackField(rawValue: name) else {
+                    NSLog("[library] 认不出字段「%@」", name)
+                    continue
+                }
+                library.setVisible(field, false)
+            } else {
+                NSLog("[library] 认不出指令「%@」", token)
+            }
+        }
+
+        // 取数、取图都是异步的，等它们落地再报。
+        try? await Task.sleep(nanoseconds: 4 * 1_000_000_000)
+        NSLog("[library] 指令「%@」→ 排序 %@ · 列 %@ · 菜单 %@ · 共 %@ 首 · 总数 %@",
+              command,
+              library.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认",
+              TrackField.allCases.filter { library.isVisible($0) }.map(\.rawValue).joined(separator: "、"),
+              library.showsFieldMenu ? "开" : "关",
+              String(library.songs.count),
+              String(library.total))
+        let head = library.songs.prefix(8).map { "\($0.title)[\($0.year.map(String.init) ?? "-")]" }
+        NSLog("[library] 前八条 %@", head.joined(separator: " / "))
+    }
+
     /// 四个数据源各取一次（侧栏点得动之前，先把「取数通不通」验掉）。
     private func smokeLibrarySources(_ manager: SessionManager) async {
         do {

@@ -70,6 +70,15 @@ final class LibraryModel {
     private(set) var source: Source = .all
     private(set) var searchKeyword = ""
 
+    /// 表头排序。`nil` = 服务端默认顺序（曲库写入的先后）—— 表头一个箭头都不亮。
+    /// 跨来源保留：在曲库按年份排过，切到歌单还是按年份看，这才合用。
+    private(set) var sort: SongSort?
+    /// 显示的列。恒含 `.title`（主键列不可隐藏）—— 存的也只有可隐藏的那几列。
+    private(set) var visibleColumns: Set<TrackField> = Set(TrackField.allCases)
+    /// 字段配置菜单开合。挂模型上而不是表视图的 `@State`：这一页会随沉浸模式
+    /// 上下层级，状态跟着视图走就丢；真机核对也要能从入口把它展开（见 `DM_LIBRARY`）。
+    var showsFieldMenu = false
+
     private(set) var songs: [AudioSong] = []
     private(set) var total = 0
     private(set) var artists: [AudioArtist] = []
@@ -215,29 +224,29 @@ final class LibraryModel {
         do {
             switch mode {
             case .allSongs:
-                let page = try await AudioLibrary.songs(manager)
+                let page = try await AudioLibrary.songs(manager, sort: sort)
                 guard token == generation else { return }
                 setSongs(page)
             case .filtered(let filter):
-                let page = try await AudioLibrary.songs(manager, matching: filter)
+                let page = try await AudioLibrary.songs(manager, matching: filter, sort: sort)
                 guard token == generation else { return }
                 setSongs(page)
             case .searched(let keyword):
                 let page = try await AudioLibrary.search(manager, keyword: keyword)
                 guard token == generation else { return }
-                setSongs(page)
+                setSongs(page, localSort: true)
             case .random:
                 let page = try await AudioLibrary.randomSongs(manager, limit: Self.randomCount)
                 guard token == generation else { return }
-                setSongs(page)
+                setSongs(page, localSort: true)
             case .topRated:
                 let page = try await AudioLibrary.topRatedSongs(manager, minRating: Self.chartRating)
                 guard token == generation else { return }
-                setSongs(page)
+                setSongs(page, localSort: true)
             case .playlist(let id):
                 let page = try await AudioLibrary.songs(manager, playlistID: id)
                 guard token == generation else { return }
-                setSongs(page)
+                setSongs(page, localSort: true)
             case .artistList:
                 let list = try await AudioLibrary.artists(manager)
                 guard token == generation else { return }
@@ -270,9 +279,9 @@ final class LibraryModel {
         do {
             let page: AudioSongPage
             if case .filtered(let filter) = mode {
-                page = try await AudioLibrary.songs(manager, matching: filter, offset: songs.count)
+                page = try await AudioLibrary.songs(manager, matching: filter, offset: songs.count, sort: sort)
             } else {
-                page = try await AudioLibrary.songs(manager, offset: songs.count)
+                page = try await AudioLibrary.songs(manager, offset: songs.count, sort: sort)
             }
             guard token == generation else { return }
             songs.append(contentsOf: page.songs)
@@ -352,6 +361,123 @@ final class LibraryModel {
         }
     }
 
+    // MARK: 表视图偏好（排序与列显隐，持久化）
+
+    private let defaults = UserDefaults.standard
+
+    private enum PrefKey {
+        static let sortField = "nas.library.sortField"
+        static let sortAscending = "nas.library.sortAscending"
+        static let columns = "nas.library.columns"
+    }
+
+    init() {
+        sort = Self.storedSort()
+        visibleColumns = Self.storedColumns()
+    }
+
+    /// 点表头：同一列切换正序 / 倒序，换一列从正序起（原型「点表头切换正序 / 倒序」）。
+    ///
+    /// 曲库快照与它的字段筛选是分页的两路，**顺序变了要重新问服务端** —— 只排已经
+    /// 加载的这几页，滚到底拿回来的第二页会又按默认顺序接在后面。其余四路
+    /// （搜索 / 每日随机 / 高分曲 / 歌单）一次要齐，本地就能排。
+    func toggleSort(_ field: TrackField, on manager: SessionManager?) async {
+        let next: SongSort
+        if let current = sort, current.field == field {
+            next = SongSort(field: field, ascending: !current.ascending)
+        } else {
+            next = SongSort(field: field, ascending: true)
+        }
+        await applySort(next, on: manager)
+    }
+
+    /// 直接落一个排序（表头点按走 `toggleSort`）。回默认顺序传 `nil`。
+    func applySort(_ next: SongSort?, on manager: SessionManager?) async {
+        sort = next
+        if let next {
+            defaults.set(next.field.rawValue, forKey: PrefKey.sortField)
+            defaults.set(next.ascending, forKey: PrefKey.sortAscending)
+        } else {
+            defaults.removeObject(forKey: PrefKey.sortField)
+            defaults.removeObject(forKey: PrefKey.sortAscending)
+        }
+
+        if usesServerOrdering {
+            await refresh(manager)
+        } else {
+            songs = applyLocalSort(songs)
+        }
+    }
+
+    func isVisible(_ field: TrackField) -> Bool { visibleColumns.contains(field) }
+
+    /// 勾 / 取消一列。标题是主键列 —— `canHide` 为假时直接不理会。
+    func setVisible(_ field: TrackField, _ visible: Bool) {
+        guard field.canHide else { return }
+        if visible { visibleColumns.insert(field) } else { visibleColumns.remove(field) }
+        defaults.set(TrackField.allCases.filter { visibleColumns.contains($0) }.map(\.rawValue),
+                     forKey: PrefKey.columns)
+    }
+
+    /// 恢复默认字段：八列全开。
+    func resetColumns() {
+        visibleColumns = Set(TrackField.allCases)
+        defaults.removeObject(forKey: PrefKey.columns)
+    }
+
+    /// 分页的两路必须服务端排序（理由见 `toggleSort`）。
+    private var usesServerOrdering: Bool {
+        switch mode {
+        case .allSongs, .filtered: return true
+        default: return false
+        }
+    }
+
+    /// 本地排序。文本列用 `localizedStandardCompare`（中文 / 日文按当地习惯排，
+    /// 不是码点序）；全等键上再按 id 兜底 —— 否则同一批数据每次排出来的次序都
+    /// 可能不同（Swift 的 `sorted` 不保证稳定）。
+    private func applyLocalSort(_ list: [AudioSong]) -> [AudioSong] {
+        guard let sort else { return list }
+        let ascending = sort.ascending
+        return list.sorted { a, b in
+            let order: ComparisonResult
+            switch sort.field {
+            case .title: order = a.title.localizedStandardCompare(b.title)
+            case .artist: order = a.artist.localizedStandardCompare(b.artist)
+            case .album: order = a.album.localizedStandardCompare(b.album)
+            case .genre: order = a.genre.localizedStandardCompare(b.genre)
+            case .year: order = Self.compare(a.year ?? 0, b.year ?? 0)
+            case .duration: order = Self.compare(a.duration, b.duration)
+            case .track: order = Self.compare(a.track ?? 0, b.track ?? 0)
+            case .rating: order = Self.compare(a.rating, b.rating)
+            }
+            if order == .orderedSame { return a.id < b.id }
+            return ascending ? order == .orderedAscending : order == .orderedDescending
+        }
+    }
+
+    private static func compare<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
+        if a == b { return .orderedSame }
+        return a < b ? .orderedAscending : .orderedDescending
+    }
+
+    /// 读回排序偏好。没存过 = 不排序（服务端默认顺序）。
+    private static func storedSort() -> SongSort? {
+        guard let raw = UserDefaults.standard.string(forKey: PrefKey.sortField),
+              let field = TrackField(rawValue: raw) else { return nil }
+        let ascending = UserDefaults.standard.object(forKey: PrefKey.sortAscending) as? Bool ?? true
+        return SongSort(field: field, ascending: ascending)
+    }
+
+    /// 读回列显隐。没存过就是全开；存过的内容里无论有没有标题列，标题都在
+    /// —— 主键列不可隐藏，这条不能靠存出来的数据保证。
+    private static func storedColumns() -> Set<TrackField> {
+        guard let raw = UserDefaults.standard.array(forKey: PrefKey.columns) as? [String] else {
+            return Set(TrackField.allCases)
+        }
+        return Set(raw.compactMap(TrackField.init(rawValue:))).union([.title])
+    }
+
     // MARK: 内部
 
     private func resetScope() {
@@ -361,8 +487,11 @@ final class LibraryModel {
         selectedSongID = nil
     }
 
-    private func setSongs(_ page: AudioSongPage) {
-        songs = page.songs
+    /// 落一页数据。`localSort` 给「一次要齐」的来源用（服务端没排，本地排）；
+    /// 分页的两路服务端已经排好了，本地不能再排一遍 —— 两边的 collation 不完全
+    /// 一致，重排会让「已加载的前几页」与「服务端顺序」对不上。
+    private func setSongs(_ page: AudioSongPage, localSort: Bool = false) {
+        songs = localSort ? applyLocalSort(page.songs) : page.songs
         total = page.total
         artists = []
         albums = []
@@ -618,22 +747,24 @@ private struct LibraryRailRow: View {
 
 // MARK: - 曲目表
 
-/// 表宽：标题列自适应，其余八列按原型 `colgroup` 的固定宽。
-/// （非 private —— 队列行借用 `padH`，两边同一档列内边距。）
-enum TrackColumn {
-    static let artist: CGFloat = 96
-    static let album: CGFloat = 96
-    static let genre: CGFloat = 124
-    static let year: CGFloat = 56
-    static let duration: CGFloat = 48
-    static let track: CGFloat = 48
-    /// 评分在最右：左边是「库的信息」，右边是「我的标记」。
-    static let rating: CGFloat = 68
+/// 表的排版参数。列宽、对齐与「能不能隐藏」都跟着 `TrackField`（那一组同时也是
+/// 可排序的字段，定义在 `AudioLibrary`）；这里只剩列内边距 —— 曲库表与队列表
+/// 共用同一档，两边的表头与行都从这里取。
+enum TrackMetrics {
     static let padH: CGFloat = 10
+    /// 表头行高。由 cell 的上下 `s8` + 11px 字 + 底下一根发丝决定 ——
+    /// 字段配置菜单浮在它下面，改表头内边距要一起改这里。
+    static let headerHeight: CGFloat = 30
+    /// 字段配置那一列的宽（原型 `colgroup` 最后一格 32）。
+    static let configWidth: CGFloat = 32
 }
 
 /// 表头固定——列表滚多长表头都钉在顶上，所以它放在 `ScrollView` 外面，
 /// 不对着滚（原型是 CSS `sticky`）。
+///
+/// 字段配置菜单浮在表头右下方（原型 `.menu` 定位在 `top:151px;right:11px` 那一格）：
+/// 它压在 `ZStack` 最上层，配一层透明遮罩接住「点别处关闭」—— 不参与布局，
+/// 也不进滚动区。
 private struct TrackTable: View {
     let model: LibraryModel
     let manager: SessionManager?
@@ -641,53 +772,99 @@ private struct TrackTable: View {
     let onRate: (AudioSong, Int) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            TrackHeader()
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                TrackHeader(
+                    sort: model.sort,
+                    visible: model.visibleColumns,
+                    onSort: { field in
+                        Task { await model.toggleSort(field, on: manager) }
+                    },
+                    onConfigure: { model.showsFieldMenu = true }
+                )
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(model.songs) { song in
-                        TrackRow(
-                            song: song,
-                            isSelected: model.selectedSongID == song.id,
-                            isPlaying: engine?.currentSong?.id == song.id
-                        ) {
-                            model.select(song: song)
-                        } onPlay: {
-                            // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
-                            // 追加进模型后，下次播放自然带上新页）。
-                            model.select(song: song)
-                            engine?.play(model.songs, songID: song.id)
-                        } onRate: { stars in
-                            onRate(song, stars)
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.songs) { song in
+                            TrackRow(
+                                song: song,
+                                isSelected: model.selectedSongID == song.id,
+                                isPlaying: engine?.currentSong?.id == song.id,
+                                visible: model.visibleColumns
+                            ) {
+                                model.select(song: song)
+                            } onPlay: {
+                                // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
+                                // 追加进模型后，下次播放自然带上新页）。
+                                model.select(song: song)
+                                engine?.play(model.songs, songID: song.id)
+                            } onRate: { stars in
+                                onRate(song, stars)
+                            }
                         }
-                    }
-                    if model.hasMore {
-                        LoadMoreRow(
-                            loaded: model.songs.count,
-                            isLoading: model.isLoadingMore
-                        ) {
-                            Task { await model.loadMore(manager) }
+                        if model.hasMore {
+                            LoadMoreRow(
+                                loaded: model.songs.count,
+                                isLoading: model.isLoadingMore
+                            ) {
+                                Task { await model.loadMore(manager) }
+                            }
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            if model.showsFieldMenu {
+                // 压在表头与列表之上的一层：点哪儿都先收菜单。
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.showsFieldMenu = false }
+
+                fieldMenu
+                    .padding(.top, TrackMetrics.headerHeight)
+                    .padding(.trailing, DmSpace.s4)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// 表头最右竖三点弹出来的字段配置（照原型那一格）：标题 + 八列勾选框
+    /// （标题是主键列，走禁用态勾选）+ 分隔线 +「恢复默认字段」。
+    /// **勾完不收菜单** —— 连勾几列是常事，开着才看得见勾的状态。
+    private var fieldMenu: some View {
+        DmMenuCard(width: 196) {
+            DmMenuTitle("显示的字段")
+            ForEach(TrackField.allCases) { field in
+                DmMenuRow(
+                    title: field.label,
+                    action: { model.setVisible(field, !model.isVisible(field)) }
+                ) {
+                    DmCheckbox(isOn: model.isVisible(field), isDisabled: !field.canHide)
+                }
+            }
+            DmMenuSeparator()
+            DmMenuRow(title: "恢复默认字段", icon: "rotate-ccw") {
+                model.resetColumns()
+            }
+        }
     }
 }
 
+/// 表头：每一列都可点 —— 点了按这一列排，同一列再点换方向（正序 `chevron-up` /
+/// 倒序 `chevron-down`，只有当前排序列带箭头）。一列都没点时是服务端默认顺序。
+/// 最右一格是字段配置。
 private struct TrackHeader: View {
+    let sort: SongSort?
+    let visible: Set<TrackField>
+    let onSort: (TrackField) -> Void
+    let onConfigure: () -> Void
+
     var body: some View {
         HStack(spacing: 0) {
-            cell("标题", width: nil)
-            cell("艺术家", width: TrackColumn.artist)
-            cell("专辑", width: TrackColumn.album)
-            cell("流派", width: TrackColumn.genre)
-            cell("年份", width: TrackColumn.year)
-            cell("时长", width: TrackColumn.duration, alignment: .trailing)
-            cell("曲序", width: TrackColumn.track, alignment: .trailing)
-            cell("评分", width: TrackColumn.rating, alignment: .trailing)
+            ForEach(TrackField.allCases) { field in
+                if visible.contains(field) { sortCell(field) }
+            }
+            configCell
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
@@ -695,18 +872,49 @@ private struct TrackHeader: View {
     }
 
     @ViewBuilder
-    private func cell(_ text: String, width: CGFloat?, alignment: Alignment = .leading) -> some View {
-        let label = Text(text)
-            .font(.system(size: DmText.t11, weight: .bold))
-            .kerning(0.33)
-            .foregroundColor(Color.dmInk3)
-            .padding(.horizontal, TrackColumn.padH)
-            .padding(.vertical, DmSpace.s8)
+    private func sortCell(_ field: TrackField) -> some View {
+        let isActive = sort?.field == field
 
-        if let width {
-            label.frame(width: width, alignment: alignment)
+        Button { onSort(field) } label: {
+            HStack(spacing: DmSpace.s2) {
+                Text(field.label)
+                    .font(.system(size: DmText.t11, weight: .bold))
+                    .kerning(0.33)
+                if isActive {
+                    LucideIcon(sort?.ascending == false ? "chevron-down" : "chevron-up",
+                               size: DmIcon.i10)
+                        .foregroundColor(Color.dmAccent2)
+                }
+            }
+            .foregroundColor(Color.dmInk3)
+            .padding(.horizontal, TrackMetrics.padH)
+            .padding(.vertical, DmSpace.s8)
+            .modifier(ColumnWidth(field: field))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("按\(field.label)排序")
+    }
+
+    /// 字段配置（原型 `.tbl th.th-cfg`：列宽 32、按钮右贴、右留 `s6`）。
+    private var configCell: some View {
+        IconButton(iconName: "more-vertical", compact: true) { onConfigure() }
+            .padding(.trailing, DmSpace.s6)
+            .frame(width: TrackMetrics.configWidth, alignment: .trailing)
+    }
+}
+
+/// 列宽：标题列自适应（保底 180），其余按 `TrackField.width`。
+/// 表头与行共用 —— 两边的列必须一样宽，所以宽度只从 `TrackField` 来。
+private struct ColumnWidth: ViewModifier {
+    let field: TrackField
+
+    func body(content: Content) -> some View {
+        if let width = field.width {
+            content.frame(width: width, alignment: field.isTrailing ? .trailing : .leading)
         } else {
-            label.frame(minWidth: 180, maxWidth: .infinity, alignment: alignment)
+            content.frame(minWidth: 180, maxWidth: .infinity,
+                          alignment: field.isTrailing ? .trailing : .leading)
         }
     }
 }
@@ -721,6 +929,8 @@ struct TrackRow: View {
     let song: AudioSong
     let isSelected: Bool
     var isPlaying: Bool = false
+    /// 显示的列。默认全开 —— 队列行与单视图台架那两处不关心列配置。
+    var visible: Set<TrackField> = Set(TrackField.allCases)
     let onSelect: () -> Void
     var onPlay: (() -> Void)?
     /// 给了评分列就可点；没给（如队列页之外的只读场合）保持只读。
@@ -734,6 +944,7 @@ struct TrackRow: View {
         song: AudioSong,
         isSelected: Bool,
         isPlaying: Bool = false,
+        visible: Set<TrackField> = Set(TrackField.allCases),
         onSelect: @escaping () -> Void,
         onPlay: (() -> Void)? = nil,
         onRate: ((Int) -> Void)? = nil
@@ -741,6 +952,7 @@ struct TrackRow: View {
         self.song = song
         self.isSelected = isSelected
         self.isPlaying = isPlaying
+        self.visible = visible
         self.onSelect = onSelect
         self.onPlay = onPlay
         self.onRate = onRate
@@ -759,30 +971,34 @@ struct TrackRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            .padding(.horizontal, TrackColumn.padH)
+            .padding(.horizontal, TrackMetrics.padH)
             // 标题列自适应，但**保底 180** —— 固定列合计 536，主区一挤
             // （窗口收到最小宽以下不会有，但门禁外的人为缩放会）自适应列会
-            // 被压成 0，整列凭空消失（真机踩过）。
+            // 被压成 0，整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
             .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
 
-            plain(song.artist, width: TrackColumn.artist)
-            plain(song.album, width: TrackColumn.album)
-            plain(song.genreTags.joined(separator: " · "), width: TrackColumn.genre)
-            dim(song.yearText, width: TrackColumn.year)
+            if visible.contains(.artist) { plain(song.artist, field: .artist) }
+            if visible.contains(.album) { plain(song.album, field: .album) }
+            if visible.contains(.genre) {
+                plain(song.genreTags.joined(separator: " · "), field: .genre)
+            }
+            if visible.contains(.year) { dim(song.yearText, field: .year) }
 
-            dim(song.durationText, width: TrackColumn.duration, alignment: .trailing)
-            dim(song.track.map(String.init) ?? "", width: TrackColumn.track, alignment: .trailing)
+            if visible.contains(.duration) { dim(song.durationText, field: .duration) }
+            if visible.contains(.track) { dim(song.track.map(String.init) ?? "", field: .track) }
 
-            // 未评分的行**悬停才浮出空星** —— 浮出来即「这一格能点」。
-            // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
-            RatingStars(
-                rating: song.rating,
-                isSelected: isPlaying,
-                revealsEmpty: isHovered && onRate != nil,
-                onRate: onRate
-            )
-            .padding(.trailing, DmSpace.s8)
-            .frame(width: TrackColumn.rating, alignment: .trailing)
+            if visible.contains(.rating) {
+                // 未评分的行**悬停才浮出空星** —— 浮出来即「这一格能点」。
+                // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
+                RatingStars(
+                    rating: song.rating,
+                    isSelected: isPlaying,
+                    revealsEmpty: isHovered && onRate != nil,
+                    onRate: onRate
+                )
+                .padding(.trailing, DmSpace.s8)
+                .modifier(ColumnWidth(field: .rating))
+            }
         }
         .frame(height: 34)
         // 选中 = 悬停同款底（常亮）：把「悬停或选中」一起喂给 hovered，
@@ -800,25 +1016,25 @@ struct TrackRow: View {
     }
 
     @ViewBuilder
-    private func plain(_ text: String, width: CGFloat) -> some View {
+    private func plain(_ text: String, field: TrackField) -> some View {
         Text(text)
             .font(.system(size: DmText.t13))
             .foregroundColor(ListRowState.foreground(isSelected: isPlaying, hovered: isHovered && !isPlaying))
             .lineLimit(1)
             .truncationMode(.tail)
-            .padding(.horizontal, TrackColumn.padH)
-            .frame(width: width, alignment: .leading)
+            .padding(.horizontal, TrackMetrics.padH)
+            .modifier(ColumnWidth(field: field))
     }
 
     @ViewBuilder
-    private func dim(_ text: String, width: CGFloat, alignment: Alignment = .leading) -> some View {
+    private func dim(_ text: String, field: TrackField) -> some View {
         Text(text)
             .font(.system(size: DmText.t12))
             .foregroundColor(ListRowState.secondaryForeground(isSelected: isPlaying, hovered: isHovered && !isPlaying))
             .lineLimit(1)
             .monospacedDigit()
-            .padding(.horizontal, TrackColumn.padH)
-            .frame(width: width, alignment: alignment)
+            .padding(.horizontal, TrackMetrics.padH)
+            .modifier(ColumnWidth(field: field))
     }
 }
 

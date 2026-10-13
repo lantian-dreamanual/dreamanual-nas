@@ -175,6 +175,14 @@ struct LucideIcon: View {
         "circle-x": "xmark.circle.fill",
         "info": "info.circle",
         "x": "xmark",
+        // 表头排序与字段配置这几枚（2026-10-13 补）。⚠️ `chevron-down` 是**补漏**：
+        // 分页那一行早就用了它、表里却一直没有，真机上画的是问号 —— 门禁不管
+        // 图标名，只有截图能抓到，所以加图标时顺手扫一遍「用过 vs 表里有」。
+        "check": "checkmark",
+        "chevron-up": "chevron.up",
+        "chevron-down": "chevron.down",
+        "more-vertical": "ellipsis.vertical",
+        "rotate-ccw": "arrow.counterclockwise",
         "triangle-alert": "exclamationmark.triangle",
         "wifi": "wifi",
         "key-round": "key",
@@ -620,8 +628,15 @@ struct DmToggleStyle: ToggleStyle {
 /// 图标按钮：28×28 方形 / 圆角 `r-6` / 图形 12 / 悬停 `panel-3` 底 + `ink` 字，
 /// 禁用原样整体压暗 0.5。**逐字复刻投资监控 `IconButton`** —— 那不是它的私有件，
 /// 是产品线里这个组件的落点，页头动作、面板角落都该用它，别的端不必另立形态。
+///
+/// `compact` 是**密集行小档**（22×22）：只给行高 ≤ 30 的密集行用 —— 表头最右的
+/// 字段配置、侧栏小节头的「+」（原型 `.tbl th.th-cfg .icon-btn` 与
+/// `.mside-head .icon-btn` 两处都是 22）。常规位置一律 28：这个档存在的理由是
+/// 「表头行高只有 29，28 的按钮在里面显得顶」，不是「图标按钮有两种尺寸」。
+/// 图形仍取 12，不随框缩 —— 22 的框配 12 的图形，与 28 档是同一个比例。
 struct IconButton: View {
     let iconName: String
+    var compact: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -631,7 +646,7 @@ struct IconButton: View {
         Button(action: action) {
             LucideIcon(iconName, size: DmIcon.i12)
                 .foregroundColor(isHovered && isEnabled ? Color.dmInk : Color.dmInk2)
-                .frame(width: DmControl.h28, height: DmControl.h28)
+                .frame(width: side, height: side)
                 .background(
                     RoundedRectangle(cornerRadius: DmRadius.r6)
                         .fill(isHovered && isEnabled ? Color.dmPanel3 : Color.clear)
@@ -640,6 +655,152 @@ struct IconButton: View {
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { isHovered = $0 }
+    }
+
+    private var side: CGFloat { compact ? 22 : DmControl.h28 }
+}
+
+/// 勾选框（原型 `.cb`）：14×14 / 圆角 `r-4` / `line-2` 1px 描边 / 底 `panel-2`；
+/// 勾选 = `accent-fill` 实底 + `on-accent` 勾；未勾悬停描边转 `ink-2`。
+///
+/// **禁用勾选态**（`isDisabled && isOn`）：底 `line-2` + 勾取 `ink-3` —— 用在
+/// 「选了但不能改」的地方，表头字段配置里的标题列（主键列，不可隐藏）就是这一态。
+/// 禁用未勾是 `panel` 底 + `line` 描边，比常态更沉一档。
+struct DmCheckbox: View {
+    let isOn: Bool
+    var isDisabled: Bool = false
+
+    @State private var isHovered = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: DmRadius.r4)
+            .fill(fill)
+            .overlay {
+                if let border {
+                    RoundedRectangle(cornerRadius: DmRadius.r4)
+                        .strokeBorder(border, lineWidth: DmLine.base)
+                }
+            }
+            .overlay {
+                if isOn {
+                    LucideIcon("check", size: DmIcon.i10)
+                        .foregroundColor(isDisabled ? Color.dmInk3 : Color.dmOnAccent)
+                }
+            }
+            .frame(width: 14, height: 14)
+            .onHover { isHovered = $0 && !isDisabled }
+    }
+
+    private var fill: Color {
+        if isOn { return isDisabled ? Color.dmLine2 : Color.dmAccentFill }
+        return isDisabled ? Color.dmPanel : Color.dmPanel2
+    }
+
+    /// 勾上就不画描边（实底自己成形）。未勾时：禁用 `line`、悬停 `ink-2`、常态 `line-2`。
+    private var border: Color? {
+        guard !isOn else { return nil }
+        if isDisabled { return Color.dmLine }
+        return isHovered ? Color.dmInk2 : Color.dmLine2
+    }
+}
+
+// ============ 菜单 ============
+
+/// 下拉菜单卡片（原型 `.menu`）：`panel-2` + `line-2` 发丝 + `r-10` + `shadow-modal`，
+/// 内边距 4。右键菜单与表头字段配置共用这一套（第八节「菜单」，形态源自 video
+/// `menuCard` / vault `.ctxmenu`）。宽度由调用点给（字段配置 196，min 160）。
+struct DmMenuCard<Content: View>: View {
+    var width: CGFloat?
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .frame(width: width, alignment: .leading)
+        .padding(DmSpace.s4)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r10).fill(Color.dmPanel2)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: DmRadius.r10)
+                .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+        }
+        .dmShadowModal()
+    }
+}
+
+/// 菜单里的小节标题（原型 `.fg-title`）：11 / bold / 字距 .06em / `ink-3`，
+/// 内边距上 4 下 6 左右 8。不给悬停、不可点。
+struct DmMenuTitle: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: DmText.t11, weight: .bold))
+            .kerning(0.66)
+            .foregroundColor(Color.dmInk3)
+            .padding(.horizontal, DmSpace.s8)
+            .padding(.top, DmSpace.s4)
+            .padding(.bottom, DmSpace.s6)
+    }
+}
+
+/// 菜单项（原型 `.mi`）：高按内容（上下 6）、圆角 `r-6`、字 13 / `ink-2`，
+/// 悬停 `panel-3` 底 + 字转 `ink`；可选前置图标（`ink-3`，悬停转 `ink-2`）。
+///
+/// `trailing` 贴右（原型 `.mi .cb{margin-left:auto}`）—— 字段配置的勾选框走这里。
+struct DmMenuRow<Trailing: View>: View {
+    let title: String
+    var icon: String?
+    let action: () -> Void
+    @ViewBuilder let trailing: () -> Trailing
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DmSpace.s8) {
+                if let icon {
+                    LucideIcon(icon, size: DmIcon.i12)
+                        .foregroundColor(isHovered ? Color.dmInk2 : Color.dmInk3)
+                }
+                Text(title)
+                    .font(.system(size: DmText.t13))
+                    .foregroundColor(isHovered ? Color.dmInk : Color.dmInk2)
+                Spacer(minLength: DmSpace.s8)
+                trailing()
+            }
+            .padding(.horizontal, DmSpace.s8)
+            .padding(.vertical, DmSpace.s6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: DmRadius.r6)
+                    .fill(isHovered ? Color.dmPanel3 : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+extension DmMenuRow where Trailing == EmptyView {
+    init(title: String, icon: String? = nil, action: @escaping () -> Void) {
+        self.init(title: title, icon: icon, action: action, trailing: { EmptyView() })
+    }
+}
+
+/// 菜单里的分隔线（原型 `.msep`）：发丝 + `line-2`，左右 6、上下 4。
+struct DmMenuSeparator: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.dmLine2)
+            .frame(height: DmLine.hairline)
+            .padding(.horizontal, DmSpace.s6)
+            .padding(.vertical, DmSpace.s4)
     }
 }
 

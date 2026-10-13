@@ -80,7 +80,7 @@ struct QueueView: View {
             cell("艺术家", width: 96, alignment: .leading)
             cell("专辑", width: 96, alignment: .leading)
             cell("时长", width: 48, alignment: .trailing)
-            cell("评分", width: TrackColumn.rating, alignment: .trailing)
+            cell("评分", width: TrackField.rating.fixedWidth, alignment: .trailing)
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
@@ -93,7 +93,7 @@ struct QueueView: View {
             .font(.system(size: DmText.t11, weight: .bold))
             .kerning(0.33)
             .foregroundColor(Color.dmInk3)
-            .padding(.horizontal, TrackColumn.padH)
+            .padding(.horizontal, TrackMetrics.padH)
             .padding(.vertical, DmSpace.s8)
         if let width {
             label.frame(width: width, alignment: alignment)
@@ -118,7 +118,7 @@ struct QueueView: View {
     }
 }
 
-/// 队列行。`TrackColumn.padH` 借曲库表的列内边距，两边同一档。
+/// 队列行。`TrackMetrics.padH` 借曲库表的列内边距，两边同一档。
 private struct QueueRow: View {
     let order: Int
     let song: AudioSong
@@ -141,7 +141,7 @@ private struct QueueRow: View {
                 }
             }
             .frame(width: 56, alignment: .leading)
-            .padding(.horizontal, TrackColumn.padH)
+            .padding(.horizontal, TrackMetrics.padH)
 
             HStack(spacing: DmSpace.s8) {
                 DmCover(album: song.album, artist: song.albumArtist, folder: song.folder, size: 28)
@@ -151,7 +151,7 @@ private struct QueueRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            .padding(.horizontal, TrackColumn.padH)
+            .padding(.horizontal, TrackMetrics.padH)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             plain(song.artist, width: 96)
@@ -162,7 +162,7 @@ private struct QueueRow: View {
                 .foregroundColor(ListRowState.secondaryForeground(isSelected: isPlaying, hovered: isHovered))
                 .monospacedDigit()
                 .lineLimit(1)
-                .padding(.horizontal, TrackColumn.padH)
+                .padding(.horizontal, TrackMetrics.padH)
                 .frame(width: 48, alignment: .trailing)
 
             RatingStars(
@@ -172,7 +172,7 @@ private struct QueueRow: View {
                 onRate: onRate
             )
             .padding(.trailing, DmSpace.s8)
-            .frame(width: TrackColumn.rating, alignment: .trailing)
+            .frame(width: TrackField.rating.fixedWidth, alignment: .trailing)
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: isPlaying, hovered: isHovered))
@@ -191,7 +191,7 @@ private struct QueueRow: View {
             .foregroundColor(ListRowState.foreground(isSelected: isPlaying, hovered: isHovered))
             .lineLimit(1)
             .truncationMode(.tail)
-            .padding(.horizontal, TrackColumn.padH)
+            .padding(.horizontal, TrackMetrics.padH)
             .frame(width: width, alignment: .leading)
     }
 }

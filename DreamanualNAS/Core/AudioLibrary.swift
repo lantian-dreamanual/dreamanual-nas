@@ -137,6 +137,78 @@ struct SongFilter: Equatable {
     let value: String
 }
 
+/// 曲库表的一列 —— 同时也是可排序的字段（两者是同一组：能显示的列就能排序）。
+///
+/// 列的定义只有这一处：表头、行、字段配置菜单都迭代它，加一列只改这里。
+/// 宽度与对齐对着原型 `colgroup`；标题列既自适应（宽 `nil`）又不能隐藏（主键列）。
+enum TrackField: String, CaseIterable, Identifiable {
+    case title
+    case artist
+    case album
+    case genre
+    case year
+    case duration
+    case track
+    case rating
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .title: return "标题"
+        case .artist: return "艺术家"
+        case .album: return "专辑"
+        case .genre: return "流派"
+        case .year: return "年份"
+        case .duration: return "时长"
+        case .track: return "曲序"
+        case .rating: return "评分"
+        }
+    }
+
+    /// 标题列自适应、这里给 `nil`；其余八列固定宽。
+    var width: CGFloat? {
+        switch self {
+        case .title: return nil
+        case .artist: return 96
+        case .album: return 96
+        case .genre: return 124
+        case .year: return 56
+        case .duration: return 48
+        case .track: return 48
+        case .rating: return 68
+        }
+    }
+
+    /// 固定列的宽 —— 只对 `width != nil` 的列问。
+    var fixedWidth: CGFloat { width ?? 0 }
+
+    /// 右对齐（时长 / 曲序 / 评分是数值列）。表头与行用同一个判据。
+    var isTrailing: Bool {
+        switch self {
+        case .duration, .track, .rating: return true
+        default: return false
+        }
+    }
+
+    /// 标题是主键列，字段配置里不可隐藏（禁用态勾选框）。
+    var canHide: Bool { self != .title }
+}
+
+/// 表头排序。落成服务端的 `sort_by` / `sort_direction` 两个参数。
+///
+/// 🔴 八个字段**实测都被服务端认**（2026-10-13 探测：asc / desc 两次结果不同，
+/// 数值列 desc 严格单调）—— 没有「点了没反应」的列。**未知参数一律静默忽略、
+/// 不报错**是这个接口的老脾气，所以这套结论只能靠对照实测、不能靠状态码。
+/// `Song.search` 也认这两个参数，排序能与字段筛选组合（实测 `album=0` 下按
+/// 标题 / 年份排都生效）；排序下 `total` 仍是全库数，分页可用。
+struct SongSort: Equatable {
+    let field: TrackField
+    let ascending: Bool
+
+    var direction: String { ascending ? "asc" : "desc" }
+}
+
 struct AudioSongPage {
     let songs: [AudioSong]
     let total: Int
@@ -197,19 +269,22 @@ enum AudioLibrary {
     static func songs(
         _ manager: SessionManager,
         offset: Int = 0,
-        limit: Int = pageSize
+        limit: Int = pageSize,
+        sort: SongSort? = nil
     ) async throws -> AudioSongPage {
+        var params = [
+            "library": "all",
+            "offset": String(offset),
+            "limit": String(limit),
+            "additional": additional,
+        ]
+        addSort(sort, to: &params)
         let data = try await manager.call(
             kind: .audio,
             api: songAPI,
             version: 3,
             method: "list",
-            params: [
-                "library": "all",
-                "offset": String(offset),
-                "limit": String(limit),
-                "additional": additional,
-            ]
+            params: params
         )
         return songPage(data)
     }
@@ -220,22 +295,33 @@ enum AudioLibrary {
         _ manager: SessionManager,
         matching filter: SongFilter,
         offset: Int = 0,
-        limit: Int = pageSize
+        limit: Int = pageSize,
+        sort: SongSort? = nil
     ) async throws -> AudioSongPage {
+        var params = [
+            "library": "all",
+            filter.field.rawValue: filter.value,
+            "offset": String(offset),
+            "limit": String(limit),
+            "additional": additional,
+        ]
+        addSort(sort, to: &params)
         let data = try await manager.call(
             kind: .audio,
             api: songAPI,
             version: 3,
             method: "search",
-            params: [
-                "library": "all",
-                filter.field.rawValue: filter.value,
-                "offset": String(offset),
-                "limit": String(limit),
-                "additional": additional,
-            ]
+            params: params
         )
         return songPage(data)
+    }
+
+    /// 把排序并进请求参数。不给 `sort` 就一个参数都不加 —— 那就是服务端的默认
+    /// 顺序（库里写入的先后），表头没有亮着的箭头就是这一态。
+    private static func addSort(_ sort: SongSort?, to params: inout [String: String]) {
+        guard let sort else { return }
+        params["sort_by"] = sort.field.rawValue
+        params["sort_direction"] = sort.direction
     }
 
     /// 按标题 / 艺术家 / 专辑三个字段各搜一次，按曲目 id 合并去重。
