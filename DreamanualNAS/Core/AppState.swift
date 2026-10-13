@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -166,6 +167,244 @@ final class AppState {
             return nil
         }
     }
+
+    // MARK: - 歌曲右键菜单
+
+    /// 歌曲右键菜单的锚点与目标。挂全局而不是行里：菜单要浮在**整个窗口**之上，
+    /// 而画在行里会被后面的行盖住、也会被滚动区裁掉（原型 `.menu` 也是绝对定位）。
+    private(set) var songMenu: SongMenuRequest?
+
+    struct SongMenuRequest: Identifiable {
+        let id = UUID()
+        let song: AudioSong
+        /// 根视图坐标（左上原点）。
+        let point: CGPoint
+        /// 点开菜单时那一屏的曲目 —— 菜单里的「播放」拿它当队列（与双击同义）。
+        let queue: [AudioSong]
+    }
+
+    func openSongMenu(_ song: AudioSong, at point: CGPoint, queue: [AudioSong]) {
+        songMenu = SongMenuRequest(song: song, point: point, queue: queue)
+    }
+
+    func closeSongMenu() {
+        songMenu = nil
+    }
+
+    /// 菜单「播放」：这一屏整体成为队列，从这首起播（同双击）。
+    func playFromMenu(_ request: SongMenuRequest) {
+        playback?.play(request.queue, songID: request.song.id)
+    }
+
+    /// 菜单「下一首播放」：只把这一首插到当前播放位置后面，队列其余不动。
+    func playNext(_ song: AudioSong) {
+        guard let engine = playback else { return }
+        engine.insertNext(song)
+        showToast("「\(song.title)」已排到下一首", .ok)
+    }
+
+    // MARK: - 下载
+
+    /// 右键「下载」：先让用户挑存哪儿，再把曲库里那个**原始文件**拉下来。
+    ///
+    /// 走文件会话的 `FileStation.Download`（与预取大封面同一条），拿的是原文件
+    /// 而不是转码流。进度不给 —— Toast 一刷新就重开计时、还重播入场，反而看不清；
+    /// 落地时一条「已保存」更实在。
+    func download(_ song: AudioSong) async {
+        guard let manager = sessionManager else { return }
+        guard let destination = Self.askDestination(for: song) else { return }
+        showToast("正在下载「\(song.title)」…", .info)
+        do {
+            let endpoint = try await manager.fileEndpoint
+            try await FileDownloader(
+                baseURL: endpoint.baseURL,
+                credentials: endpoint.credentials,
+                allowSelfSigned: endpoint.allowSelfSigned,
+                destination: destination
+            ).start(path: song.path)
+            showToast("已保存「\(destination.lastPathComponent)」", .ok)
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 保存面板。默认文件名「歌手 - 标题.扩展名」—— 扩展名取自曲库路径（取不到
+    /// 就不带），别写死 `.mp3`：库里 flac / m4a 都有。
+    private static func askDestination(for song: AudioSong) -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "下载到"
+        panel.nameFieldStringValue = downloadName(for: song)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    static func downloadName(for song: AudioSong) -> String {
+        var base = song.artist.isEmpty ? song.title : "\(song.artist) - \(song.title)"
+        for bad in ["/", ":", "\\"] {
+            base = base.replacingOccurrences(of: bad, with: "_")
+        }
+        let ext = StreamLoader.fileExtension(of: song)
+        return ext.isEmpty ? base : "\(base).\(ext)"
+    }
+
+    // MARK: - 键盘
+
+    /// 空格 = 播放 / 暂停，← / → = 后退 / 前进 `seekStep` 秒。
+    ///
+    /// 用**本地事件监听**而不是 `.keyboardShortcut`：快捷键挂在 Button 上时
+    /// `performKeyEquivalent` 会先于文本框拿到按键 —— 曲库的搜索框里打一个空格
+    /// 就变成了暂停。这里先看第一响应者，是文本输入就原样放行。
+    ///
+    /// 媒体键（Mac 的 F8）不走这里，那是系统按键 —— 见 `NowPlaying`。
+    static let seekStep: Double = 5
+
+    private var keyMonitor: Any?
+
+    func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // `NSEvent` 不是 Sendable，别把它带进 `assumeIsolated` 的闭包里 ——
+            // 先把要用的两个值取出来再跳。
+            let code = event.keyCode
+            let flags = event.modifierFlags
+            let handled = MainActor.assumeIsolated {
+                self?.handleKey(code: code, flags: flags) ?? false
+            }
+            return handled ? nil : event
+        }
+    }
+
+    /// 认了这个键就返回 true（事件被吃掉，不再往下传）。
+    @discardableResult
+    func handleKey(code: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
+        // Esc：菜单开着就先收菜单。
+        if code == 53, songMenu != nil {
+            closeSongMenu()
+            return true
+        }
+        // ⌘ / ⌥ / ⌃ 的组合一律放行 —— 系统与菜单的快捷键优先。
+        let modifiers = flags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.isDisjoint(with: [.command, .option, .control]) else { return false }
+        // 光标在文本里就放行：搜索框要能打空格。
+        guard !isEditingText, let engine = playback else { return false }
+
+        switch code {
+        case 49: engine.togglePlayPause()
+        case 123: engine.seek(to: engine.currentTime - Self.seekStep)
+        case 124: engine.seek(to: engine.currentTime + Self.seekStep)
+        default: return false
+        }
+        return true
+    }
+
+    /// 第一响应者是不是文本输入。SwiftUI 的输入框在编辑时第一响应者是**字段
+    /// 编辑器**（一个 `NSTextView`），`SecureField` 也一样。
+    ///
+    /// 问的是同一个 `hostingWindow()` —— 拿 `NSApp.keyWindow` 直取会在启动时序里
+    /// 问到别的窗口，判据跟着飘。
+    private var isEditingText: Bool {
+        hostingWindow()?.firstResponder is NSTextView
+    }
+
+    /// 曲库页搜索框的聚焦请求，每加一就聚焦一次。给冒烟通路用：真机上没法用脚本
+    /// 点进输入框，而 AppKit 那边硬塞第一响应者会被 SwiftUI 的焦点机制顶回来。
+    private(set) var searchFocusTicket = 0
+    func requestSearchFocus() { searchFocusTicket += 1 }
+
+    /// `DM_KEYS=<逗号分隔>` 时由入口调用：按顺序发一遍按键，每步打引擎状态。
+    ///
+    /// 事件走 `NSApp.postEvent` 进事件队列 —— 与真按键同一条路（本地监听器、
+    /// 响应链都在里面），比自己调 `handleKey` 更能证明接线是通的。
+    /// 认得的名字：`space` / `left` / `right` / `search`。
+    func smokeKeys(_ list: String) async {
+        guard let engine = playback else {
+            NSLog("[keys] 没有播放引擎，跳过")
+            return
+        }
+        // 队列空就先播一首 —— 不然空格只是空转，看不出接线通没通。
+        // 这样 `DM_KEYS` 自己就是一趟完整核对，不必再叠 `DM_SMOKE`（那趟跑完会切到
+        // 队列页，曲库的搜索框就不在视图树里了，`search` 记号会找不到）。
+        if !engine.hasQueue, isConnected, let manager = sessionManager {
+            if let page = try? await AudioLibrary.songs(manager, limit: 20),
+               let first = page.songs.first {
+                NSLog("[keys] 队列是空的，先播第一首「%@」", first.title)
+                engine.play(page.songs, at: 0)
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+            }
+        }
+        for name in list.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
+            // `search`：把光标放进搜索框 —— 验证「光标在文本里时空格不暂停」那条守卫。
+            if name == "search" {
+                let moved = await focusSearchField()
+                NSLog("[keys] 焦点挪到搜索框：%@（isEditingText=%@）",
+                      moved ? "成功" : "没找到", isEditingText ? "是" : "否")
+                continue
+            }
+            guard let code = Self.keyCode(for: name) else {
+                NSLog("[keys] 认不出「%@」", name)
+                continue
+            }
+            let before = engine.smokeStatus()
+            if let event = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: NSApp.keyWindow?.windowNumber ?? 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: code
+            ) {
+                NSApp.postEvent(event, atStart: false)
+            }
+            // 拖进度要等播放器反应，给一秒半。
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            NSLog("[keys] %@：%@ → %@", name, before, engine.smokeStatus())
+        }
+    }
+
+    /// 把光标放进搜索框：每 0.25 秒举一次「聚焦请求」，一直到 `isEditingText`
+    /// 成立为止，最多 5 秒。
+    ///
+    /// 走 SwiftUI 的焦点状态（`DmSearchField` 的 `focusTicket`），不用 AppKit 硬塞
+    /// ——`makeFirstResponder` 收得下，但第一响应者不是字段编辑器，守卫仍然验不到
+    /// （2026-10-13 实测）。
+    ///
+    /// 举多次而不是一次：视图树逐帧长出来，进程刚起那会儿曲库页还没挂上，挂上之前
+    /// 的请求没人接；`onChange` 只在值变了才响，所以得继续加。
+    private func focusSearchField() async -> Bool {
+        for _ in 0..<20 {
+            requestSearchFocus()
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if isEditingText { return true }
+        }
+        return false
+    }
+
+    /// 主窗口。`keyWindow` 优先，但它可能因启动时序还没立起来 —— 那时退到
+    /// `mainWindow` 与第一个可见的非面板窗口。
+    private func hostingWindow() -> NSWindow? {
+        if let window = NSApp.keyWindow { return window }
+        if let window = NSApp.mainWindow { return window }
+        return NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
+    }
+
+    private static func keyCode(for name: String) -> UInt16? {
+        switch name {
+        case "space": return 49
+        case "left": return 123
+        case "right": return 124
+        default: return nil
+        }
+    }
+
+    // MARK: - 系统媒体键
+
+    /// 「正在播放」与媒体键（F7 / F8 / F9、控制中心、AirPods）。理由见 `NowPlaying`。
+    let nowPlaying = NowPlaying()
 
     // MARK: - 连接
 
@@ -357,6 +596,98 @@ final class AppState {
         NSLog("[library] 前八条 %@", head.joined(separator: " / "))
     }
 
+    /// `DM_UI=<逗号分隔>` 时由入口调用：把窗口与右键那套摆到指定状态，供真机核对。
+    ///
+    /// AI 环境点不了 UI、拖不动窗口、按不了保存面板 —— 这三件事只能让程序自己走。
+    /// 认得的指令：`window=<宽>x<高>` 摆主窗内容尺寸（最小窗宽那一屏要真机看）；
+    /// `songmenu` 打开曲库第一首的右键菜单；`download` 把曲库第一首下到临时目录
+    /// （走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）。
+    func smokeUI(_ command: String) async {
+        guard isConnected, let manager = sessionManager else {
+            NSLog("[ui] 未连接，跳过")
+            return
+        }
+        for raw in command.split(separator: ",") {
+            let token = raw.trimmingCharacters(in: .whitespaces)
+            if token.isEmpty { continue }
+            if token.hasPrefix("window=") {
+                await smokeWindow(String(token.dropFirst("window=".count)))
+            } else if token == "songmenu" {
+                await smokeSongMenu(manager)
+            } else if token == "download" {
+                await smokeDownload(manager)
+            } else {
+                NSLog("[ui] 认不出指令「%@」", token)
+            }
+        }
+    }
+
+    /// 主窗摆到指定内容尺寸。窗口是启动后长出来的，等它出现再摆。
+    private func smokeWindow(_ spec: String) async {
+        let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
+        guard parts.count == 2, let width = parts.first, let height = parts.last else {
+            NSLog("[window] 认不出尺寸「%@」（要 宽x高）", spec)
+            return
+        }
+        for _ in 0..<20 {
+            if let window = hostingWindow() {
+                window.setContentSize(NSSize(width: width, height: height))
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                let actual = window.contentRect(forFrameRect: window.frame).size
+                NSLog("[window] 摆 %@x%@ → 实际 %@x%@",
+                      String(Int(width)), String(Int(height)),
+                      String(Int(actual.width)), String(Int(actual.height)))
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        NSLog("[window] 没等到窗口")
+    }
+
+    private func smokeSongMenu(_ manager: SessionManager) async {
+        await library.loadIfNeeded(manager)
+        guard let song = library.songs.first else {
+            NSLog("[ui] 曲库是空的，菜单开不出来")
+            return
+        }
+        // 锚点给内容区中上那一块，菜单卡按指针摆、越界会收回窗口内。
+        openSongMenu(song, at: CGPoint(x: 380, y: 240), queue: library.songs)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        NSLog("[ui] 右键菜单已开「%@」（四项：播放 / 下一首播放 / 评分 / 下载）", song.title)
+    }
+
+    private func smokeDownload(_ manager: SessionManager) async {
+        await library.loadIfNeeded(manager)
+        guard let song = library.songs.first else {
+            NSLog("[ui] 曲库是空的，下载无从谈起")
+            return
+        }
+        guard let endpoint = try? await manager.fileEndpoint else {
+            NSLog("[ui] 拿不到文件服务的端点")
+            return
+        }
+        let dir = URL(fileURLWithPath: "/tmp/dm-smoke-download", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let destination = dir.appendingPathComponent(Self.downloadName(for: song))
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try await FileDownloader(
+                baseURL: endpoint.baseURL,
+                credentials: endpoint.credentials,
+                allowSelfSigned: endpoint.allowSelfSigned,
+                destination: destination
+            ).start(path: song.path)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: destination.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue
+            NSLog("[ui] 下载落地 %@（%@ 字节）",
+                  destination.lastPathComponent, size.map(String.init) ?? "?")
+            // 冒烟用完就清 —— 落盘这一步已经证明了。
+            try? FileManager.default.removeItem(at: destination)
+        } catch {
+            NSLog("[ui] 下载失败：%@", error.localizedDescription)
+        }
+    }
+
     /// 四个数据源各取一次（侧栏点得动之前，先把「取数通不通」验掉）。
     private func smokeLibrarySources(_ manager: SessionManager) async {
         do {
@@ -455,7 +786,13 @@ final class AppState {
             // 播放引擎跟着会话一起上：端点与证书策略在每首开播时随凭据取。
             let engine = PlaybackEngine()
             engine.attach(sessionManager: manager)
+            // 曲目 / 播放状态 / 进度有变化时把「正在播放」交给系统（媒体键那条路的回执）。
+            engine.nowPlayingHandler = { [weak self] song, isPlaying, elapsed, duration in
+                self?.nowPlaying.publish(song: song, isPlaying: isPlaying,
+                                         elapsed: elapsed, duration: duration)
+            }
             playback = engine
+            nowPlaying.attach(to: engine)
 
             await manager.startKeepAlive()
             lastConnectedAt = Date()

@@ -1,7 +1,8 @@
 import Foundation
 
 /// 双会话管理器：AudioStation 管曲库、FileStation 管文件 / 系统，
-/// **两个 sid 与两个 token 一一配对**，不能混用（混用一律 code=105）。
+/// **两个 sid 与两个 token 一一配对**，不能混用（AudioStation 类混用回 `105`，
+/// `FileStation.Download` 回 `119` —— 码随接口变，见 `docs/接口结论.md` 第十一节第 5 条）。
 ///
 /// 三件事都在这里：
 ///   1. 懒登录 —— 第一次用到某个会话时才登，别一上来占两个会话名额；
@@ -211,6 +212,24 @@ actor SessionManager {
     var streamEndpoint: StreamLoader.Endpoint {
         get async throws {
             let creds = try await credentials(for: .audio)
+            return StreamLoader.Endpoint(
+                baseURL: client.baseURL,
+                credentials: creds,
+                allowSelfSigned: client.allowSelfSigned
+            )
+        }
+    }
+
+    /// 下载原文件要用的端点。给的是**文件会话**那把钥匙 —— 按接口归口，文件类的活
+    /// 用文件会话，与取流用的音频会话分开。
+    ///
+    /// ⚠️ 实测（2026-10-13）`FileStation.Download` **并不校验会话名**：音频那把
+    /// 钥匙配自己的 token 也能下，它只查 `sid` 与 `X-SYNO-TOKEN` 是不是一对，
+    /// 配错就回 `119`。归口是工程规矩，别把「混用」的说辞写在错误提示里。
+    /// `StreamLoader.Endpoint` 只是「主机 + 凭据 + 证书策略」这三件，两处共用。
+    var fileEndpoint: StreamLoader.Endpoint {
+        get async throws {
+            let creds = try await credentials(for: .file)
             return StreamLoader.Endpoint(
                 baseURL: client.baseURL,
                 credentials: creds,

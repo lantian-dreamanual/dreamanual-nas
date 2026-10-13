@@ -139,6 +139,11 @@ struct LucideIcon: View {
                 Image(systemName: Self.symbol(for: name, filled: filled))
                     .font(.system(size: size * 0.9, weight: .regular))
                     .frame(width: size, height: size)
+                    // 竖排三点：SF 没有竖省略号，横排转 90° —— 形态照原型
+                    // lucide `more-vertical`。ⓘ 这条曾经写的是 `ellipsis.vertical`，
+                    // 那个名字在 SF Symbols 里不存在，真机上画的是空气（2026-10-13
+                    // 抓到：表头最右一格看着是空的，点不了）。
+                    .rotationEffect(.degrees(name == "more-vertical" ? 90 : 0))
             }
         }
     }
@@ -181,13 +186,19 @@ struct LucideIcon: View {
         "check": "checkmark",
         "chevron-up": "chevron.up",
         "chevron-down": "chevron.down",
-        "more-vertical": "ellipsis.vertical",
+        // ⚠️ `more-vertical` 兜底取 `ellipsis` 再转 90°（见 body）—— SF 没有
+        // `ellipsis.vertical`，写那个名字真机上就是空气。
+        "more-vertical": "ellipsis",
         "rotate-ccw": "arrow.counterclockwise",
         "triangle-alert": "exclamationmark.triangle",
         "wifi": "wifi",
         "key-round": "key",
         "link": "link",
         "refresh-cw": "arrow.clockwise",
+        // 歌曲右键菜单那几枚（2026-10-13）。`play` / `star` 播放条与评分星早就在用。
+        "list-start": "text.insert",
+        "download": "arrow.down.circle",
+        "trash": "trash",
     ]
 }
 
@@ -804,6 +815,54 @@ struct DmMenuSeparator: View {
     }
 }
 
+// ============ 右键 ============
+
+/// 右键捕获层：压在列表行上，只接右键。
+///
+/// `hitTest` 是这套的关键：除了右键那三个事件，一律返回 nil 把事件穿透给下层，
+/// 行上的单击选中、双击播放、悬停反馈才照常工作。接下来的一步把指针位置换算到
+/// **根视图坐标**（左上原点）—— 菜单要浮在整个窗口之上，而画在行里会被后面的行
+/// 盖住、也会被滚动区裁掉（原型的 `.menu` 是绝对定位在页面上的，同一条道理）。
+///
+/// SwiftUI 自己没有右键手势，`.contextMenu` 出的是**系统菜单**（NSMenu）—— 与第八节
+/// 的菜单卡不是一套形态，所以这里自己接。
+struct RightClickCatcher: NSViewRepresentable {
+    /// 参数已在根视图坐标系里（左上原点）。
+    let onRightClick: (CGPoint) -> Void
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onRightClick = onRightClick
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onRightClick = onRightClick
+    }
+
+    final class CatcherView: NSView {
+        var onRightClick: ((CGPoint) -> Void)?
+
+        /// 只管右键：其余事件一律不接（返回 nil 即穿透）。
+        /// `NSApp.currentEvent` 拿不到时也穿透 —— 宁可右键没反应，也别把左键吞掉。
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            switch NSApp.currentEvent?.type {
+            case .rightMouseDown, .rightMouseUp, .rightMouseDragged:
+                return self
+            default:
+                return nil
+            }
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            guard let content = window?.contentView else { return }
+            let inContent = content.convert(event.locationInWindow, from: nil)
+            // AppKit 原点在左下、SwiftUI 在左上。
+            onRightClick?(CGPoint(x: inContent.x, y: content.bounds.height - inContent.y))
+        }
+    }
+}
+
 /// 搜索框：高钉控件档 32、圆角 `r-8`、底按所在面取相邻一档、`line-2` 1px 描边；
 /// 左侧放大镜 14（`ink-3`），横向内边距 12、图标与输入之间 8；聚焦只转描边
 /// （`accent-2`）、底色不动；有内容时右侧出清除钮。宽度由调用点给
@@ -811,10 +870,15 @@ struct DmMenuSeparator: View {
 ///
 /// 形态照原型 `.searchbox`。产品线里这是第一个搜索框 —— 另四端都没有这个场景，
 /// 没有可复刻的落点，规格先落在本端。
+///
+/// `focusTicket`：外部的「把光标放进来」请求，每加一就聚焦一次。冒烟通路要用它
+/// —— AI 点不了 UI，而 AppKit 那边硬塞第一响应者会被 SwiftUI 的焦点机制顶回来
+/// （2026-10-13 实测：`makeFirstResponder` 收下了，第一响应者却不是字段编辑器）。
 struct DmSearchField: View {
     @Binding private var text: String
     private let placeholder: String
     private let surface: DmSurface
+    private let focusTicket: Int
     private let onSubmit: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -823,11 +887,13 @@ struct DmSearchField: View {
         text: Binding<String>,
         placeholder: String,
         surface: DmSurface = .panel,
+        focusTicket: Int = 0,
         onSubmit: @escaping () -> Void = {}
     ) {
         self._text = text
         self.placeholder = placeholder
         self.surface = surface
+        self.focusTicket = focusTicket
         self.onSubmit = onSubmit
     }
 
@@ -863,6 +929,9 @@ struct DmSearchField: View {
             RoundedRectangle(cornerRadius: DmRadius.r8)
                 .strokeBorder(isFocused ? Color.dmAccent2 : Color.dmLine2, lineWidth: DmLine.base)
         )
+        // 外部的聚焦请求落到 SwiftUI 自己的焦点状态上 —— 由它去装字段编辑器，
+        // 不走 AppKit 硬塞。
+        .onChange(of: focusTicket) { isFocused = true }
     }
 }
 

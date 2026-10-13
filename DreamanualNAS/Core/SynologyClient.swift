@@ -1,7 +1,9 @@
 import Foundation
 
 /// 会话凭据。`sid` 与 `X-SYNO-TOKEN` **必须成对** —— 拿 A 会话的 sid 配
-/// B 会话的 token 一律回 `code=105`（看起来像权限问题，实际是配错了对）。
+/// B 会话的 token 会被判成会话无效（看起来像权限问题，实际是配错了对）。
+/// ⚠️ **码随接口变**：AudioStation 类回 `105`，`FileStation.Download` 回 `119`
+/// （2026-10-13 实测，见 `docs/接口结论.md` 第十一节第 5 条）。
 struct SynologyCredentials: Equatable {
     var sid: String
     var token: String
@@ -76,19 +78,28 @@ final class TLSPolicyDelegate: NSObject, URLSessionDelegate, @unchecked Sendable
         self.allowSelfSigned = allowSelfSigned
     }
 
+    /// 判据只此一处：普通调用、取流（`StreamLoader`）、下载（`FileDownloader`）
+    /// 各开自己的 URLSession，三处共用这一条 —— 一处改了、另两处忘了，直连就会
+    /// 只坏在某个场景上，很难查。
+    static func allows(_ challenge: URLAuthenticationChallenge,
+                       allowSelfSigned: Bool) -> URLCredential? {
+        guard allowSelfSigned,
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else { return nil }
+        return URLCredential(trust: trust)
+    }
+
     func urlSession(
         _ session: URLSession,
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        guard allowSelfSigned,
-              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust
-        else {
+        if let credential = Self.allows(challenge, allowSelfSigned: allowSelfSigned) {
+            completionHandler(.useCredential, credential)
+        } else {
             completionHandler(.performDefaultHandling, nil)
-            return
         }
-        completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
 

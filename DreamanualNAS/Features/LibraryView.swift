@@ -573,7 +573,9 @@ struct LibraryView: View {
                     get: { model.searchText },
                     set: { model.searchText = $0 }
                 ),
-                placeholder: "搜索标题、艺术家、专辑"
+                placeholder: "搜索标题、艺术家、专辑",
+                // 冒烟通路的「把光标放进搜索框」请求（AI 点不了 UI）。
+                focusTicket: state.searchFocusTicket
             ) {
                 Task { await model.submitSearch(on: state.sessionManager) }
             }
@@ -610,6 +612,8 @@ struct LibraryView: View {
             } else {
                 TrackTable(model: model, manager: state.sessionManager, engine: state.playback) { song, stars in
                     Task { await model.rate(song, to: stars, on: state) }
+                } onContextMenu: { song, point in
+                    state.openSongMenu(song, at: point, queue: model.songs)
                 }
             }
         } else if model.isEmptyContent {
@@ -755,8 +759,21 @@ enum TrackMetrics {
     /// 表头行高。由 cell 的上下 `s8` + 11px 字 + 底下一根发丝决定 ——
     /// 字段配置菜单浮在它下面，改表头内边距要一起改这里。
     static let headerHeight: CGFloat = 30
-    /// 字段配置那一列的宽（原型 `colgroup` 最后一格 32）。
+    /// 字段配置那一列的宽（原型 `colgroup` 最后一格 32）。表头那一格放竖三点，
+    /// 行尾是**一格空道** —— 曲库表的行也要留出这一格，否则行的自适应标题列会比
+    /// 表头宽 32，后面每一列整体右移、与表头错位（2026-10-13 用户真机抓到）。
     static let configWidth: CGFloat = 32
+    /// 标题列保底宽。固定列合计 536，主区一挤自适应列会被压成 0、整列凭空消失。
+    static let titleMinWidth: CGFloat = 180
+
+    /// 表格内容宽。视口比它宽时标题列吸收余量（铺满），比它窄时**横向滚动**
+    /// —— 表头与行在同一个滚动容器里，一起滚，列不会各滚各的。
+    static func contentWidth(viewport: CGFloat, visible: Set<TrackField>) -> CGFloat {
+        let fixed = TrackField.allCases
+            .filter { $0 != .title && visible.contains($0) }
+            .reduce(CGFloat.zero) { $0 + $1.fixedWidth }
+        return max(viewport, titleMinWidth + fixed + configWidth)
+    }
 }
 
 /// 表头固定——列表滚多长表头都钉在顶上，所以它放在 `ScrollView` 外面，
@@ -770,50 +787,66 @@ private struct TrackTable: View {
     let manager: SessionManager?
     let engine: PlaybackEngine?
     let onRate: (AudioSong, Int) -> Void
+    /// 右键一行：参数是**根视图坐标**（左上原点）里的指针位置 —— 菜单浮在整个
+    /// 窗口之上，行在滚动区里画不了（会被后面的行盖住、也会被滚动区裁掉）。
+    let onContextMenu: (AudioSong, CGPoint) -> Void
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            VStack(spacing: 0) {
-                TrackHeader(
-                    sort: model.sort,
-                    visible: model.visibleColumns,
-                    onSort: { field in
-                        Task { await model.toggleSort(field, on: manager) }
-                    },
-                    onConfigure: { model.showsFieldMenu = true }
-                )
+            // 视口窄于内容时横向滚动（表头与行在同一个滚动容器里，一起滚）。
+            // 内容宽由可见列算出，标题列吸收余量 —— 窗口宽时与以前完全一样。
+            GeometryReader { geo in
+                let width = TrackMetrics.contentWidth(viewport: geo.size.width,
+                                                      visible: model.visibleColumns)
+                ScrollView(.horizontal) {
+                    VStack(spacing: 0) {
+                        TrackHeader(
+                            sort: model.sort,
+                            visible: model.visibleColumns,
+                            onSort: { field in
+                                Task { await model.toggleSort(field, on: manager) }
+                            },
+                            onConfigure: { model.showsFieldMenu = true }
+                        )
 
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.songs) { song in
-                            TrackRow(
-                                song: song,
-                                isSelected: model.selectedSongID == song.id,
-                                isPlaying: engine?.currentSong?.id == song.id,
-                                visible: model.visibleColumns
-                            ) {
-                                model.select(song: song)
-                            } onPlay: {
-                                // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
-                                // 追加进模型后，下次播放自然带上新页）。
-                                model.select(song: song)
-                                engine?.play(model.songs, songID: song.id)
-                            } onRate: { stars in
-                                onRate(song, stars)
-                            }
-                        }
-                        if model.hasMore {
-                            LoadMoreRow(
-                                loaded: model.songs.count,
-                                isLoading: model.isLoadingMore
-                            ) {
-                                Task { await model.loadMore(manager) }
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(model.songs) { song in
+                                    TrackRow(
+                                        song: song,
+                                        isSelected: model.selectedSongID == song.id,
+                                        isPlaying: engine?.currentSong?.id == song.id,
+                                        visible: model.visibleColumns,
+                                        // 行尾留出字段配置那一格的空道，与表头对齐。
+                                        trailingLane: TrackMetrics.configWidth
+                                    ) {
+                                        model.select(song: song)
+                                    } onPlay: {
+                                        // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
+                                        // 追加进模型后，下次播放自然带上新页）。
+                                        model.select(song: song)
+                                        engine?.play(model.songs, songID: song.id)
+                                    } onRate: { stars in
+                                        onRate(song, stars)
+                                    } onContextMenu: { point in
+                                        model.select(song: song)
+                                        onContextMenu(song, point)
+                                    }
+                                }
+                                if model.hasMore {
+                                    LoadMoreRow(
+                                        loaded: model.songs.count,
+                                        isLoading: model.isLoadingMore
+                                    ) {
+                                        Task { await model.loadMore(manager) }
+                                    }
+                                }
                             }
                         }
                     }
+                    .frame(width: width)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if model.showsFieldMenu {
                 // 压在表头与列表之上的一层：点哪儿都先收菜单。
@@ -904,7 +937,7 @@ private struct TrackHeader: View {
     }
 }
 
-/// 列宽：标题列自适应（保底 180），其余按 `TrackField.width`。
+/// 列宽：标题列自适应（保底 `titleMinWidth`），其余按 `TrackField.width`。
 /// 表头与行共用 —— 两边的列必须一样宽，所以宽度只从 `TrackField` 来。
 private struct ColumnWidth: ViewModifier {
     let field: TrackField
@@ -913,7 +946,7 @@ private struct ColumnWidth: ViewModifier {
         if let width = field.width {
             content.frame(width: width, alignment: field.isTrailing ? .trailing : .leading)
         } else {
-            content.frame(minWidth: 180, maxWidth: .infinity,
+            content.frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity,
                           alignment: field.isTrailing ? .trailing : .leading)
         }
     }
@@ -931,10 +964,15 @@ struct TrackRow: View {
     var isPlaying: Bool = false
     /// 显示的列。默认全开 —— 队列行与单视图台架那两处不关心列配置。
     var visible: Set<TrackField> = Set(TrackField.allCases)
+    /// 行尾空道宽。曲库表填 `TrackMetrics.configWidth`（与表头那格字段配置对齐），
+    /// 没有这一格的表（队列）留 0。
+    var trailingLane: CGFloat = 0
     let onSelect: () -> Void
     var onPlay: (() -> Void)?
     /// 给了评分列就可点；没给（如队列页之外的只读场合）保持只读。
     var onRate: ((Int) -> Void)?
+    /// 右键（参数是指针位置，已在根视图坐标系里）。不给就不接右键。
+    var onContextMenu: ((CGPoint) -> Void)?
 
     @State private var isHovered = false
 
@@ -945,17 +983,21 @@ struct TrackRow: View {
         isSelected: Bool,
         isPlaying: Bool = false,
         visible: Set<TrackField> = Set(TrackField.allCases),
+        trailingLane: CGFloat = 0,
         onSelect: @escaping () -> Void,
         onPlay: (() -> Void)? = nil,
-        onRate: ((Int) -> Void)? = nil
+        onRate: ((Int) -> Void)? = nil,
+        onContextMenu: ((CGPoint) -> Void)? = nil
     ) {
         self.song = song
         self.isSelected = isSelected
         self.isPlaying = isPlaying
         self.visible = visible
+        self.trailingLane = trailingLane
         self.onSelect = onSelect
         self.onPlay = onPlay
         self.onRate = onRate
+        self.onContextMenu = onContextMenu
     }
 
     var body: some View {
@@ -972,10 +1014,9 @@ struct TrackRow: View {
                     .truncationMode(.middle)
             }
             .padding(.horizontal, TrackMetrics.padH)
-            // 标题列自适应，但**保底 180** —— 固定列合计 536，主区一挤
-            // （窗口收到最小宽以下不会有，但门禁外的人为缩放会）自适应列会
-            // 被压成 0，整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
-            .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
+            // 标题列自适应，但**保底 `titleMinWidth`** —— 固定列合计 536，主区一挤
+            // 自适应列会被压成 0、整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
+            .frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity, alignment: .leading)
 
             if visible.contains(.artist) { plain(song.artist, field: .artist) }
             if visible.contains(.album) { plain(song.album, field: .album) }
@@ -999,6 +1040,10 @@ struct TrackRow: View {
                 .padding(.trailing, DmSpace.s8)
                 .modifier(ColumnWidth(field: .rating))
             }
+
+            if trailingLane > 0 {
+                Color.clear.frame(width: trailingLane)
+            }
         }
         .frame(height: 34)
         // 选中 = 悬停同款底（常亮）：把「悬停或选中」一起喂给 hovered，
@@ -1012,6 +1057,12 @@ struct TrackRow: View {
         .onTapGesture(perform: onSelect)
         .onTapGesture(count: 2) {
             onPlay?()
+        }
+        // 右键捕获层压在行上：它只接右键事件，左键与悬停一律穿透（见 `RightClickCatcher`）。
+        .overlay {
+            if let onContextMenu {
+                RightClickCatcher(onRightClick: onContextMenu)
+            }
         }
     }
 

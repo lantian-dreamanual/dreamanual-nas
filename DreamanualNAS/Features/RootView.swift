@@ -38,8 +38,73 @@ struct RootView: View {
         // 且与品牌区的 DmLayout.titlebar padding 叠成双重让位 —— 侧栏顶上多出
         // 一块空白（2026-10-12 用户截图）。与视频下载根部同一条处理。
         .ignoresSafeArea(.container, edges: .top)
+        // 歌曲右键菜单：挂根上（不是行里）—— 行在滚动区里，菜单画在行里会被
+        // 后面的行盖住、也会被滚动区裁掉。锚点给的是根视图坐标，这里就是根。
+        .overlay { songMenuLayer }
         // 提示条挂在根上：曲库表与播放条两处评分入口都落到同一条上。
         .dmToast($state.toast)
+    }
+
+    /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，
+    /// 越界时收回窗口内。
+    @ViewBuilder
+    private var songMenuLayer: some View {
+        GeometryReader { geo in
+            if let request = state.songMenu {
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { state.closeSongMenu() }
+
+                    DmMenuCard(width: SongMenu.width) {
+                        DmMenuRow(title: "播放", icon: "play") {
+                            state.closeSongMenu()
+                            state.playFromMenu(request)
+                        }
+                        DmMenuRow(title: "下一首播放", icon: "list-start") {
+                            state.closeSongMenu()
+                            state.playNext(request.song)
+                        }
+                        // 评分那一行：星星自己接点击，行本身不做事。原型 `.mi` 里的
+                        // 内嵌星（`.rate{margin-left:auto}`）。
+                        DmMenuRow(title: "评分", icon: "star", action: {}) {
+                            RatingStars(
+                                rating: request.song.rating,
+                                isSelected: false,
+                                revealsEmpty: true,
+                                onRate: { stars in
+                                    Task { await state.rate(request.song.id, to: stars) }
+                                }
+                            )
+                        }
+                        DmMenuSeparator()
+                        DmMenuRow(title: "下载", icon: "download") {
+                            state.closeSongMenu()
+                            Task { await state.download(request.song) }
+                        }
+                    }
+                    .offset(x: SongMenu.anchor(request.point, in: geo.size).x,
+                            y: SongMenu.anchor(request.point, in: geo.size).y)
+                }
+            }
+        }
+    }
+}
+
+/// 歌曲右键菜单的摆位。菜单卡宽固定（原型 `.menu` 的 `min-width:160`，这里给
+/// 196 —— 带内嵌星那一行要放得下），高按项数估：每项 30 + 分隔线 9 + 内边距 8。
+enum SongMenu {
+    static let width: CGFloat = 196
+    static let itemHeight: CGFloat = 30
+    private static let inset: CGFloat = 8
+
+    /// 指针位置 → 菜单左上角，越界时收回窗口内（同访达 / 原型那层绝对定位的意思）。
+    static func anchor(_ point: CGPoint, in size: CGSize) -> CGPoint {
+        let height = itemHeight * 4 + 9 + 8
+        return CGPoint(
+            x: min(max(inset, point.x), max(inset, size.width - width - inset)),
+            y: min(max(inset, point.y), max(inset, size.height - height - inset))
+        )
     }
 }
 

@@ -24,7 +24,9 @@ struct QueueView: View {
                 Button {
                     engine.clearQueue()
                 } label: {
-                    Label("清空", systemImage: "trash-2")
+                    // ⚠️ 这里给的是 **SF Symbols** 名（`Label` 走系统图标），不是 Lucide ——
+                    // 原来写的 `trash-2` 是 Lucide 的名，SF 里没有，真机画的是空占位。
+                    Label("清空", systemImage: "trash")
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(!engine.hasQueue)
@@ -65,6 +67,8 @@ struct QueueView: View {
                             engine.play(engine.queue, at: songIndex)
                         } onRate: { stars in
                             Task { await state.rate(song.id, to: stars) }
+                        } onContextMenu: { point in
+                            state.openSongMenu(song, at: point, queue: engine.queue)
                         }
                     }
                 }
@@ -125,6 +129,8 @@ private struct QueueRow: View {
     let isPlaying: Bool
     let onPlay: () -> Void
     var onRate: ((Int) -> Void)?
+    /// 右键（参数是指针位置，已在根视图坐标系里）。
+    var onContextMenu: ((CGPoint) -> Void)?
 
     @State private var isHovered = false
 
@@ -140,8 +146,10 @@ private struct QueueRow: View {
                         .monospacedDigit()
                 }
             }
-            .frame(width: 56, alignment: .leading)
+            // ⚠️ 内边距必须在 `frame` **里面**：写在外面会让这一格变成
+            // 56 + 20 = 76 宽，表头那格是 56，后面每一列都错位 20。
             .padding(.horizontal, TrackMetrics.padH)
+            .frame(width: 56, alignment: .leading)
 
             HStack(spacing: DmSpace.s8) {
                 DmCover(album: song.album, artist: song.albumArtist, folder: song.folder, size: 28)
@@ -182,6 +190,11 @@ private struct QueueRow: View {
         .contentShape(Rectangle())
         .trackingHover($isHovered)
         .onTapGesture(perform: onPlay)
+        .overlay {
+            if let onContextMenu {
+                RightClickCatcher(onRightClick: onContextMenu)
+            }
+        }
     }
 
     @ViewBuilder

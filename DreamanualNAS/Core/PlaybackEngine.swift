@@ -43,6 +43,11 @@ final class PlaybackEngine {
     /// 取流失败时的提示，挂播放条上。成功开下一首时清掉。
     private(set) var streamErrorMessage: String?
 
+    /// 「正在播放」信息的出口（装配时由 `AppState` 挂上 `NowPlaying`）。
+    /// 曲目、播放状态、进度这三样有变化时往外送一次 —— 系统自己按
+    /// `elapsedPlaybackTime` + `playbackRate` 外推进度，不必每秒刷。
+    var nowPlayingHandler: (@MainActor (AudioSong?, Bool, Double, Double) -> Void)?
+
     var currentSong: AudioSong? {
         guard playOrder.indices.contains(position) else { return nil }
         return queue[playOrder[position]]
@@ -103,7 +108,7 @@ final class PlaybackEngine {
         play(songs, at: index)
     }
 
-    /// 追加到队尾（右键「下一首播放」「添加到歌单」那一族还没落，先留口）。
+    /// 追加到队尾（「添加到歌单」那一族还没落，先留着这个口）。
     func append(_ songs: [AudioSong]) {
         guard !songs.isEmpty else { return }
         let base = queue.count
@@ -116,6 +121,7 @@ final class PlaybackEngine {
         queue = []
         playOrder = []
         position = 0
+        publishNowPlaying()
     }
 
     /// 评分变更后同步队列里那一首 —— 播放条读 `currentSong`，本地不同步的话
@@ -154,7 +160,22 @@ final class PlaybackEngine {
             isPlaying = true
         } else {
             start(at: position)
+            return
         }
+        publishNowPlaying()
+    }
+
+    /// 只播（媒体键 / 控制中心的播放）：已经在播就不动 —— 用 `togglePlayPause`
+    /// 会把「系统发来 play」变成暂停。
+    func play() {
+        guard hasQueue, !isPlaying else { return }
+        togglePlayPause()
+    }
+
+    /// 只停（媒体键的暂停）。
+    func pause() {
+        guard isPlaying else { return }
+        togglePlayPause()
     }
 
     func next() {
@@ -187,6 +208,20 @@ final class PlaybackEngine {
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
+        publishNowPlaying()
+    }
+
+    /// 把一首歌插到「接下来播放」的位置（右键菜单「下一首播放」）。
+    ///
+    /// 队列与播放顺序是两张表：歌追加到 `queue` 末尾，`playOrder` 里插到**当前
+    /// 播放位置后面** —— 随机播放打开时也照打乱后的顺序落在「下一首」。
+    func insertNext(_ song: AudioSong) {
+        guard playOrder.indices.contains(position) else {
+            play([song], at: 0)
+            return
+        }
+        queue.append(song)
+        playOrder.insert(queue.count - 1, at: position + 1)
     }
 
     func setVolume(_ value: Double) {
@@ -247,18 +282,21 @@ final class PlaybackEngine {
                         guard let self, case .failed = item.status else { return }
                         self.streamErrorMessage = item.error?.localizedDescription ?? "取流失败。"
                         self.isPlaying = false
+                        self.publishNowPlaying()
                     }
                 }
 
                 player.replaceCurrentItem(with: item)
                 player.play()
                 isPlaying = true
+                self.publishNowPlaying()
                 if Self.smoke {
                     NSLog("[play] start id=%@ ext=%@ item=%@", song.id, ext, item.debugDescription)
                 }
             } catch {
                 streamErrorMessage = error.localizedDescription
                 isPlaying = false
+                self.publishNowPlaying()
             }
         }
     }
@@ -301,6 +339,10 @@ final class PlaybackEngine {
         seek(to: duration)
     }
 
+    private func publishNowPlaying() {
+        nowPlayingHandler?(currentSong, isPlaying, currentTime, duration)
+    }
+
     private func stop() {
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -310,5 +352,6 @@ final class PlaybackEngine {
         currentTime = 0
         duration = 0
         tracks = []
+        publishNowPlaying()
     }
 }

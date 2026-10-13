@@ -27,13 +27,29 @@ struct DreamanualNASApp: App {
         WindowGroup("Dreamanual NAS 助手", id: "main") {
             RootView()
                 .environment(state)
-                .frame(minWidth: 1140, minHeight: 620)
+                // 最小宽要装得下：应用侧栏 220 + 一根发丝 + 内容区侧栏 200
+                // + 固定列 536 + 标题列保底 180 + 字段配置一格 32 = 1169。
+                // ⚠️ 这一格字段配置是后来补的 —— 1140 那会儿漏算了它，于是窗口收到
+                // 最小的那一段里，表头最右那格（竖三点）被裁掉半个（2026-10-13 用户抓到）。
+                .frame(minWidth: 1170, minHeight: 620)
                 .task {
                     // 启动即重解析端点再自动登录（端点会变，不缓存到磁盘）。
                     await state.restoreAndAutoConnect()
+                    // 键盘控制键（空格 / ←→）挂了才认，装一次就够。
+                    state.installKeyMonitor()
+                    // DM_UI=window=1170x680,songmenu,download：把窗口 / 右键菜单 /
+                    // 下载摆到指定状态，供真机核对（AI 点不了 UI、拖不动窗口）。
+                    if let ui = ProcessInfo.processInfo.environment["DM_UI"] {
+                        await state.smokeUI(ui)
+                    }
                     // 冒烟验证：DM_SMOKE=1 时自动播一首并打状态日志。
                     if ProcessInfo.processInfo.environment["DM_SMOKE"] == "1" {
                         await state.smokePlayFirst()
+                    }
+                    // DM_KEYS=space,right,left：把控制键逐个发一遍，打每步的引擎状态
+                    // —— AI 按不了键盘，这条通路是核对控制键的唯一办法。
+                    if let keys = ProcessInfo.processInfo.environment["DM_KEYS"] {
+                        await state.smokeKeys(keys)
                     }
                     // DM_IMMERSIVE=<关键词>：搜一首、开播、进沉浸模式，供真机截图核对
                     // （AI 点不了 UI，只能让程序自己走到那一屏）。
@@ -50,7 +66,7 @@ struct DreamanualNASApp: App {
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。
         .windowStyle(.hiddenTitleBar)
         // 最小宽要装得下：应用侧栏 220 + 内容区侧栏 200 + 固定列 536 + 标题列保底 180。
-        .defaultSize(width: 1160, height: 700)
+        .defaultSize(width: 1180, height: 720)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
