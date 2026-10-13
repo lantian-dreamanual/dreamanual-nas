@@ -57,28 +57,34 @@ struct PlayerBarView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// 进度线本体：占位 3px，可视轨道悬停时长到 6px。🔴 轨道要在 GR 里再钉一次
-    /// `.frame(maxHeight: .infinity, alignment: .bottom)` —— GeometryReader 把超框
-    /// 子视图**居中**放，不钉底就是「上下各溢一半」（2026-10-13 用户抓出来的：
-    /// 外层 ZStack 的 bottom 对齐管不到 GR 内部）。钉底后向上溢出、不挤占内容。
-    /// 拇指 10 居中在轨道上；气泡挂在轨道中心上方，悬停时浮到内容区上。
+    /// 进度线本体：占位 3px；悬停时长到 6px 且**整体抬到条沿外**（轨道 [-6,0]，
+    /// 拇指骑在沿上）—— 展开只向上、条内几何不动。🔴 两个布局坑（2026-10-13
+    /// 用户两轮抓出来的）：① GeometryReader 把超框子视图居中放，轨道要在 GR
+    /// 里钉底再抬；② 气泡不能当轨道 ZStack 的布局子视图（Text 撑高 ZStack、
+    /// 轨道跟着居中漂），要挂 overlay。
     private var progressLine: some View {
         GeometryReader { geo in
             let width = geo.size.width
+            let h: CGFloat = isEngaged ? 6 : 3
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(Color.dmPanel3)
+                    .frame(height: h)
                 Rectangle()
                     .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
-                    .frame(width: width * shownFraction)
+                    .frame(width: width * shownFraction, height: h)
                 if isEngaged {
                     Circle()
                         .fill(Color.dmInk)
                         .frame(width: 10, height: 10)
                         .offset(x: width * shownFraction - 5)
                 }
+            }
+            .frame(height: h)
+            .overlay(alignment: .top) {
                 if let hoverX, !isScrubbing, let engine, engine.hasQueue {
-                    // 气泡报悬停位置的时间（原型 `.p-line .tip`）。
+                    // 气泡报悬停位置的时间（原型 `.p-line .tip`）；挂 overlay
+                    // 不参与布局，悬在轨道上方。
                     let hoverTime = Double(hoverX / max(width, 1)) * engine.duration
                     Text("\(timeText(hoverTime)) / \(timeText(engine.duration))")
                         .font(.system(size: DmText.t11))
@@ -95,11 +101,12 @@ struct PlayerBarView: View {
                                 )
                         )
                         .fixedSize()
-                        .offset(x: min(max(hoverX, 40), width - 40), y: -24)
+                        .offset(x: min(max(hoverX, 40), width - 40) - width / 2, y: -26)
                 }
             }
-            .frame(height: isEngaged ? 6 : 3)
             .frame(maxHeight: .infinity, alignment: .bottom)
+            // 钉底之后整体抬 3：悬停时轨道 [-6,0]、完全在条沿外，只向上展开。
+            .offset(y: isEngaged ? -3 : 0)
         }
         .frame(height: 3)
         .overlay(interactionZone)
