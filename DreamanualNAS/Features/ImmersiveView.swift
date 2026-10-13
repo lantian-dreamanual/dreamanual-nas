@@ -6,6 +6,7 @@ import SwiftUI
 /// 留在底下 —— 控制、进度、气泡与曲库状态是同一个组件、同一份数据。
 ///
 /// 底是一张放大的封面：等比撑满 + 重高斯模糊 + 一层压暗，保证前景文字对比度；
+/// 底缘再从透明渐到播放条的 panel 色（网易云口径），让模糊封面自然接上播放条。
 /// 没有封面（或还没取回来）时退回纯色底 —— 原型那层渐变是占位美术，不落进实现。
 /// 左封面 280、右信息栏 380，间距 56（容器级留白，第 5 节按布局值保留）。
 ///
@@ -81,6 +82,19 @@ struct ImmersiveView: View {
             }
             // 压暗层：原型是 rgba(10,10,10,.62)，这里用 bg 色压同样的透明度。
             Color.dmBg.opacity(0.62)
+            // 底缘渐隐（网易云口径，2026-10-13 用户点名）：从透明渐到播放条的
+            // panel 色，模糊封面在底部自然接上播放条、不再有一条硬边。渐变高度
+            // 140 是布局值（视觉过渡带，无令牌可取）。渐变层在压暗层之上、
+            // 内容之下（backdrop 整体是 background）。
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LinearGradient(
+                    colors: [Color.dmPanel.opacity(0), Color.dmPanel],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 140)
+            }
         }
     }
 

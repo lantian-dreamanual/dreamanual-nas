@@ -67,7 +67,9 @@ struct PlayerBarView: View {
             let h: CGFloat = isEngaged ? 6 : 3
             ZStack(alignment: .leading) {
                 Rectangle()
-                    .fill(Color.dmPanel3)
+                    // 余段底色做得淡（网易云口径，2026-10-13 用户点名）：ink 10%
+                    // 压在 panel 上只是一道可辨的浅痕，不与已播段抢视线。
+                    .fill(Color.dmInk.opacity(0.1))
                     .frame(height: h)
                 Rectangle()
                     .fill(isEngaged ? Color.dmAccent2 : Color.dmAccent)
