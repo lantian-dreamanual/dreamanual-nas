@@ -9,7 +9,8 @@
 > 真机 12328 首完整渲染。**播放与队列已接**：取流走自定义 scheme + 资源装载代理（`stream.cgi`
 > 要带 `X-SYNO-TOKEN`），真机验证过播放 / 拖进度 / 切歌（`DM_SMOKE=1` 冒烟通路）。
 > **内容区侧栏已接**：每日随机 / 全部曲目 / 我的歌单 / 评分 ≥ 4 星（这台库还没评过分，此入口现为空）。
-> 评分写入、封面缩略图、表头排序与字段配置、文件管理、系统状态还没接。
+> **评分写入已接**（真机验证过写 5 / 写 3 / 复原 0 三步回读一致）：曲库表 / 队列表 / 播放条三处都能点星，写后回读校验，写失败弹 Toast。
+> 封面缩略图、表头排序与字段配置、文件管理、系统状态还没接。
 
 ## 功能
 
@@ -41,13 +42,13 @@ nas/
 │   ├── DreamanualNASApp.swift   入口：固定深色 + 窗口
 │   ├── DesignSystem/
 │   │   ├── DreamanualTheme.nas.swift   生成物副本（勿手改，门禁对账 design/dist）
-│   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / LucideIcon
+│   │   └── DesignSystem.swift          组件层：选中态（两条轨道）/ 页头 / 按钮 / 输入框 / 搜索框 / 开关 / 评分星 / Toast / LucideIcon
 │   ├── Core/
 │   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
 │   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码
 │   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
 │   │   ├── KeychainStore.swift    口令只进系统钥匙串
-│   │   ├── AudioLibrary.swift     曲库只读数据层（四维 / 搜索 / 筛选 / 分页）
+│   │   ├── AudioLibrary.swift     曲库数据层（四维 / 搜索 / 筛选 / 分页 / 歌单 / 评分读写）
 │   │   ├── PlaybackEngine.swift   播放引擎（队列 / 播放顺序 / 拖进度 / 音量）
 │   │   ├── StreamLoader.swift     取流装载器（自定义 scheme + Range + TLS 策略）
 │   │   └── AppState.swift         连接状态机 + 模块切换

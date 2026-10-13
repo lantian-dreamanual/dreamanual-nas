@@ -25,8 +25,9 @@ struct AudioSong: Identifiable, Equatable {
     let codec: String
     let container: String
     let filesize: Int64
-    /// 0–5，未评分是 0。
-    let rating: Int
+    /// 0–5，未评分是 0。**唯一可变字段** —— 评完分只动这一格，
+    /// 不重拉整页（写评分那条路要回读校验，拿回来的值与这里对齐）。
+    var rating: Int
 
     init?(_ raw: [String: Any]) {
         let id = jsonString(raw["id"])
@@ -132,6 +133,21 @@ struct SongFilter: Equatable {
 struct AudioSongPage {
     let songs: [AudioSong]
     let total: Int
+}
+
+/// 评分写入没有真的生效（写了与回读对不上）。
+///
+/// `Song.setrating` 的成功标志不可信 —— 拿一个不存在的 id 去写，服务端照样回
+/// `{"success": true}`。所以判据只能是自己再读一遍。
+enum RatingError: LocalizedError {
+    case notApplied(wrote: Int, readBack: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .notApplied(let wrote, let readBack):
+            return "评分没写进去：写的是 \(wrote) 星，回读是 \(readBack) 星。"
+        }
+    }
 }
 
 // MARK: - 读取层
@@ -308,6 +324,42 @@ enum AudioLibrary {
             if offset >= page.total { break }
         }
         return AudioSongPage(songs: collected, total: collected.count)
+    }
+
+    // MARK: 评分写入
+
+    /// 写评分（0–5，0 = 清除）。**只有 v2** —— v1 回 103（方法不存在）。
+    ///
+    /// 🔴 `setrating` 对一个**不存在的 id 也回 `{"success": true}`**，成功标志
+    /// 不可信。写完必须回读校验：对不上就抛出去，让界面说实话，而不是把
+    /// 「看起来成功」画成一颗星。
+    static func setRating(
+        _ manager: SessionManager,
+        songID: String,
+        rating: Int
+    ) async throws -> Int {
+        let value = max(0, min(5, rating))
+        _ = try await manager.call(
+            kind: .audio,
+            api: songAPI,
+            version: 2,
+            method: "setrating",
+            params: ["id": songID, "rating": String(value)]
+        )
+        let readBack = try await Self.rating(manager, songID: songID)
+        smokeLog("写评分 \(songID) → \(value)，回读 \(readBack)")
+        guard readBack == value else {
+            throw RatingError.notApplied(wrote: value, readBack: readBack)
+        }
+        return readBack
+    }
+
+    /// 读单曲评分。`Song.getinfo` 认 `additional=song_rating` —— 键名就是它，
+    /// 给 `rating` 会被忽略，`song_tag,song_audio` 也不带它。
+    static func rating(_ manager: SessionManager, songID: String) async throws -> Int {
+        let raw = try await songInfo(manager, id: songID)
+        let box = ((raw?["additional"] as? [String: Any])?["song_rating"] as? [String: Any]) ?? [:]
+        return jsonInt(box["rating"]) ?? 0
     }
 
     // MARK: 歌单

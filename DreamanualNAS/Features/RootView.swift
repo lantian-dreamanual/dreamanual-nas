@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
+        @Bindable var state = state
         Group {
             if state.isConnected {
                 VStack(spacing: 0) {
@@ -29,6 +30,8 @@ struct RootView: View {
         // 且与品牌区的 DmLayout.titlebar padding 叠成双重让位 —— 侧栏顶上多出
         // 一块空白（2026-10-12 用户截图）。与视频下载根部同一条处理。
         .ignoresSafeArea(.container, edges: .top)
+        // 提示条挂在根上：曲库表与播放条两处评分入口都落到同一条上。
+        .dmToast($state.toast)
     }
 }
 

@@ -71,6 +71,10 @@ final class AppState {
     private(set) var showsQueue = false
     private(set) var lastConnectedAt: Date?
 
+    /// 窗口底部那条短提示。放全局是因为触发点不止一处 —— 曲库表与播放条
+    /// 各有评分入口，两侧都该落到同一条提示上。
+    var toast: ToastMessage?
+
     private let defaults = UserDefaults.standard
     private let resolver = QuickConnectResolver()
 
@@ -100,6 +104,33 @@ final class AppState {
             return
         }
         showsQueue.toggle()
+    }
+
+    // MARK: - 提示
+
+    func showToast(_ text: String, _ kind: DmToast.Kind) {
+        toast = ToastMessage(text, kind)
+    }
+
+    // MARK: - 评分
+
+    /// 评分（0–5，0 = 清除）。写的是 Audio Station 的评分字段，**写完回读校验**
+    /// —— `Song.setrating` 对一个不存在的 id 也回 `success`，成功标志不可信。
+    /// 落地了才改界面，返回落地值；没落地就落一条失败提示、返回 `nil`。
+    ///
+    /// 队列里同一首一并同步：播放条读的是队列里的那一份。
+    @discardableResult
+    func rate(_ songID: String, to stars: Int) async -> Int? {
+        guard let manager = sessionManager else { return nil }
+        do {
+            let applied = try await AudioLibrary.setRating(manager, songID: songID, rating: stars)
+            playback?.applyRating(songID: songID, rating: applied)
+            showToast(applied == 0 ? "已清除评分" : "已评 \(applied) 星", .ok)
+            return applied
+        } catch {
+            showToast(error.localizedDescription, .err)
+            return nil
+        }
     }
 
     // MARK: - 连接
@@ -162,8 +193,35 @@ final class AppState {
                 if !engine.isPlaying { break }
             }
             await smokeLibrarySources(manager)
+            await smokeRating(manager, song: first)
         } catch {
             NSLog("[smoke] 失败：%@", error.localizedDescription)
+        }
+    }
+
+    /// 评分自检：写 → 回读 → 再写另一个值 → 回读 → **复原成起始值**。
+    ///
+    /// `Song.setrating` 对不存在的 id 也回 `success: true`，成功标志不可信 ——
+    /// 这条链路只有真机回读能证明。走的是界面同一条路（`rate`），顺带把
+    /// Toast 与队列同步也跑过。**用完复原**：别在曲库里留下冒烟改过的分。
+    private func smokeRating(_ manager: SessionManager, song: AudioSong) async {
+        do {
+            let before = try await AudioLibrary.rating(manager, songID: song.id)
+            NSLog("[smoke] 评分 起始 %@ 星（%@）", String(before), song.title)
+
+            for probe in [5, 3] {
+                let applied = await rate(song.id, to: probe)
+                NSLog("[smoke] 评分 写 %@ → 落地 %@ %@",
+                      String(probe), applied.map(String.init) ?? "nil",
+                      applied == probe ? "✓" : "✗")
+            }
+
+            let restored = await rate(song.id, to: before)
+            NSLog("[smoke] 评分 复原 %@ → 落地 %@ %@",
+                  String(before), restored.map(String.init) ?? "nil",
+                  restored == before ? "✓" : "✗")
+        } catch {
+            NSLog("[smoke] 评分自检失败：%@", error.localizedDescription)
         }
     }
 

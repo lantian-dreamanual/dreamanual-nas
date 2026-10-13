@@ -336,6 +336,15 @@ final class LibraryModel {
         selectedSongID = song.id
     }
 
+    /// 评分：写出去、拿回落地值，再改本地这一格 —— 不整页重拉（评一次分重拉
+    /// 一千首是白费）。失败原因由 `AppState` 落成 Toast，这里不重复报。
+    func rate(_ song: AudioSong, to stars: Int, on state: AppState) async {
+        guard let applied = await state.rate(song.id, to: stars) else { return }
+        if let index = songs.firstIndex(where: { $0.id == song.id }) {
+            songs[index].rating = applied
+        }
+    }
+
     // MARK: 内部
 
     private func resetScope() {
@@ -455,7 +464,9 @@ struct LibraryView: View {
                     note: "换一个维度，或改个关键词"
                 )
             } else {
-                TrackTable(model: model, manager: state.sessionManager, engine: state.playback)
+                TrackTable(model: model, manager: state.sessionManager, engine: state.playback) { song, stars in
+                    Task { await model.rate(song, to: stars, on: state) }
+                }
             }
         } else if model.isEmptyContent {
             LibraryNotice(
@@ -612,6 +623,7 @@ private struct TrackTable: View {
     let model: LibraryModel
     let manager: SessionManager?
     let engine: PlaybackEngine?
+    let onRate: (AudioSong, Int) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -631,6 +643,8 @@ private struct TrackTable: View {
                             // 追加进模型后，下次播放自然带上新页）。
                             model.select(song: song)
                             engine?.play(model.songs, songID: song.id)
+                        } onRate: { stars in
+                            onRate(song, stars)
                         }
                     }
                     if model.hasMore {
@@ -691,6 +705,8 @@ struct TrackRow: View {
     var isPlaying: Bool = false
     let onSelect: () -> Void
     var onPlay: (() -> Void)?
+    /// 给了评分列就可点；没给（如队列页之外的只读场合）保持只读。
+    var onRate: ((Int) -> Void)?
 
     @State private var isHovered = false
 
@@ -723,9 +739,16 @@ struct TrackRow: View {
             dim(song.durationText, width: TrackColumn.duration, alignment: .trailing)
             dim(song.track.map(String.init) ?? "", width: TrackColumn.track, alignment: .trailing)
 
-            RatingStars(rating: song.rating, isSelected: showsAccentBackground)
-                .padding(.horizontal, TrackColumn.padH)
-                .frame(width: TrackColumn.rating, alignment: .trailing)
+            // 未评分的行**悬停才浮出空星** —— 浮出来即「这一格能点」。
+            // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
+            RatingStars(
+                rating: song.rating,
+                isSelected: showsAccentBackground,
+                revealsEmpty: isHovered && onRate != nil,
+                onRate: onRate
+            )
+            .padding(.trailing, DmSpace.s8)
+            .frame(width: TrackColumn.rating, alignment: .trailing)
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))

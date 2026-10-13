@@ -110,6 +110,13 @@ final class PlaybackEngine {
         position = 0
     }
 
+    /// 评分变更后同步队列里那一首 —— 播放条读 `currentSong`，本地不同步的话
+    /// 评完分星还是灭的。
+    func applyRating(songID: String, rating: Int) {
+        guard let index = queue.firstIndex(where: { $0.id == songID }) else { return }
+        queue[index].rating = rating
+    }
+
     /// 随机播放：重排播放顺序，当前这首歌钉在第一位 —— 点开随即听到的还是
     /// 正在放的这首，后面的顺序打乱。再点一次回到原序。
     func toggleShuffle() {

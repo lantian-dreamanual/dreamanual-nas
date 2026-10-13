@@ -173,6 +173,7 @@ struct LucideIcon: View {
         "loader": "arrow.triangle.2.circlepath",
         "circle-check": "checkmark.circle.fill",
         "circle-x": "xmark.circle.fill",
+        "info": "info.circle",
         "triangle-alert": "exclamationmark.triangle",
         "wifi": "wifi",
         "key-round": "key",
@@ -183,30 +184,89 @@ struct LucideIcon: View {
 
 // ============ 评分 ============
 
+/// 星级条的节距：星 10px + 视觉间距 2px。点到的最小宽度靠它。
+private let ratingPitch: CGFloat = 12
+
 /// 评分（0–5）：5 颗 10px 星，实心主色 `accent-2`、空星中性 `ink-3`。
 ///
-/// **未评分整格留空**（`rating = 0` 时整体隐身）—— 不铺一列空星：曲库一屏
-/// 上百行、绝大多数是 0 分，满屏空星只是噪声。原型 `.rate.ghost` 那条「悬停该行
-/// 才浮出空星」是给「可点」留的提示，等写入（`Song.setrating`）那一批再接。
+/// **未评分整格留空**（没悬停时整体隐身）—— 不铺一列空星：曲库一屏上百行、
+/// 绝大多数是 0 分，满屏空星只是噪声。`revealsEmpty` 就是原型 `.rate.ghost`
+/// 那条「悬停该行才浮出空星」—— 浮出来即「这一格能点」。
+///
+/// 给了 `onRate` 就变可点：点第 n 颗 = n 星；已是 n 星再点第 n 颗 = 清零。
+/// 悬停到第 n 颗时左侧同亮做预览。
 struct RatingStars: View {
     let rating: Int
     /// 选中行：空星跟着正文走 `accent`，实心星仍取 `accent-2`。
     var isSelected: Bool = false
+    /// 未评分时是否铺出空星（列表行悬停该行才亮）。
+    var revealsEmpty: Bool = false
+    /// 给了就是可点态，参数是点中的那一档。
+    var onRate: ((Int) -> Void)?
+
+    @State private var hoverIndex = 0
+
+    /// 亮到第几颗：悬停时按悬停位（预览），否则按真实评分。
+    private var litCount: Int { hoverIndex > 0 ? hoverIndex : rating }
+    private var isVisible: Bool { rating > 0 || revealsEmpty || hoverIndex > 0 }
 
     var body: some View {
-        HStack(spacing: DmSpace.s2) {
+        HStack(spacing: 0) {
             ForEach(1...5, id: \.self) { index in
-                LucideIcon("star", size: DmIcon.i10, filled: index <= rating)
-                    .foregroundColor(color(filled: index <= rating))
+                star(index)
             }
         }
-        .opacity(rating > 0 ? 1 : 0)
+        .contentShape(Rectangle())
+        .modifier(RatingHover(isInteractive: onRate != nil, hoverIndex: $hoverIndex))
+        .opacity(isVisible ? 1 : 0)
         .accessibilityLabel(rating > 0 ? "评分 \(rating) 星" : "未评分")
+    }
+
+    @ViewBuilder
+    private func star(_ index: Int) -> some View {
+        let icon = LucideIcon("star", size: DmIcon.i10, filled: index <= litCount)
+            .foregroundColor(color(filled: index <= litCount))
+            .frame(width: ratingPitch, height: DmIcon.i14)
+
+        if let onRate {
+            Button {
+                onRate(rating == index ? 0 : index)
+            } label: {
+                icon
+            }
+            .buttonStyle(.plain)
+        } else {
+            icon
+        }
     }
 
     private func color(filled: Bool) -> Color {
         if filled { return Color.dmAccent2 }
         return isSelected ? Color.dmAccent : Color.dmInk3
+    }
+}
+
+/// 星级条的悬停预览。整条只留**一个**悬停源、按横坐标换算档位 —— 每颗星各自
+/// 挂 `onHover` 时，相邻两星的进入 / 离开回调次序不定，预览会闪。
+private struct RatingHover: ViewModifier {
+    let isInteractive: Bool
+    @Binding var hoverIndex: Int
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isInteractive {
+            content.onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    let index = Int(point.x / ratingPitch) + 1
+                    hoverIndex = max(1, min(5, index))
+                case .ended:
+                    hoverIndex = 0
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -709,5 +769,83 @@ struct EqualizerBars: View {
         Capsule()
             .fill(color)
             .frame(width: 3, height: height)
+    }
+}
+
+// ============ Toast ============
+
+/// 一条短提示的内容。`id` 换一次就是一条新提示（重开计时、重播入场）。
+struct ToastMessage: Identifiable {
+    let id = UUID()
+    let kind: DmToast.Kind
+    let text: String
+
+    init(_ text: String, _ kind: DmToast.Kind) {
+        self.text = text
+        self.kind = kind
+    }
+}
+
+/// Toast（第八节「Toast」表）：底 `toast-bg` / 字 `toast-ink` 实色、`t12` / 500、
+/// 内边距纵向 `s8` 横向 `s16`、圆角 `r-10`、提示条档阴影、图标 `ic-16`。
+///
+/// **位置不在这里** —— 「窗口底部居中、距底 `s24`」由调用点的 overlay 对齐给
+/// （`.dmToast(_:)` 就是那个调用点）。写在组件自己身上，改坏对齐不会有东西红。
+///
+/// `kind` **必传、不给默认值**：这一处算成功、失败还是说明，只有调用点知道；
+/// 给了默认值就没人再想它，三种语义会退化成一种。图标与文字同取 `toast-ink`、
+/// **不取族色** —— 族基础档是为固定深色底选的，压在这块浅实色底上只有
+/// 2.01 / 2.99 / 2.92:1，够不到承载图形那条 3:1；语义由形状承载。
+struct DmToast: View {
+    enum Kind {
+        case ok
+        case err
+        case info
+
+        var icon: String {
+            switch self {
+            case .ok: return "circle-check"
+            case .err: return "circle-x"
+            case .info: return "info"
+            }
+        }
+    }
+
+    let kind: Kind
+    let message: String
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon(kind.icon, size: DmIcon.i16)
+                .foregroundColor(Color.dmToastInk)
+            Text(message)
+                .font(.system(size: DmText.t12, weight: .medium))
+                .foregroundColor(Color.dmToastInk)
+        }
+        .padding(.horizontal, DmSpace.s16)
+        .padding(.vertical, DmSpace.s8)
+        .background(Color.dmToastBg, in: RoundedRectangle(cornerRadius: DmRadius.r10))
+        .dmShadowToast()
+    }
+}
+
+extension View {
+    /// 挂一条 Toast：置值即显示，2 秒后自己清空。位置落在这个调用点上 ——
+    /// 窗口底部居中、距底 `s24`（第八节）。
+    func dmToast(_ toast: Binding<ToastMessage?>) -> some View {
+        overlay(alignment: .bottom) {
+            if let message = toast.wrappedValue {
+                DmToast(kind: message.kind, message: message.text)
+                    .padding(.bottom, DmSpace.s24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .task(id: message.id) {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        withAnimation(.easeOut(duration: DmMotion.base)) {
+                            toast.wrappedValue = nil
+                        }
+                    }
+            }
+        }
+        .animation(.easeOut(duration: DmMotion.base), value: toast.wrappedValue?.id)
     }
 }

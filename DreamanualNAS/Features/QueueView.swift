@@ -4,8 +4,8 @@ import SwiftUI
 ///
 /// 列表结构与曲库一致；首列是**播放顺序**（不是 ID3 曲序），正在播放行 =
 /// 浅底 + 主色字 + 均衡器（第八节浅底轨，均衡器区分选中与正在播放）。
-/// 表头不参与排序 —— 这里的顺序就是播放顺序。评分列与曲库同款（只读，
-/// 写入等 `Song.setrating` 那批）。
+/// 表头不参与排序 —— 这里的顺序就是播放顺序。评分列与曲库同款，且同样可点
+/// （两处共用 `AppState.rate`，写的是同一个字段）。
 struct QueueView: View {
     @Environment(AppState.self) private var state
     let engine: PlaybackEngine
@@ -63,6 +63,8 @@ struct QueueView: View {
                             isPlaying: engine.position == position
                         ) {
                             engine.play(engine.queue, at: songIndex)
+                        } onRate: { stars in
+                            Task { await state.rate(song.id, to: stars) }
                         }
                     }
                 }
@@ -122,6 +124,7 @@ private struct QueueRow: View {
     let song: AudioSong
     let isPlaying: Bool
     let onPlay: () -> Void
+    var onRate: ((Int) -> Void)?
 
     @State private var isHovered = false
 
@@ -159,9 +162,14 @@ private struct QueueRow: View {
                 .padding(.horizontal, TrackColumn.padH)
                 .frame(width: 48, alignment: .trailing)
 
-            RatingStars(rating: song.rating, isSelected: isPlaying)
-                .padding(.horizontal, TrackColumn.padH)
-                .frame(width: TrackColumn.rating, alignment: .trailing)
+            RatingStars(
+                rating: song.rating,
+                isSelected: isPlaying,
+                revealsEmpty: isHovered && onRate != nil,
+                onRate: onRate
+            )
+            .padding(.trailing, DmSpace.s8)
+            .frame(width: TrackColumn.rating, alignment: .trailing)
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: isPlaying, hovered: isHovered))

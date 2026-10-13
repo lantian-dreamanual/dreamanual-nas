@@ -293,7 +293,9 @@ input,select{font:inherit;color:inherit}
 .cb.dis{border-color:var(--line);background:var(--panel);color:var(--ink-3)}
 /* 勾选但不可改（如表格字段里的主键列） */
 .cb.dis.on{background:var(--line-2);border-color:transparent;color:var(--ink-3)}
-/* 评分（星级）：5 颗 10px 星。空星中性描边、实心星主色。未评分的行整格留空，悬停该行才出空星（悬停浮出空星 = 「可点」的提示，跟着 setrating 写入那批落；只读阶段不浮） */
+/* 评分（星级）：5 颗 10px 星、节距 12。空星中性描边、实心星主色。未评分的行整格留空，
+   悬停该行才出空星 —— 悬停浮出空星就是「这一格能点」的提示。点第 n 颗 = n 星、
+   再点同一颗 = 清零；悬停到第 n 颗左侧同亮做预览 */
 .rate{display:inline-flex;gap:2px;align-items:center;color:var(--ink-3)}
 .rate .ic.f{color:var(--accent-2);fill:currentColor}
 .rate.ghost{visibility:hidden}

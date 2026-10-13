@@ -154,8 +154,26 @@ struct PlayerBarView: View {
                         .lineLimit(1)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // 播放条只放一颗星（放不下 5 颗）：点亮即 5 星、再点清零，
+            // 与列表共用同一个评分字段（原型「播放条 · 单星」）。
+            if let song = engine?.currentSong {
+                ratingButton(for: song)
+            }
         }
         .frame(width: 300, alignment: .leading)
+    }
+
+    private func ratingButton(for song: AudioSong) -> some View {
+        iconButton(
+            "star",
+            size: DmIcon.i16,
+            active: song.rating > 0,
+            filled: song.rating > 0
+        ) {
+            Task { await state.rate(song.id, to: song.rating > 0 ? 0 : 5) }
+        }
     }
 
     // MARK: 控制钮
@@ -198,9 +216,15 @@ struct PlayerBarView: View {
         .animation(.easeInOut(duration: DmMotion.fast), value: isPlayHovered)
     }
 
-    private func iconButton(_ name: String, size: CGFloat, active: Bool = false, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        _ name: String,
+        size: CGFloat,
+        active: Bool = false,
+        filled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            LucideIcon(name, size: size)
+            LucideIcon(name, size: size, filled: filled)
                 .foregroundColor(active ? Color.dmAccent2 : Color.dmInk2)
                 .frame(width: 28, height: 28)
         }
