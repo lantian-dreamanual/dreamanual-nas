@@ -151,6 +151,22 @@ actor SessionManager {
         for kind in Kind.allCases { await logout(kind) }
     }
 
+    // MARK: - 取流
+
+    /// 取流那一路要用的端点信息。AVPlayer 的请求加不了 `X-SYNO-TOKEN`、
+    /// 直连模式还要放行自签证书 —— 都得自己发请求（`StreamLoader`），端点与
+    /// 证书策略从这里拿，保证与普通调用走同一个主机、同一套规矩。
+    var streamEndpoint: StreamLoader.Endpoint {
+        get async throws {
+            let creds = try await credentials(for: .audio)
+            return StreamLoader.Endpoint(
+                baseURL: client.baseURL,
+                credentials: creds,
+                allowSelfSigned: client.allowSelfSigned
+            )
+        }
+    }
+
     // MARK: - 保活
 
     /// 心跳：拿文件会话打一次系统信息。失败不抛 —— 由下一次请求去触发重登。

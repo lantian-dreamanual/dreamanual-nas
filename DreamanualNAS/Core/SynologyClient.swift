@@ -97,6 +97,8 @@ final class TLSPolicyDelegate: NSObject, URLSessionDelegate, @unchecked Sendable
 final class SynologyClient: @unchecked Sendable {
     /// 形如 `https://<主机>:<端口>/webapi/`
     let baseURL: URL
+    /// 取流那一路（StreamLoader）要用同一套证书策略另开 URLSession。
+    let allowSelfSigned: Bool
     private let session: URLSession
     private var apiMap: [String: SynologyAPIInfo]?
     private let lock = NSLock()
@@ -104,6 +106,7 @@ final class SynologyClient: @unchecked Sendable {
     /// - Parameter allowSelfSigned: 直连（局域网 / Tailscale）传 true，
     ///   QuickConnect 中继传 false。
     init(host: String, port: Int, allowSelfSigned: Bool) {
+        self.allowSelfSigned = allowSelfSigned
         var comps = URLComponents()
         comps.scheme = "https"
         comps.host = host

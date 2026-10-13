@@ -140,11 +140,12 @@ struct DmShadowSpec {
     let y: CGFloat
 }
 
-/// 阴影三档：card 列表内卡片 / toast 会话提示 / modal 弹窗与浮层。
+/// 阴影四档：card 列表内卡片 / toast 会话提示 / modal 弹窗与浮层 / knob 开关滑块。
 enum DmShadow {
     static let card = DmShadowSpec(ink: 0.04, radius: 4, x: 0, y: 2)
     static let toast = DmShadowSpec(ink: 0.3, radius: 8, x: 0, y: 2)
     static let modal = DmShadowSpec(ink: 0.4, radius: 24, x: 0, y: 8)
+    static let knob = DmShadowSpec(ink: 0.2, radius: 1, x: 0, y: 1)
 }
 
 extension View {
@@ -156,4 +157,5 @@ extension View {
     func dmShadowCard() -> some View { dmShadow(DmShadow.card) }
     func dmShadowToast() -> some View { dmShadow(DmShadow.toast) }
     func dmShadowModal() -> some View { dmShadow(DmShadow.modal) }
+    func dmShadowKnob() -> some View { dmShadow(DmShadow.knob) }
 }

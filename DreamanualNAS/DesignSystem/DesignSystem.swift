@@ -498,6 +498,8 @@ struct DmToggleStyle: ToggleStyle {
                         Circle()
                             .fill(Color.white)
                             .frame(width: 20, height: 20)
+                            // 贴地投影（`DmShadow.knob`）：白滑块压在亮色轨道上靠它托出轮廓。
+                            .dmShadowKnob()
                             .offset(
                                 x: configuration.isOn ? geo.size.width - 22 : 2,
                                 y: (geo.size.height - 20) / 2
@@ -642,5 +644,21 @@ struct DmPageHead<Trailing: View>: View {
 extension DmPageHead where Trailing == EmptyView {
     init(_ title: String, subtitle: String? = nil) {
         self.init(title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+// ============ 均衡器标记 ============
+
+/// 「正在播放」的行标 —— 三根静态小条（原型 `.eq`：3 宽、高 6/12/9、accent-2）。
+/// 正在播放与选中共用底色，靠它区分（第八节「选中与悬停」浅底轨）。
+struct EqualizerBars: View {
+    var color: Color = Color.dmAccent2
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 6)
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 12)
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 3, height: 9)
+        }
     }
 }

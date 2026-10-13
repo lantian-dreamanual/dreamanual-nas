@@ -17,7 +17,7 @@ struct RootView: View {
                         MainAreaView()
                     }
                     .frame(maxHeight: .infinity)
-                    PlayerBarView()
+                    PlayerBarView(engine: state.playback)
                 }
                 .background(Color.dmBg)
             } else {
@@ -159,7 +159,9 @@ private struct MainAreaView: View {
 
     var body: some View {
         Group {
-            if state.module == .music {
+            if state.module == .music, state.showsQueue, let engine = state.playback {
+                QueueView(engine: engine)
+            } else if state.module == .music {
                 LibraryView()
             } else {
                 VStack(alignment: .leading, spacing: 0) {

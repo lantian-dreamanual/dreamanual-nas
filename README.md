@@ -2,11 +2,13 @@
 
 连接群晖（Synology）NAS 的 macOS 桌面客户端。以听自己的曲库为主轴，兼顾文件管理与开关机。
 
-> **当前状态：曲库浏览已通（2026-10-12）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
+> **当前状态：播放已通（2026-10-13）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
 > 功能范围已定（见 [产品定义](docs/产品定义.md)），整体界面出了 HTML 原型（[界面原型](design/界面原型.html)）。
 > 地基已通：QuickConnect 端点解析、双会话（FileStation + AudioStation）、钥匙串口令、保活重登、
 > 外壳（侧栏 + 主区 + 底部播放条）。**曲库页已接数据**：四维浏览 / 搜索 / 筛选 / 分页懒加载，
-> 真机 12328 首完整渲染。播放与队列、歌单与每日随机、文件管理、系统状态还没接。
+> 真机 12328 首完整渲染。**播放与队列已接**：取流走自定义 scheme + 资源装载代理（`stream.cgi`
+> 要带 `X-SYNO-TOKEN`），真机验证过播放 / 拖进度 / 切歌（`DM_SMOKE=1` 冒烟通路）。
+> 歌单与每日随机、评分写入、封面缩略图、文件管理、系统状态还没接。
 
 ## 功能
 
@@ -45,12 +47,15 @@ nas/
 │   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
 │   │   ├── KeychainStore.swift    口令只进系统钥匙串
 │   │   ├── AudioLibrary.swift     曲库只读数据层（四维 / 搜索 / 筛选 / 分页）
+│   │   ├── PlaybackEngine.swift   播放引擎（队列 / 播放顺序 / 拖进度 / 音量）
+│   │   ├── StreamLoader.swift     取流装载器（自定义 scheme + Range + TLS 策略）
 │   │   └── AppState.swift         连接状态机 + 模块切换
 │   └── Features/
 │       ├── ConnectView.swift      连接页
 │       ├── LibraryView.swift      曲库页（四维浏览 + 搜索 + 筛选）
+│       ├── QueueView.swift        队列页（播放顺序 + 正在播标记）
 │       ├── RootView.swift         外壳（侧栏 + 主区）
-│       └── PlayerBarView.swift    底部常驻播放条（空态）
+│       └── PlayerBarView.swift    底部常驻播放条（进度条 + 控制钮 + 音量）
 ├── scripts/
 │   ├── check-tokens.mjs    令牌门禁（生成物一致 + 引用完整）
 │   └── build-app.sh        编译 → 组装 .app → 签名

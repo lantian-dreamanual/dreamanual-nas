@@ -64,6 +64,11 @@ final class AppState {
     private(set) var endpointLabel = ""
     private(set) var module: Module = .music
     private(set) var sessionManager: SessionManager?
+    /// 播放引擎：连上之后创建，断开即卸。曲库页与播放条都读它。
+    private(set) var playback: PlaybackEngine?
+    /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
+    /// 侧栏没有队列这一项。
+    private(set) var showsQueue = false
     private(set) var lastConnectedAt: Date?
 
     private let defaults = UserDefaults.standard
@@ -84,6 +89,17 @@ final class AppState {
 
     func select(_ module: Module) {
         self.module = module
+        showsQueue = false
+    }
+
+    /// 播放条的队列按钮：主区在曲库 ↔ 队列之间切。
+    func toggleQueue() {
+        if module != .music {
+            select(.music)
+            showsQueue = true
+            return
+        }
+        showsQueue.toggle()
     }
 
     // MARK: - 连接
@@ -103,6 +119,46 @@ final class AppState {
         }.value
         guard let password = saved else { return }
         await connect(password: password)
+    }
+
+    // MARK: - 冒烟验证
+
+    /// `DM_SMOKE=1` 时由入口调用：连上后自动播第一页的第一首，并连打 20 秒
+    /// 引擎状态 —— 真机播放验证不必依赖界面点击（AI 环境没有辅助功能权限，
+    /// 点不到按钮）。日志走 stderr，从终端直接起进程就能收。
+    func smokePlayFirst() async {
+        guard isConnected, let manager = sessionManager, let engine = playback else {
+            NSLog("[smoke] 未连接，跳过（phase=%@)", String(describing: phase))
+            return
+        }
+        do {
+            let page = try await AudioLibrary.songs(manager, limit: 20)
+            guard let first = page.songs.first else {
+                NSLog("[smoke] 曲库空")
+                return
+            }
+            NSLog("[smoke] 曲库 %@ 首，开播「%@」path=%@", String(page.songs.count), first.title, first.path)
+            engine.play(page.songs, at: 0)
+            var sought = false
+            var switched = false
+            for second in 1...25 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // t+8s 拖进度到 60s；t+14s 切下一首 —— 一轮覆盖两条主路径。
+                if second == 8, engine.duration > 0 {
+                    engine.seek(to: 60)
+                    sought = true
+                }
+                if second == 14 {
+                    engine.next()
+                    switched = true
+                }
+                let tag = sought && second <= 13 ? "（已拖）" : switched && second > 14 ? "（已切）" : ""
+                NSLog("[smoke] t+%d%@ %@", second, tag, engine.smokeStatus())
+                if !engine.isPlaying { break }
+            }
+        } catch {
+            NSLog("[smoke] 失败：%@", error.localizedDescription)
+        }
     }
 
     /// - Parameter password: 口令只在内存里传，落盘只落钥匙串。
@@ -138,6 +194,12 @@ final class AppState {
             try await manager.probe()
 
             sessionManager = manager
+
+            // 播放引擎跟着会话一起上：端点与证书策略在每首开播时随凭据取。
+            let engine = PlaybackEngine()
+            engine.attach(sessionManager: manager)
+            playback = engine
+
             await manager.startKeepAlive()
             lastConnectedAt = Date()
             phase = .connected
@@ -155,6 +217,9 @@ final class AppState {
     }
 
     func disconnect() async {
+        playback?.detach()
+        playback = nil
+        showsQueue = false
         if let manager = sessionManager {
             await manager.stopKeepAlive()
             await manager.logoutAll()

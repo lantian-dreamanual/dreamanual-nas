@@ -329,7 +329,7 @@ struct LibraryView: View {
                     note: "换一个维度，或改个关键词"
                 )
             } else {
-                TrackTable(model: model, manager: state.sessionManager)
+                TrackTable(model: model, manager: state.sessionManager, engine: state.playback)
             }
         } else if model.isEmptyContent {
             LibraryNotice(
@@ -346,7 +346,8 @@ struct LibraryView: View {
 // MARK: - 曲目表
 
 /// 表宽：标题列自适应，其余八列按原型 `colgroup` 的固定宽。
-private enum TrackColumn {
+/// （非 private —— 队列行借用 `padH`，两边同一档列内边距。）
+enum TrackColumn {
     static let artist: CGFloat = 96
     static let album: CGFloat = 96
     static let genre: CGFloat = 124
@@ -361,6 +362,7 @@ private enum TrackColumn {
 private struct TrackTable: View {
     let model: LibraryModel
     let manager: SessionManager?
+    let engine: PlaybackEngine?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -369,8 +371,17 @@ private struct TrackTable: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(model.songs) { song in
-                        TrackRow(song: song, isSelected: model.selectedSongID == song.id) {
+                        TrackRow(
+                            song: song,
+                            isSelected: model.selectedSongID == song.id,
+                            isPlaying: engine?.currentSong?.id == song.id
+                        ) {
                             model.select(song: song)
+                        } onPlay: {
+                            // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
+                            // 追加进模型后，下次播放自然带上新页）。
+                            model.select(song: song)
+                            engine?.play(model.songs, songID: song.id)
                         }
                     }
                     if model.hasMore {
@@ -422,23 +433,34 @@ private struct TrackHeader: View {
 }
 
 /// 一行曲目 —— **列表行（浅底轨）**：选中 `accent-soft` 底 + `accent-2` 字、
-/// 次要格 `accent`；悬停 `panel-2` 底 + `ink` 字。列与列宽对着原型 `colgroup`。
+/// 次要格 `accent`；悬停 `panel-2` 底 + `ink` 字。正在播的行同浅底、
+/// 标题前挂均衡器（与选中靠图标区分）。列与列宽对着原型 `colgroup`。
 struct TrackRow: View {
     let song: AudioSong
     let isSelected: Bool
+    var isPlaying: Bool = false
     let onSelect: () -> Void
+    var onPlay: (() -> Void)?
 
     @State private var isHovered = false
 
+    /// 底色：选中与正在播共用浅底（同一档），悬停只在两态都没有时抬一档。
+    private var showsAccentBackground: Bool { isSelected || isPlaying }
+
     var body: some View {
         HStack(spacing: 0) {
-            Text(song.title)
-                .font(.system(size: DmText.t13, weight: .medium))
-                .foregroundColor(ListRowState.primaryForeground(isSelected: isSelected))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, TrackColumn.padH)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: DmSpace.s8) {
+                if isPlaying {
+                    EqualizerBars()
+                }
+                Text(song.title)
+                    .font(.system(size: DmText.t13, weight: .medium))
+                    .foregroundColor(ListRowState.primaryForeground(isSelected: showsAccentBackground))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, TrackColumn.padH)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             plain(song.artist, width: TrackColumn.artist)
             plain(song.album, width: TrackColumn.album)
@@ -449,20 +471,23 @@ struct TrackRow: View {
             dim(song.track.map(String.init) ?? "", width: TrackColumn.track, alignment: .trailing)
         }
         .frame(height: 34)
-        .background(ListRowState.background(isSelected: isSelected, hovered: isHovered))
+        .background(ListRowState.background(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
         }
         .contentShape(Rectangle())
         .trackingHover($isHovered)
         .onTapGesture(perform: onSelect)
+        .onTapGesture(count: 2) {
+            onPlay?()
+        }
     }
 
     @ViewBuilder
     private func plain(_ text: String, width: CGFloat) -> some View {
         Text(text)
             .font(.system(size: DmText.t13))
-            .foregroundColor(ListRowState.foreground(isSelected: isSelected, hovered: isHovered))
+            .foregroundColor(ListRowState.foreground(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
             .lineLimit(1)
             .truncationMode(.tail)
             .padding(.horizontal, TrackColumn.padH)
@@ -473,8 +498,9 @@ struct TrackRow: View {
     private func dim(_ text: String, width: CGFloat, alignment: Alignment = .leading) -> some View {
         Text(text)
             .font(.system(size: DmText.t12))
-            .foregroundColor(ListRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
+            .foregroundColor(ListRowState.secondaryForeground(isSelected: showsAccentBackground, hovered: isHovered && !showsAccentBackground))
             .lineLimit(1)
+            .monospacedDigit()
             .padding(.horizontal, TrackColumn.padH)
             .frame(width: width, alignment: alignment)
     }

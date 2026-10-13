@@ -23,6 +23,10 @@ struct DreamanualNASApp: App {
                 .task {
                     // 启动即重解析端点再自动登录（端点会变，不缓存到磁盘）。
                     await state.restoreAndAutoConnect()
+                    // 冒烟验证：DM_SMOKE=1 时自动播一首并打状态日志。
+                    if ProcessInfo.processInfo.environment["DM_SMOKE"] == "1" {
+                        await state.smokePlayFirst()
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。
