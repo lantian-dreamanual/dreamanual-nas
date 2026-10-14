@@ -215,6 +215,15 @@ struct LucideIcon: View {
         "file-archive": "doc.zipper",
         "chevron-right": "chevron.right",
         "house": "house",
+        // 写操作那一批（2026-10-14）。`minus` 是勾选框半选态的图形；另三枚给
+        // 工具条与弹窗（新建文件夹 / 重命名）。上传与复制/移动到在下一批，图标名
+        // 先备在这里 —— 名字逐个问过 `NSImage(systemSymbolName:)`，省得届时漏兜底画空气。
+        "minus": "minus",
+        "folder-plus": "folder.badge.plus",
+        "pencil": "pencil",
+        "upload": "square.and.arrow.up",
+        "copy": "doc.on.doc",
+        "folder-input": "arrow.right.square",
     ]
 }
 
@@ -690,14 +699,22 @@ struct IconButton: View {
 /// 勾选框（原型 `.cb`）：14×14 / 圆角 `r-4` / `line-2` 1px 描边 / 底 `panel-2`；
 /// 勾选 = `accent-fill` 实底 + `on-accent` 勾；未勾悬停描边转 `ink-2`。
 ///
+/// **半选态**（`isIndeterminate`，原型 `.cb.ind`）：底与勾选态同款，图形换 `minus`
+/// —— 用在表头全选位（一部分选中）。半选与勾选**互斥**，同时给只认半选。
+///
 /// **禁用勾选态**（`isDisabled && isOn`）：底 `line-2` + 勾取 `ink-3` —— 用在
 /// 「选了但不能改」的地方，表头字段配置里的标题列（主键列，不可隐藏）就是这一态。
 /// 禁用未勾是 `panel` 底 + `line` 描边，比常态更沉一档。
 struct DmCheckbox: View {
     let isOn: Bool
     var isDisabled: Bool = false
+    /// 半选（表头全选位）。与 `isOn` 互斥，同时给时只认半选。
+    var isIndeterminate: Bool = false
 
     @State private var isHovered = false
+
+    /// 实底（勾选或半选）。
+    private var isFilled: Bool { isOn || isIndeterminate }
 
     var body: some View {
         RoundedRectangle(cornerRadius: DmRadius.r4)
@@ -709,8 +726,8 @@ struct DmCheckbox: View {
                 }
             }
             .overlay {
-                if isOn {
-                    LucideIcon("check", size: DmIcon.i10)
+                if isFilled {
+                    LucideIcon(isIndeterminate ? "minus" : "check", size: DmIcon.i10)
                         .foregroundColor(isDisabled ? Color.dmInk3 : Color.dmOnAccent)
                 }
             }
@@ -719,15 +736,280 @@ struct DmCheckbox: View {
     }
 
     private var fill: Color {
-        if isOn { return isDisabled ? Color.dmLine2 : Color.dmAccentFill }
+        if isFilled { return isDisabled ? Color.dmLine2 : Color.dmAccentFill }
         return isDisabled ? Color.dmPanel : Color.dmPanel2
     }
 
-    /// 勾上就不画描边（实底自己成形）。未勾时：禁用 `line`、悬停 `ink-2`、常态 `line-2`。
+    /// 实底就不画描边（自己成形）。未勾时：禁用 `line`、悬停 `ink-2`、常态 `line-2`。
     private var border: Color? {
-        guard !isOn else { return nil }
+        guard !isFilled else { return nil }
         if isDisabled { return Color.dmLine }
         return isHovered ? Color.dmInk2 : Color.dmLine2
+    }
+}
+
+// ============ 弹窗与写操作 ============
+
+/// 弹窗遮罩层：半透明黑铺满 + 居中卡片，点遮罩关。
+///
+/// 用法：`.dmModal(isPresented:onDismiss:) { 卡片 }`，**挂在铺满窗口的视图上**
+/// （NAS 挂 `RootView` 根）—— 挂在某个区块里，遮罩就只盖住那块。
+/// 与投资监控 `DmModal` 同构（那边宿主是菜单栏小面板，只有居中那一圈）。
+struct DmModal<Modal: View>: ViewModifier {
+    let isPresented: Bool
+    let onDismiss: () -> Void
+    @ViewBuilder let modal: () -> Modal
+
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+            if isPresented {
+                Rectangle()
+                    .fill(Color.black.opacity(0.5))
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onDismiss)
+                modal()
+                    .padding(DmSpace.s24)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: DmMotion.fast), value: isPresented)
+    }
+}
+
+extension View {
+    func dmModal<Modal: View>(
+        isPresented: Bool,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder modal: @escaping () -> Modal
+    ) -> some View {
+        modifier(DmModal(isPresented: isPresented, onDismiss: onDismiss, modal: modal))
+    }
+}
+
+/// 三段卡片：head（标题 + 关闭钮）/ body（可滚动）/ foot（动作右对齐）。
+/// 底 `panel`、描边 `line` 1px、圆角 `r16`、阴影 `shadow-modal`、宽 **470**。
+///
+/// 470 是第八节弹窗口径给**标准窗口**的尺寸，NAS 按满值取；投资监控那份收到 368
+/// 是菜单栏小面板的宿主差异（规范十三节记着），别拿那一版覆盖这里。
+struct DmModalCard<Content: View, Foot: View>: View {
+    let title: String
+    let onClose: () -> Void
+    @ViewBuilder let content: () -> Content
+    @ViewBuilder let foot: () -> Foot
+
+    @State private var bodyHeight: CGFloat = 0
+
+    /// body 内容高超过这个数就内部滚（卡片总高约 560，比多数窗口扣掉 s24 遮罩边距后仍有余量）。
+    private var bodyCap: CGFloat { 420 }
+
+    /// 弹窗卡宽（第八节：自绘卡片 470）。
+    static var width: CGFloat { 470 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            head
+            body_
+            foot_
+        }
+        .frame(width: Self.width)
+        .background(Color.dmPanel)
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r16)
+                .strokeBorder(Color.dmLine, lineWidth: DmLine.base)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: DmRadius.r16))
+        .dmShadowModal()
+    }
+
+    /// head：纵向 `s16` / 横向 `s20`，标题 15 semibold，右上角关闭钮（图形 12）。
+    private var head: some View {
+        HStack(spacing: DmSpace.s8) {
+            Text(title)
+                .font(.system(size: DmText.t15, weight: .semibold))
+                .foregroundColor(Color.dmInk)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            IconButton(iconName: "x", action: onClose)
+        }
+        .padding(.vertical, DmSpace.s16)
+        .padding(.horizontal, DmSpace.s20)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.dmLine).frame(height: DmLine.base)
+        }
+    }
+
+    /// body：`s20`（下方 `s6`），**高度贴内容**（量出来多少给多少），超过 `bodyCap` 内部滚。
+    /// ScrollView 会吞掉全部提议高度，不量着钉住就会把弹窗撑满整窗。
+    private var body_: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DmSpace.s12) {
+                content()
+            }
+            .padding(.top, DmSpace.s20)
+            .padding(.bottom, DmSpace.s6)
+            .padding(.horizontal, DmSpace.s20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: ModalBodyHeightKey.self, value: geo.size.height)
+                }
+            )
+        }
+        .frame(height: bodyHeight > 0 ? min(bodyHeight, bodyCap) : nil)
+        .onPreferenceChange(ModalBodyHeightKey.self) { bodyHeight = $0 }
+    }
+
+    /// foot：上 `s14` / 横向 `s20` / 下 `s16`，动作右对齐、间距 `s8`。
+    private var foot_: some View {
+        HStack(spacing: DmSpace.s8) {
+            Spacer(minLength: 0)
+            foot()
+        }
+        .padding(.top, DmSpace.s14)
+        .padding(.horizontal, DmSpace.s20)
+        .padding(.bottom, DmSpace.s16)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.dmLine).frame(height: DmLine.base)
+        }
+    }
+}
+
+/// body 内容高的测量键（DmModalCard 内部用）。
+private struct ModalBodyHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// 危险按钮：框与主按钮同规格（高 38 / 内边距 16 / `r-8` / 字 13 / 500），
+/// 配色走 danger 族 —— `danger-soft` 底 + `danger-ink` 字 + `danger-line` 1px 描边，
+/// 悬停底转 `danger-hover`（原型 `.btn-danger`）。删除确认的确认钮用它。
+///
+/// 不用系统的 `role: .destructive`：那套走系统配色，与第八节的按钮规格对不上。
+struct DangerButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: DmText.t13, weight: .medium))
+            .lineLimit(1)
+            .foregroundColor(Color.dmDangerInk)
+            .padding(.horizontal, DmSpace.s16)
+            .frame(height: DmControl.h38)
+            .background(
+                RoundedRectangle(cornerRadius: DmRadius.r8)
+                    .fill(isEnabled && isHovered ? Color.dmDangerHover : Color.dmDangerSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DmRadius.r8)
+                    .strokeBorder(Color.dmDangerLine, lineWidth: DmLine.base)
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
+            .onHover { isHovered = $0 }
+    }
+}
+
+/// 弹窗里的危险提示块（原型 `.banner-d`）：`danger-soft` 底 + `danger-ink` 字 + `r-10`，
+/// 内边距 10/12，字 12、行高 1.6。
+///
+/// 删除确认里那条「不进回收站、无法恢复」用它 —— 那是硬约束，不是普通说明文字。
+struct DmDangerNote: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DmSpace.s8) {
+            LucideIcon("triangle-alert", size: DmIcon.i14)
+                .foregroundColor(Color.dmDangerInk)
+                // 图标 14、正文行高约 17：顶对齐后图标中心偏上，压 s2 补齐。
+                .padding(.top, DmSpace.s2)
+            Text(text)
+                .font(.system(size: DmText.t12))
+                .foregroundColor(Color.dmDangerInk)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DmSpace.s12)
+        .padding(.vertical, DmSpace.s10)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r10).fill(Color.dmDangerSoft)
+        )
+    }
+}
+
+/// 页内提醒条（原型 `.banner`）：`warn-soft` 底 + `warn-ink` 字、字 13、内边距 8/14、
+/// **不带圆角**（通栏一条，压在内容区上沿）。用在「当前目录不可写」。
+struct DmBanner: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon(icon, size: DmIcon.i16)
+                .foregroundColor(Color.dmWarnInk)
+            Text(text)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmWarnInk)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.vertical, DmSpace.s8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.dmWarnSoft)
+    }
+}
+
+/// 清单（原型 `.pick-list`）：一层发丝描边的方框、内边距 4、行距 2，最高 180 自己滚。
+/// 删除确认列被删的项，每行右侧给大小或「文件夹 · 含 N 项」。
+struct DmPickList<Row: View>: View {
+    @ViewBuilder let content: () -> Row
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: DmSpace.s2) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(DmSpace.s4)
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(Color.dmLine, lineWidth: DmLine.hairline)
+        )
+        .frame(maxHeight: 180, alignment: .top)
+        .clipShape(RoundedRectangle(cornerRadius: DmRadius.r8))
+    }
+}
+
+/// 清单里的一行：图形 + 名字 + 右侧补充（原型 `.pick-list .row`）。
+struct DmPickRow: View {
+    let icon: String
+    let title: String
+    let note: String
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon(icon, size: DmIcon.i14)
+                .foregroundColor(Color.dmInk3)
+            Text(title)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmInk2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: DmSpace.s8)
+            Text(note)
+                .font(.system(size: DmText.t11))
+                .foregroundColor(Color.dmInk3)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, DmSpace.s8)
+        .padding(.vertical, DmSpace.s6)
     }
 }
 

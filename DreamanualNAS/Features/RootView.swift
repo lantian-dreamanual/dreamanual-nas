@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// 外壳：侧栏（三个模块 + 设置）+ 主区 + 底部常驻播放条。
-/// 布局与设计原型一致：侧栏 220 固定宽，主区自适应，播放条通栏、切到任何模块都不中断。
+/// 外壳：侧栏（三个模块 + 设置）+ 主区 + 底部常驻播放条。/// 布局与设计原型一致：侧栏 220 固定宽，主区自适应，播放条通栏、切到任何模块都不中断。
 struct RootView: View {
     @Environment(AppState.self) private var state
 
@@ -41,8 +40,20 @@ struct RootView: View {
         // 歌曲右键菜单：挂根上（不是行里）—— 行在滚动区里，菜单画在行里会被
         // 后面的行盖住、也会被滚动区裁掉。锚点给的是根视图坐标，这里就是根。
         .overlay { songMenuLayer }
+        // 文件列表的右键菜单同一归属、同一套摆位。
+        .overlay { fileMenuLayer }
         // 提示条挂在根上：曲库表与播放条两处评分入口都落到同一条上。
         .dmToast($state.toast)
+        // 写操作弹窗（新建文件夹 / 重命名 / 删除确认）挂在根上 —— 遮罩要盖住整个窗口，
+        // 连播放条一起。挂在最后，它会盖住上面的菜单层与提示条。
+        .dmModal(
+            isPresented: state.fileDialog != nil,
+            onDismiss: { state.closeFileDialog() }
+        ) {
+            if let dialog = state.fileDialog {
+                FileDialogCard(dialog: dialog)
+            }
+        }
     }
 
     /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，
@@ -92,6 +103,47 @@ struct RootView: View {
             }
         }
     }
+
+    /// 文件列表的右键菜单层：与歌曲菜单同构（一层透明遮罩接「点别处关闭」，菜单卡按
+    /// 指针摆、越界收回窗口内）。
+    ///
+    /// 项按**选中集合**出：单选才给「重命名」（文件再多一条「下载」），多选只有「删除」。
+    /// 多文件下载要一次挑目录再逐个落盘，那是上传那一批的事 —— 现在给个只能下一个的
+    /// 「下载（3 个文件）」反而误导。
+    @ViewBuilder
+    private var fileMenuLayer: some View {
+        GeometryReader { geo in
+            if let request = state.fileMenu {
+                let spot = FileMenu.spot(request.point, in: geo.size, entries: request.entries)
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { state.closeFileMenu() }
+
+                    DmMenuCard(width: FileMenu.width) {
+                        if request.entries.count == 1, let entry = request.entries.first {
+                            if !entry.isDirectory {
+                                DmMenuRow(title: "下载", icon: "download") {
+                                    state.closeFileMenu()
+                                    Task { await state.download(file: entry) }
+                                }
+                            }
+                            DmMenuRow(title: "重命名", icon: "pencil") {
+                                state.closeFileMenu()
+                                state.openFileDialog(.rename(entry))
+                            }
+                            DmMenuSeparator()
+                        }
+                        DmMenuRow(title: FileMenu.deleteTitle(request.entries), icon: "trash") {
+                            state.closeFileMenu()
+                            state.openFileDialog(.delete(request.entries))
+                        }
+                    }
+                    .offset(x: spot.x, y: spot.y)
+                }
+            }
+        }
+    }
 }
 
 /// 歌曲右键菜单的摆位。菜单卡宽固定（原型 `.menu` 的 `min-width:160`，这里给
@@ -106,6 +158,39 @@ enum SongMenu {
     /// 指针位置 → 菜单左上角，越界时收回窗口内（同访达 / 原型那层绝对定位的意思）。
     static func anchor(_ point: CGPoint, in size: CGSize) -> CGPoint {
         let height = itemHeight * CGFloat(itemCount) + 9 + 8
+        return CGPoint(
+            x: min(max(inset, point.x), max(inset, size.width - width - inset)),
+            y: min(max(inset, point.y), max(inset, size.height - height - inset))
+        )
+    }
+}
+
+/// 文件列表右键菜单的摆位与行数。宽与项高与歌曲菜单同档。
+///
+/// 行数要按实际出的项算 —— 只有**单选**才给「重命名」（文件再多一条「下载」），
+/// 多选时只有一条「删除」。高估了，菜单会被窗口底边顶回来一截；低估了会被切掉底。
+enum FileMenu {
+    static let width: CGFloat = 196
+    static let itemHeight: CGFloat = 30
+    /// 分隔线占位（含上下各 `s4`）。
+    private static let separator: CGFloat = 9
+    private static let inset: CGFloat = 8
+
+    /// 菜单里有几行（不含分隔线）。
+    static func rowCount(_ entries: [FileEntry]) -> Int {
+        guard entries.count == 1 else { return 1 }
+        // 目录不给「下载」—— 单个目录只能改名与删除。
+        return entries[0].isDirectory ? 2 : 3
+    }
+
+    /// 删除那一项的文案：多项带个数（原型「删除（3 个）」）。
+    static func deleteTitle(_ entries: [FileEntry]) -> String {
+        entries.count == 1 ? "删除" : "删除（\(entries.count) 个）"
+    }
+
+    /// 指针位置 → 菜单左上角，越界时收回窗口内。
+    static func spot(_ point: CGPoint, in size: CGSize, entries: [FileEntry]) -> CGPoint {
+        let height = itemHeight * CGFloat(rowCount(entries)) + separator + inset
         return CGPoint(
             x: min(max(inset, point.x), max(inset, size.width - width - inset)),
             y: min(max(inset, point.y), max(inset, size.height - height - inset))

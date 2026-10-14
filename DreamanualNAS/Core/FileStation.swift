@@ -132,6 +132,44 @@ struct FilePage {
     let total: Int
 }
 
+/// 一个文件任务的落地结果（`CopyMove` / `Delete` / `DirSize` 的 `status` 那一份）。
+///
+/// 🔴 `finished` 只说明任务停了，**不代表做成了** —— 判成败看 `errors`。
+/// 实测：删非空目录且没给 `recursive` 时，任务报 `finished = true`、目录还在，
+/// 错误藏在 `errors[{900, path}]` 里。
+struct FileTask: Equatable {
+    let finished: Bool
+    /// 0–1。小文件太快时服务端给 1，而 `total` / `processed_size` 常是 0。
+    let progress: Double
+    let errors: [FileTaskError]
+
+    var failed: Bool { !errors.isEmpty }
+
+    /// 给人话的失败说明（一条，多项时带个数）。
+    var failureText: String {
+        guard let first = errors.first else { return "" }
+        guard errors.count > 1 else { return first.text }
+        return "\(first.text)（另有 \(errors.count - 1) 项失败）"
+    }
+}
+
+/// 任务 `errors[]` 里的一条。
+struct FileTaskError: Equatable {
+    let code: Int
+    let path: String
+
+    /// 码转人话。**只翻实测过的那两个**，其余把码原样带上 —— 码本身是查文档的钥匙，
+    /// 认不出来的就别说成某个具体原因。
+    var text: String {
+        let name = path.isEmpty ? "" : "「\(path.split(separator: "/").last.map(String.init) ?? path)」"
+        switch code {
+        case 408: return "\(name)找不到了，可能已被移走。"
+        case 414: return "\(name)名字重复了。"
+        default: return "\(name)操作失败（code \(code)）。"
+        }
+    }
+}
+
 /// 文件管理只读那一路的接口。
 ///
 /// 三条实测硬约束（`docs/接口结论.md` 第七节，2026-10-14 复验）：
@@ -207,6 +245,140 @@ enum FileStation {
             method: "get",
             params: ["path": path, "size": "small", "rotate": "0"]
         )
+    }
+
+    // MARK: - 写操作
+
+    /// 建文件夹（`CreateFolder` v2 `create`）。
+    ///
+    /// 🔴 **重名由调用方先查**（`exists(_:in:name:)`）：服务端对已存在的名字回
+    /// `success` 并返回那个已存在目录的 path，实际什么也没做 —— 2026-10-14 复验过
+    /// （目录里有文件、再建同名，内容与 `mtime` 都没变）。成功应答证明不了「新建了」。
+    ///
+    /// - Parameter forceParent: `true` 时父级不存在自动建；`false` 建多级回
+    ///   `1100` + `errors[{408}]`。
+    static func createFolder(
+        _ manager: SessionManager,
+        path: String,
+        name: String,
+        forceParent: Bool = false
+    ) async throws {
+        _ = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.CreateFolder",
+            version: 2,
+            method: "create",
+            params: [
+                "folder_path": path,
+                "name": name,
+                "force_parent": forceParent ? "true" : "false",
+            ]
+        )
+    }
+
+    /// 改名（`Rename` v2 `rename`）。`path` 与 `name` **两组一一对应** —— 长度不等
+    /// 服务端直接回 HTTP 400（实测）。
+    ///
+    /// 🔴 撞名由**服务端拦**（`1200` + `errors[{414}]`），与建文件夹那条正好相反：
+    /// 这里不必自己先查重名，把 `414` 翻成「该名称已存在」就行。
+    static func rename(_ manager: SessionManager, path: String, to name: String) async throws {
+        _ = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.Rename",
+            version: 2,
+            method: "rename",
+            params: ["path": jsonArray([path]), "name": jsonArray([name])]
+        )
+    }
+
+    /// 删除（`Delete` v2 `start` + `status` 轮询）。**异步任务**：`start` 只回 `taskid`，
+    /// 结果要自己轮。
+    ///
+    /// 🔴 三条实测口径都写在这里，因为每一条都会让「看起来成功了」变成误删：
+    ///   · `recursive` **不给就是递归删**，所以这里写死 `true` —— 删目录连内容一起，
+    ///     这件事由确认弹窗对用户讲清楚；
+    ///   · 任务报 `finished = true` **不等于成功**：没递归删非空目录时错误藏在
+    ///     status 的 `errors[]` 里、目录还在 → 判成败只看 `errors`；
+    ///   · 批量删里**不存在的条目被静默忽略**，不会出现在 `errors` 里。
+    static func delete(_ manager: SessionManager, paths: [String]) async throws -> FileTask {
+        guard !paths.isEmpty else { return FileTask(finished: true, progress: 1, errors: []) }
+        let raw = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.Delete",
+            version: 2,
+            method: "start",
+            params: ["path": jsonArray(paths), "recursive": "true"]
+        )
+        let data = (raw as? [String: Any]) ?? [:]
+        guard let taskid = data["taskid"] as? String else {
+            throw QuickConnectError.badResponse("删除没有回任务号")
+        }
+        return try await awaitTask(
+            manager, api: "SYNO.FileStation.Delete", version: 2,
+            taskid: taskid, timeout: taskTimeout
+        )
+    }
+
+    /// 目录里有没有叫这个名字的项 —— 建文件夹前的重名探测。
+    ///
+    /// 建文件夹那条接口**重名回成功**，所以这一步不能省；一次拉满（5000）而不是
+    /// 只看当前这一页：`/music` 顶层 3613 个目录，只看第一页会漏掉大部分重名。
+    static func exists(_ manager: SessionManager, in directory: String, name: String) async throws -> Bool {
+        let page = try await list(
+            manager, path: directory, sort: FileStation.defaultSort, limit: treeFetchLimit
+        )
+        return page.entries.contains { $0.name == name }
+    }
+
+    /// 等一个文件任务落地（`status` 轮询）。`CopyMove` / `Delete` / `DirSize` 都是这个形状。
+    ///
+    /// 超时按失败抛 —— 任务号还在但总不 finished 的场合（网络断了、NAS 忙），
+    /// 让界面知道「没等到结果」，别默认成功。
+    static func awaitTask(
+        _ manager: SessionManager,
+        api: String,
+        version: Int,
+        taskid: String,
+        timeout: TimeInterval
+    ) async throws -> FileTask {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let raw = try await manager.call(
+                kind: .file, api: api, version: version, method: "status", params: ["taskid": taskid]
+            )
+            let task = decodeTask((raw as? [String: Any]) ?? [:])
+            if task.finished { return task }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        throw QuickConnectError.badResponse("操作超时（\(Int(timeout)) 秒没等到结果）")
+    }
+
+    /// 文件任务等多久。删除一棵大目录会慢，给足；轮询间隔 0.4 秒。
+    static let taskTimeout: TimeInterval = 60
+
+    static func decodeTask(_ dict: [String: Any]) -> FileTask {
+        let errors = ((dict["errors"] as? [[String: Any]]) ?? []).map { err in
+            FileTaskError(
+                code: (err["code"] as? NSNumber)?.intValue ?? -1,
+                path: (err["path"] as? String) ?? ""
+            )
+        }
+        return FileTask(
+            finished: (dict["finished"] as? Bool) ?? false,
+            progress: (dict["progress"] as? NSNumber)?.doubleValue ?? 0,
+            errors: errors
+        )
+    }
+
+    /// 写接口的数组参数形态：**JSON 数组串**（`["a","b"]`）。实测 `path` / `name`
+    /// 都认这个；给纯字符串只当单项。
+    ///
+    /// 用 `JSONSerialization` 生成而不是手拼：名称里可能带引号、反斜杠、换行。
+    static func jsonArray(_ values: [String]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: values),
+              let text = String(data: data, encoding: .utf8)
+        else { return "[]" }
+        return text
     }
 
     // MARK: - 解包

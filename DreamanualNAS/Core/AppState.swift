@@ -293,6 +293,146 @@ final class AppState {
         await files.open(folder, on: sessionManager)
     }
 
+    // MARK: - 文件管理 · 写操作
+
+    /// 文件管理的弹窗请求。挂全局而不是 `FilesView` 的 `@State`：弹窗要盖住整个窗口
+    /// （连播放条一起），而且冒烟通路得在视图之外把它摆出来截图核对。
+    enum FileDialog: Identifiable {
+        case newFolder
+        case rename(FileEntry)
+        case delete([FileEntry])
+
+        var id: String {
+            switch self {
+            case .newFolder: return "newfolder"
+            case .rename(let entry): return "rename:\(entry.path)"
+            case .delete(let entries): return "delete:\(entries.count)"
+            }
+        }
+    }
+
+    private(set) var fileDialog: FileDialog?
+
+    func openFileDialog(_ dialog: FileDialog) { fileDialog = dialog }
+    func closeFileDialog() { fileDialog = nil }
+
+    /// 名称检查：`nil` 表示能用。非法字符与重名都在客户端先拦。
+    ///
+    /// 这一步不能省 —— **建文件夹那条接口重名回成功**（返回已存在目录的 path、实际
+    /// 什么也没做，2026-10-14 复验），服务端的成功应答在这件事上不可信。`Rename`
+    /// 服务端会拦，本地先判只是省一趟往返。
+    ///
+    /// 重名按**逐字比较**（区分大小写）：实测把 `same6.txt` 改成 `Same6.TXT` 是合法的，
+    /// 用不区分大小写的比较会把这种改名误拦。
+    static func nameProblem(_ name: String, among entries: [FileEntry], excluding: FileEntry? = nil) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "名称不能为空。" }
+        if trimmed.rangeOfCharacter(from: illegalNameCharacters) != nil {
+            return "不能包含 \\ / : * ? \" < > | 这些字符。"
+        }
+        if entries.contains(where: { $0.name == trimmed && $0.path != excluding?.path }) {
+            return "这个目录里已经有叫「\(trimmed)」的项了。"
+        }
+        return nil
+    }
+
+    /// 名称里的非法字符（DSM 的规矩，原型的提示行照这个写）。
+    static let illegalNameCharacters = CharacterSet(charactersIn: "\\/:*?\"<>|")
+
+    /// 新建文件夹。**先查重名** —— 服务端对已存在的名字回成功，靠返回码判会报成新建好了。
+    func createFolder(named name: String) async {
+        guard let manager = sessionManager else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directory = files.currentPath
+        do {
+            if try await FileStation.exists(manager, in: directory, name: trimmed) {
+                showToast("这个目录里已经有叫「\(trimmed)」的项了", .err)
+                return
+            }
+            try await FileStation.createFolder(manager, path: directory, name: trimmed)
+            closeFileDialog()
+            showToast("已新建「\(trimmed)」", .ok)
+            await files.refresh(manager, username: username)
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 重命名（一次一项）。与「新建文件夹」同构，只有接口与文案不同。
+    func rename(_ entry: FileEntry, to name: String) async {
+        guard let manager = sessionManager else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 名字没改就直接收工 —— 不该为一次空操作发请求，也不该弹「已改名」。
+        guard trimmed != entry.name else {
+            closeFileDialog()
+            return
+        }
+        do {
+            try await FileStation.rename(manager, path: entry.path, to: trimmed)
+            closeFileDialog()
+            showToast("已改名为「\(trimmed)」", .ok)
+            await files.refresh(manager, username: username)
+        } catch {
+            showToast(Self.renameFailure(error, name: trimmed), .err)
+        }
+    }
+
+    /// `Rename` 撞名是 `1200` + `errors[{414}]`，翻成一句能照做的。
+    private static func renameFailure(_ error: Error, name: String) -> String {
+        if let synology = error as? SynologyError,
+           synology.errors.contains(where: { ($0["code"] as? NSNumber)?.intValue == 414 }) {
+            return "这个目录里已经有叫「\(name)」的项了"
+        }
+        return error.localizedDescription
+    }
+
+    /// 删除（确认过的那些）。**判成败看任务的 `errors`，不看 `finished`** —— 没递归
+    /// 删非空目录时任务照样报 `finished`，只有 `errors` 里才看得出没删掉。
+    /// 删除不进回收站，这件事情由确认弹窗对用户写死（见 `FilesView`）。
+    func delete(_ entries: [FileEntry]) async {
+        guard let manager = sessionManager, !entries.isEmpty else { return }
+        do {
+            let task = try await FileStation.delete(manager, paths: entries.map(\.path))
+            closeFileDialog()
+            if task.failed {
+                showToast(task.failureText, .err)
+            } else if entries.count == 1 {
+                showToast("已删除「\(entries[0].name)」", .ok)
+            } else {
+                showToast("已删除 \(entries.count) 项", .ok)
+            }
+            await files.refresh(manager, username: username)
+        } catch {
+            // 超时或会话断了：弹窗照关，错误照报，列表重拉一遍看真实情况。
+            closeFileDialog()
+            showToast(error.localizedDescription, .err)
+            await files.refresh(manager, username: username)
+        }
+    }
+
+    // MARK: - 文件右键菜单
+
+    /// 文件列表的右键菜单请求。与歌曲菜单同一归属（挂全局）—— 菜单要浮在整个窗口
+    /// 之上，而且菜单项与数量按**选中的那一组**出，不归某一行管。
+    struct FileMenuRequest: Identifiable {
+        let id = UUID()
+        let entries: [FileEntry]
+        /// 根视图坐标（左上原点）。
+        let point: CGPoint
+    }
+
+    private(set) var fileMenu: FileMenuRequest?
+
+    /// 行上按右键。落在没选中的行上先把它选上（访达的做法）—— 菜单项带的数量必须
+    /// 与随后真被操作的那一组一致，否则「删除（3 个）」可能只删掉 1 个。
+    func openFileMenu(for entry: FileEntry, at point: CGPoint) {
+        if !files.isSelected(entry.path) { files.select(entry) }
+        closeSongMenu()
+        fileMenu = FileMenuRequest(entries: files.selectedEntries, point: point)
+    }
+
+    func closeFileMenu() { fileMenu = nil }
+
     // MARK: - 键盘
 
     /// 空格 = 播放 / 暂停，← / → = 后退 / 前进 `seekStep` 秒。
@@ -324,12 +464,19 @@ final class AppState {
     @discardableResult
     func handleKey(code: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
         // Esc：菜单开着就先收菜单。
-        if code == 53, songMenu != nil {
-            closeSongMenu()
+        if code == 53 {
+            if songMenu != nil { closeSongMenu(); return true }
+            if fileMenu != nil { closeFileMenu(); return true }
+        }
+        let modifiers = flags.intersection(.deviceIndependentFlagsMask)
+        // Cmd+A：文件管理页全选当前列表。这条放在「⌘ 组合一律放行」**之前** ——
+        // 那条是给系统与菜单的快捷键让路，而这是本模块自己的快捷键。光标在文本里
+        // 时照样让路（输入框里的 Cmd+A 是「全选文字」）。
+        if code == 0, modifiers.contains(.command), module == .files, !isEditingText {
+            files.selectAll()
             return true
         }
         // ⌘ / ⌥ / ⌃ 的组合一律放行 —— 系统与菜单的快捷键优先。
-        let modifiers = flags.intersection(.deviceIndependentFlagsMask)
         guard modifiers.isDisjoint(with: [.command, .option, .control]) else { return false }
         // 光标在文本里就放行：搜索框要能打空格。
         guard !isEditingText, let engine = playback else { return false }
@@ -691,6 +838,10 @@ final class AppState {
     ///   · `click=<字段>` 合成一次**真鼠标点击**表头（走的是「点表头 → 排序」这条
     ///     界面接线本身，与曲库的 `click=` 同一套做法）；
     ///   · `reveal=<关键词>` 走「在文件管理中显示」那条接线：搜一首、切模块、定位目录；
+    ///   · `select=<名字>` 勾上一条（按名字，前缀匹配）、`selectall` 全选；
+    ///   · `dialog=newfolder|rename|delete` 把某一张写操作弹窗摆出来（截图核对形态）；
+    ///   · `menu` 摆出文件右键菜单；
+    ///   · `writecheck` 在**自建沙箱**里跑一遍建夹 → 改名 → 删除，最后拆掉沙箱；
     ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
     func smokeFiles(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
@@ -735,6 +886,17 @@ final class AppState {
                       files.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认")
             } else if token.hasPrefix("reveal=") {
                 await smokeReveal(String(token.dropFirst("reveal=".count)), manager: manager)
+            } else if token.hasPrefix("select=") {
+                smokeSelect(String(token.dropFirst("select=".count)))
+            } else if token == "selectall" {
+                files.selectAll()
+                NSLog("[files] 全选 → %@ 项", String(files.selection.count))
+            } else if token.hasPrefix("dialog=") {
+                smokeFileDialog(String(token.dropFirst("dialog=".count)))
+            } else if token == "menu" {
+                smokeFileMenu()
+            } else if token == "writecheck" {
+                await smokeWriteCheck(manager)
             } else {
                 NSLog("[files] 认不出指令「%@」", token)
             }
@@ -742,14 +904,111 @@ final class AppState {
 
         // 取数、取图都是异步的，等它们落地再报。
         try? await Task.sleep(nanoseconds: 4 * 1_000_000_000)
-        NSLog("[files] 指令「%@」→ 当前 %@ · 排序 %@ · 共 %@ 项 · 选中 %@",
+        NSLog("[files] 指令「%@」→ 当前 %@ · 排序 %@ · 共 %@ 项 · 选中 %@ 项",
               command, files.currentPath,
               files.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认",
               String(files.total),
-              files.selectedEntry?.name ?? "无")
+              String(files.selection.count))
         NSLog("[files] 前八条 %@", files.entries.prefix(8)
             .map { "\($0.name)\($0.isDirectory ? "/" : "")" }.joined(separator: " / "))
         NSLog("[files] 树前十行 %@", files.treeRows.prefix(10).map(\.name).joined(separator: " / "))
+    }
+
+    /// 冒烟用：按名字勾上一条（前缀匹配，省得把长文件名整个打出来）。
+    private func smokeSelect(_ name: String) {
+        guard let entry = files.entries.first(where: { $0.name == name || $0.name.hasPrefix(name) }) else {
+            NSLog("[files] 列表里找不到「%@」", name)
+            return
+        }
+        files.select(entry, mode: .toggle)
+        NSLog("[files] 勾上「%@」→ 选中 %@ 项", entry.name, String(files.selection.count))
+    }
+
+    /// 冒烟用：把某一张写操作弹窗摆出来（截图核对形态）。真机上点不了按钮，
+    /// 弹窗的形态只能这么看。
+    private func smokeFileDialog(_ which: String) {
+        switch which {
+        case "newfolder":
+            openFileDialog(.newFolder)
+        case "rename":
+            guard let entry = files.singleSelection ?? files.entries.first else { return }
+            files.select(entry)
+            openFileDialog(.rename(entry))
+        case "delete":
+            // 删除确认的样态是多选 —— 没选就全选，让清单列满。
+            if files.selection.isEmpty { files.selectAll() }
+            openFileDialog(.delete(files.selectedEntries))
+        default:
+            NSLog("[files] 认不出弹窗「%@」", which)
+        }
+        NSLog("[files] 摆出弹窗「%@」", which)
+    }
+
+    /// 冒烟用：摆出文件右键菜单。锚点给内容区中部 —— 菜单卡越界时会自己收回窗口内。
+    private func smokeFileMenu() {
+        if files.selection.isEmpty, let first = files.entries.first { files.select(first) }
+        guard let entry = files.selectedEntries.first else {
+            NSLog("[files] 列表是空的，菜单开不出来")
+            return
+        }
+        openFileMenu(for: entry, at: CGPoint(x: 520, y: 300))
+        NSLog("[files] 右键菜单已开：%@ 项", String(files.selection.count))
+    }
+
+    /// 「写操作一趟走完」的冒烟：在**当前目录下自建一个沙箱**，里面建夹 → 改名 → 删除，
+    /// 最后把沙箱自己删掉。全程打日志，每步都回读列表核对（不看返回码）。
+    ///
+    /// 真机上写操作验不了「点按钮」（AI 点不了 UI），但能验完整的数据那一路 ——
+    /// 走的是与界面同一套 `AppState` 动作。🔴 **沙箱用完必删**，别在用户的目录里留垃圾；
+    /// 命名带时间戳，撞名时 `createFolder` 会自己拦下并报重名。
+    private func smokeWriteCheck(_ manager: SessionManager) async {
+        let root = files.currentPath
+        guard !root.isEmpty else {
+            NSLog("[files] 写自检：当前目录为空，跳过")
+            return
+        }
+        let sandboxName = "DreamanualWriteSmoke_\(Int(Date().timeIntervalSince1970))"
+        let sandbox = "\(root)/\(sandboxName)"
+        NSLog("[files] 写自检：在 %@ 下建沙箱 %@", root, sandboxName)
+
+        // 1. 建沙箱（先查重名再建，与界面同一条）
+        await createFolder(named: sandboxName)
+        await files.open(sandbox, on: manager)
+        let boxMade = files.currentPath == sandbox
+        NSLog("[files] 写自检 1 建沙箱 → %@（当前 %@）",
+              boxMade ? "✓" : "✗ 没进去", files.currentPath)
+
+        // 2. 里面建一个子目录
+        await createFolder(named: "demo")
+        let made = files.entries.first { $0.name == "demo" }
+        NSLog("[files] 写自检 2 建 demo → %@", made == nil ? "✗ 列表里没有" : "✓ 已在列表里")
+
+        // 3. 改名 demo → demo-renamed
+        if let made {
+            await rename(made, to: "demo-renamed")
+            let ok = files.entries.contains { $0.name == "demo-renamed" }
+            NSLog("[files] 写自检 3 改名 → %@", ok ? "✓ 已是 demo-renamed" : "✗ 没改到")
+        }
+
+        // 4. 删掉它（走「选中集合 → 删除」这条多选的路）
+        if let target = files.entries.first(where: { $0.name == "demo-renamed" }) {
+            files.select(target)
+            NSLog("[files] 写自检 4 选中「%@」→ 选中 %@ 项", target.name, String(files.selection.count))
+            await delete(files.selectedEntries)
+            let gone = !files.entries.contains { $0.name == "demo-renamed" }
+            NSLog("[files] 写自检 4 删除 → %@", gone ? "✓ 已不在列表里" : "✗ 还在")
+        }
+
+        // 5. 拆沙箱：回上一级、选中沙箱、删掉
+        await files.open(root, on: manager)
+        if let box = files.entries.first(where: { $0.name == sandboxName }) {
+            files.select(box)
+            await delete(files.selectedEntries)
+            let gone = !files.entries.contains { $0.name == sandboxName }
+            NSLog("[files] 写自检 5 拆沙箱 → %@", gone ? "✓ 已清干净" : "✗ 还在，手动去删")
+        } else {
+            NSLog("[files] 写自检 5 拆沙箱 → ✗ 列表里找不到沙箱（自己去看一眼）")
+        }
     }
 
     /// 「在文件管理中显示」那一条接线的冒烟：搜一首歌，按它的真实目录跳过去。

@@ -40,9 +40,12 @@ final class FileBrowser {
     private(set) var isLoading = false
     private(set) var isLoadingMore = false
     private(set) var errorMessage: String?
-    /// 点行选中。只读阶段是**单选** —— 多选的价值在批量操作，而批量操作全是写
-    /// 操作（下一批）；现在放一个能勾却没出口的勾选框列就是空壳控件。
-    private(set) var selectedPath: String?
+
+    /// 选中的条目（按路径存）。**多选** —— 写操作那一批（2026-10-12 起就是多选框列
+    /// 在等它）全靠这一份，删除 / 复制 / 移动都按选中集合生效。
+    private(set) var selection: Set<String> = []
+    /// 范围选（Shift）的锚点：上一次点的那一行。范围选**不动它**，连着点能收放范围。
+    private var selectionAnchor: String?
 
     /// 已展开的目录路径。
     private(set) var expanded: Set<String> = []
@@ -123,7 +126,7 @@ final class FileBrowser {
     func open(_ path: String, on manager: SessionManager?) async {
         guard !path.isEmpty else { return }
         currentPath = path
-        selectedPath = nil
+        clearSelection()
         await revealAncestors(of: path, on: manager)
         await loadPage(reset: true, on: manager)
     }
@@ -250,6 +253,8 @@ final class FileBrowser {
             entries = reset ? kept : entries + kept
             fetched = reset ? page.entries.count : fetched + page.entries.count
             total = page.total
+            // 条目换了（重排 / 刷新 / 翻页），选中集里指向不在列表里的那些要清掉。
+            pruneSelection()
         } catch {
             if reset {
                 errorMessage = error.localizedDescription
@@ -278,13 +283,112 @@ final class FileBrowser {
 
     // MARK: - 选中
 
-    func select(_ entry: FileEntry) {
-        selectedPath = entry.path
+    /// 点行的三种选法。**修饰键在视图那一侧读**（`NSEvent.modifierFlags`），
+    /// 模型只认语义 —— 这样选法能单测、也不把 AppKit 拖进状态层。
+    enum SelectMode {
+        /// 平点：只选这一条。
+        case replace
+        /// Cmd 点：这一条在选中集里翻个面。
+        case toggle
+        /// Shift 点：从锚点到这一条整段选中。
+        case range
     }
 
-    var selectedEntry: FileEntry? {
-        guard let selectedPath else { return nil }
-        return entries.first { $0.path == selectedPath }
+    func isSelected(_ path: String) -> Bool { selection.contains(path) }
+
+    func select(_ entry: FileEntry, mode: SelectMode = .replace) {
+        switch mode {
+        case .replace:
+            selection = [entry.path]
+            selectionAnchor = entry.path
+        case .toggle:
+            if selection.contains(entry.path) {
+                selection.remove(entry.path)
+            } else {
+                selection.insert(entry.path)
+            }
+            selectionAnchor = entry.path
+        case .range:
+            guard let anchor = selectionAnchor,
+                  let start = entries.firstIndex(where: { $0.path == anchor }),
+                  let end = entries.firstIndex(where: { $0.path == entry.path })
+            else {
+                selection = [entry.path]
+                selectionAnchor = entry.path
+                return
+            }
+            let span = start <= end ? start...end : end...start
+            selection = Set(entries[span].map(\.path))
+            // 锚点不动 —— 再 Shift 点别处才能收放同一段范围。
+        }
+    }
+
+    /// 勾选框点击 / 表头全选 / Cmd+A 的共用入口。
+    func toggle(_ entry: FileEntry) {
+        select(entry, mode: .toggle)
+    }
+
+    func clearSelection() {
+        selection.removeAll()
+        selectionAnchor = nil
+    }
+
+    func selectAll() {
+        selection = Set(entries.map(\.path))
+        selectionAnchor = entries.first?.path
+    }
+
+    func toggleSelectAll() {
+        if isAllSelected { clearSelection() } else { selectAll() }
+    }
+
+    /// 当前页有没有全部选中。**空目录不算全选**，否则表头会显示一个勾而列表里什么都没有。
+    var isAllSelected: Bool {
+        !entries.isEmpty && entries.allSatisfy { selection.contains($0.path) }
+    }
+
+    /// 表头全选位的半选态。
+    var isPartiallySelected: Bool {
+        !selection.isEmpty && !isAllSelected
+    }
+
+    /// 选中的条目，按列表顺序（状态栏合计、删除清单都按这个序走）。
+    var selectedEntries: [FileEntry] {
+        entries.filter { selection.contains($0.path) }
+    }
+
+    /// 只选中了一条时那一条 —— 单项操作（下载 / 重命名）用它。
+    var singleSelection: FileEntry? {
+        let picked = selectedEntries
+        return picked.count == 1 ? picked[0] : nil
+    }
+
+    /// 选中项的字节合计（目录记 0，见 `FileEntry.byteCount`）。
+    var selectionBytes: Int64 {
+        selectedEntries.reduce(0) { $0 + $1.byteCount }
+    }
+
+    /// 把选中集里已经不在这份列表里的路径清掉。刷新、翻页、切排序之后调用 ——
+    /// 留着一堆指针指向看不见的条目，删除会删到用户以为没选的东西。
+    func pruneSelection() {
+        let live = Set(entries.map(\.path))
+        selection.formIntersection(live)
+        if let anchor = selectionAnchor, !live.contains(anchor) { selectionAnchor = nil }
+    }
+
+    /// 当前目录能不能写（`perm.acl.write`）。三个来源按序取：共享夹表 → 父层树缓存 →
+    /// 乐观给 true。
+    ///
+    /// 当前目录**不在自己的列表里**，权限只能从别处拿：共享夹（`list_share` 那一份）
+    /// 或者父目录列表里的那一条。树缓存正合适 —— `open()` 先走 `revealAncestors`，
+    /// 父层一定拉过，而且树只收目录。
+    var currentCanWrite: Bool {
+        if let share = shares.first(where: { $0.path == currentPath }) { return share.canWrite }
+        if let parent = parentPath, let kids = children[parent],
+           let me = kids.first(where: { $0.path == currentPath }) {
+            return me.canWrite
+        }
+        return true
     }
 
     // MARK: - 面包屑
