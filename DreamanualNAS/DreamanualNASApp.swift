@@ -64,6 +64,13 @@ struct DreamanualNASApp: App {
                     if let command = ProcessInfo.processInfo.environment["DM_LIBRARY"] {
                         await state.smokeLibrary(command)
                     }
+                    // DM_FILES=<指令>：把文件管理页摆到指定目录 / 排序 / 树展开状态，
+                    // 供真机截图核对。`click=` 与 `reveal=` 两个记号例外 —— 前者合成
+                    // 真鼠标事件走「点表头 → 排序」这条接线，后者走曲库右键
+                    // 「在文件管理中显示」那条接线。
+                    if let command = ProcessInfo.processInfo.environment["DM_FILES"] {
+                        await state.smokeFiles(command)
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。

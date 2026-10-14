@@ -82,6 +82,9 @@ struct RootView: View {
                             state.closeSongMenu()
                             Task { await state.download(request.song) }
                         }
+                        DmMenuRow(title: "在文件管理中显示", icon: "folder-open") {
+                            Task { await state.revealInFiles(request.song) }
+                        }
                     }
                     .offset(x: SongMenu.anchor(request.point, in: geo.size).x,
                             y: SongMenu.anchor(request.point, in: geo.size).y)
@@ -96,11 +99,13 @@ struct RootView: View {
 enum SongMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
+    /// 项数（播放 / 下一首播放 / 评分 / 下载 / 在文件管理中显示）。
+    static let itemCount = 5
     private static let inset: CGFloat = 8
 
     /// 指针位置 → 菜单左上角，越界时收回窗口内（同访达 / 原型那层绝对定位的意思）。
     static func anchor(_ point: CGPoint, in size: CGSize) -> CGPoint {
-        let height = itemHeight * 4 + 9 + 8
+        let height = itemHeight * CGFloat(itemCount) + 9 + 8
         return CGPoint(
             x: min(max(inset, point.x), max(inset, size.width - width - inset)),
             y: min(max(inset, point.y), max(inset, size.height - height - inset))
@@ -239,28 +244,25 @@ private struct MainAreaView: View {
                 QueueView(engine: engine)
             } else if state.module == .music {
                 LibraryView()
+            } else if state.module == .files {
+                // 文件管理自带页头（标题 + 面包屑），不走外面这一条。
+                FilesView()
+            } else if state.module == .status {
+                VStack(alignment: .leading, spacing: 0) {
+                    DmPageHead(state.module.title)
+
+                    ModulePlaceholder(
+                        icon: "gauge",
+                        title: "系统状态",
+                        note: "关机与重启、读写开关机计划",
+                        next: ["状态卡片（CPU / 内存 / 存储 / 温度）", "关机与重启", "开关机计划"]
+                    )
+                }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     DmPageHead(state.module.title)
 
-                    switch state.module {
-                    case .files:
-                        ModulePlaceholder(
-                            icon: "folder",
-                            title: "文件管理",
-                            note: "8 个共享夹；目录树按名称正序，逐级懒加载",
-                            next: ["目录树与文件列表", "搜索（带重试，服务端会随机假空）", "写操作（选目标弹窗 + 同名冲突处理）"]
-                        )
-                    case .status:
-                        ModulePlaceholder(
-                            icon: "gauge",
-                            title: "系统状态",
-                            note: "关机与重启、读写开关机计划",
-                            next: ["状态卡片（CPU / 内存 / 存储 / 温度）", "关机与重启", "开关机计划"]
-                        )
-                    default:
-                        SettingsPane()
-                    }
+                    SettingsPane()
                 }
             }
         }

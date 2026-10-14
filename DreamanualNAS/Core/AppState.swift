@@ -73,6 +73,9 @@ final class AppState {
     /// 换下来，状态跟着视图走的话，进出一次沉浸模式曲库就退回「全部曲目」+
     /// 重新拉一千首。换个模块再回来同理 —— 视图是临时的，这份状态不是。
     let library = LibraryModel()
+    /// 文件管理页的状态（共享夹 / 目录树 / 当前目录 / 排序 / 选中 / 分页）。
+    /// 与曲库同一归属：换模块、从曲库跳过来都不该把浏览位置丢掉。
+    let files = FileBrowser()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -231,9 +234,34 @@ final class AppState {
     /// 保存面板。默认文件名「歌手 - 标题.扩展名」—— 扩展名取自曲库路径（取不到
     /// 就不带），别写死 `.mp3`：库里 flac / m4a 都有。
     private static func askDestination(for song: AudioSong) -> URL? {
+        askDestination(downloadName(for: song))
+    }
+
+    /// 文件管理里下载一个文件：默认名就是原文件名（文件名是 NAS 上那个，
+    /// 不重拼 —— 用户在这一屏看到什么名字，存下来就该是什么名字）。
+    func download(file entry: FileEntry) async {
+        guard !entry.isDirectory, let manager = sessionManager else { return }
+        guard let destination = Self.askDestination(entry.name) else { return }
+        showToast("正在下载「\(entry.name)」…", .info)
+        do {
+            let endpoint = try await manager.fileEndpoint
+            try await FileDownloader(
+                baseURL: endpoint.baseURL,
+                credentials: endpoint.credentials,
+                allowSelfSigned: endpoint.allowSelfSigned,
+                destination: destination
+            ).start(path: entry.path)
+            showToast("已保存「\(destination.lastPathComponent)」", .ok)
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 共享的保存面板（曲库「下载原文件」与文件管理两处同一条）。
+    private static func askDestination(_ name: String) -> URL? {
         let panel = NSSavePanel()
         panel.title = "下载到"
-        panel.nameFieldStringValue = downloadName(for: song)
+        panel.nameFieldStringValue = name
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         return panel.runModal() == .OK ? panel.url : nil
@@ -246,6 +274,23 @@ final class AppState {
         }
         let ext = StreamLoader.fileExtension(of: song)
         return ext.isEmpty ? base : "\(base).\(ext)"
+    }
+
+    // MARK: - 在文件管理中显示
+
+    /// 曲库右键「在文件管理中显示」：切到文件管理模块，并打开这首歌所在的那个目录。
+    ///
+    /// 目录直接取 `song.path` 的父级（曲库路径就是 NAS 上的真实路径，与「下载原文件」
+    /// 同一条依据），不靠名字拼 —— 曲库的艺术家 / 专辑名与目录名并不总是一样。
+    func revealInFiles(_ song: AudioSong) async {
+        closeSongMenu()
+        select(.files)
+        let folder = song.folder
+        guard !folder.isEmpty else {
+            showToast("这首歌没有可定位的目录", .err)
+            return
+        }
+        await files.open(folder, on: sessionManager)
     }
 
     // MARK: - 键盘
@@ -635,6 +680,114 @@ final class AppState {
               String(library.total))
         let head = library.songs.prefix(8).map { "\($0.title)[\($0.year.map(String.init) ?? "-")]" }
         NSLog("[library] 前八条 %@", head.joined(separator: " / "))
+    }
+
+    /// `DM_FILES=<指令>` 时由入口调用：把文件管理页摆到指定状态，供真机截图核对。
+    ///
+    /// 与曲库那条同一理由 —— AI 点不了 UI（没有辅助功能权限，点击被静默丢弃）。
+    /// 指令逗号分隔：
+    ///   · `open=<路径>` 打开目录、`expand=<路径>` 在树上展开一层；
+    ///   · `sort=<字段>:asc|desc` 直设排序（**走模型层**，绕开点击）；
+    ///   · `click=<字段>` 合成一次**真鼠标点击**表头（走的是「点表头 → 排序」这条
+    ///     界面接线本身，与曲库的 `click=` 同一套做法）；
+    ///   · `reveal=<关键词>` 走「在文件管理中显示」那条接线：搜一首、切模块、定位目录；
+    ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
+    func smokeFiles(_ command: String) async {
+        guard isConnected, let manager = sessionManager else {
+            NSLog("[files] 未连接，跳过（phase=%@）", String(describing: phase))
+            return
+        }
+        // 文件管理不是默认模块（默认落在听歌页）—— 先切过去，否则这一页根本没上屏，
+        // 表头位置自然报不上来（2026-10-14 踩过：日志里「等表头位置 20 次都没有」）。
+        select(.files)
+        await files.loadIfNeeded(manager, username: username)
+
+        for raw in command.split(separator: ",") {
+            let token = raw.trimmingCharacters(in: .whitespaces)
+            if token.isEmpty { continue }
+            if token == "reset" {
+                await files.applySort(FileStation.defaultSort, on: manager)
+            } else if token.hasPrefix("open=") {
+                await files.open(String(token.dropFirst("open=".count)), on: manager)
+            } else if token.hasPrefix("expand=") {
+                await files.toggleExpand(String(token.dropFirst("expand=".count)), on: manager)
+            } else if token.hasPrefix("sort=") {
+                let spec = token.dropFirst("sort=".count).split(separator: ":")
+                guard let field = FileSortField(rawValue: String(spec[0])) else {
+                    NSLog("[files] 认不出字段「%@」", String(spec[0]))
+                    continue
+                }
+                await files.applySort(
+                    FileSort(field: field, ascending: spec.count < 2 || spec[1] != "desc"),
+                    on: manager
+                )
+            } else if token.hasPrefix("click=") {
+                let name = String(token.dropFirst("click=".count))
+                guard let field = FileSortField(rawValue: name) else {
+                    NSLog("[files] 认不出字段「%@」", name)
+                    continue
+                }
+                await waitForFilesHeaderFrames()
+                let sent = await clickFilesHeader(field)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                NSLog("[files] 合成点击表头「%@」：%@ → 排序 %@",
+                      field.label, sent ? "已发出" : "没有位置",
+                      files.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认")
+            } else if token.hasPrefix("reveal=") {
+                await smokeReveal(String(token.dropFirst("reveal=".count)), manager: manager)
+            } else {
+                NSLog("[files] 认不出指令「%@」", token)
+            }
+        }
+
+        // 取数、取图都是异步的，等它们落地再报。
+        try? await Task.sleep(nanoseconds: 4 * 1_000_000_000)
+        NSLog("[files] 指令「%@」→ 当前 %@ · 排序 %@ · 共 %@ 项 · 选中 %@",
+              command, files.currentPath,
+              files.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认",
+              String(files.total),
+              files.selectedEntry?.name ?? "无")
+        NSLog("[files] 前八条 %@", files.entries.prefix(8)
+            .map { "\($0.name)\($0.isDirectory ? "/" : "")" }.joined(separator: " / "))
+        NSLog("[files] 树前十行 %@", files.treeRows.prefix(10).map(\.name).joined(separator: " / "))
+    }
+
+    /// 「在文件管理中显示」那一条接线的冒烟：搜一首歌，按它的真实目录跳过去。
+    private func smokeReveal(_ keyword: String, manager: SessionManager) async {
+        do {
+            let page = try await AudioLibrary.search(manager, keyword: keyword, limit: 1)
+            guard let song = page.songs.first else {
+                NSLog("[files] 搜「%@」没有命中", keyword)
+                return
+            }
+            NSLog("[files] 定位「%@」→ 目录 %@", song.title, song.folder)
+            await revealInFiles(song)
+        } catch {
+            NSLog("[files] 定位失败：%@", error.localizedDescription)
+        }
+    }
+
+    /// 等文件表把各格位置报上来（视图是逐帧长出来的，进程刚起那会儿还没有位置）。
+    private func waitForFilesHeaderFrames() async {
+        for attempt in 0..<20 {
+            if !files.headerFrames.isEmpty { return }
+            if attempt == 0 || attempt == 19 {
+                NSLog("[files] 第 %d 次等表头位置：%@", attempt + 1,
+                      files.headerFrames.isEmpty ? "还没有" : "有了")
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
+    /// 合成一次鼠标点击到文件表表头某列上。**走真事件链**（与真鼠标同一条路）——
+    /// 位置取 `HeaderGrabber` 自报的窗口坐标，不换算、不猜原点。
+    private func clickFilesHeader(_ field: FileSortField) async -> Bool {
+        guard let window = hostingWindow(), let frame = files.headerFrames[field] else { return false }
+        await activateForSyntheticInput(window)
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        sendMouse(.leftMouseDown, at: point, in: window)
+        sendMouse(.leftMouseUp, at: point, in: window)
+        return true
     }
 
     /// 等表头把各列位置报上来。视图是逐帧长出来的，进程刚起那会儿还没有位置。

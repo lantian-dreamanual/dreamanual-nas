@@ -203,6 +203,18 @@ struct LucideIcon: View {
         // （`grip` / `circle.grid.2x3` / `dot.grid.2x3` 三个名字逐个核过，都不存在）。
         // 取语义同族的 `line.3.horizontal`（macOS 列表重排手柄的画法）。
         "grip-vertical": "line.3.horizontal",
+        // 文件管理（2026-10-14）。十枚逐个问过 `NSImage(systemSymbolName:)`，
+        // 全部存在（`folder.open` 才是那个不存在的名字，`folder-open` 早年已兜到
+        // `folder`）。类型图标按 `additional.type` 分派，文件类型不止「文档」一种，
+        // 全压同一个图形等于没分。
+        "file": "doc",
+        "file-text": "doc.text",
+        "file-audio": "waveform",
+        "file-image": "photo",
+        "file-video": "film",
+        "file-archive": "doc.zipper",
+        "chevron-right": "chevron.right",
+        "house": "house",
     ]
 }
 
@@ -1044,6 +1056,21 @@ struct DmSearchField: View {
     }
 }
 
+/// 面包屑的一段。`action` 为 `nil` 表示这一段就是当前所在（压 `ink`、不可点）。
+///
+/// 面包屑占的是页头**第二行**那一格（原型的 `.crumb` 在 `.page-head` 里，
+/// 与副行同一个 `s4` 间距）—— 所以它做成 `DmPageHead` 的一个入参，而不是各页
+/// 在页头下面再拼一行。
+struct DmCrumb {
+    let title: String
+    let action: (() -> Void)?
+
+    init(_ title: String, action: (() -> Void)? = nil) {
+        self.title = title
+        self.action = action
+    }
+}
+
 /// 页头：标题 17/semibold/字距 -0.01em，副行 12/`ink-3`（题头与副行间距 4），
 /// 右侧动作区右对齐（两块之间 16）；内边距 20/24/12。
 ///
@@ -1052,11 +1079,18 @@ struct DmSearchField: View {
 struct DmPageHead<Trailing: View>: View {
     private let title: String
     private let subtitle: String?
+    private let crumbs: [DmCrumb]
     private let trailing: Trailing
 
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        crumbs: [DmCrumb] = [],
+        @ViewBuilder trailing: () -> Trailing
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.crumbs = crumbs
         self.trailing = trailing()
     }
 
@@ -1067,7 +1101,10 @@ struct DmPageHead<Trailing: View>: View {
                     .font(.system(size: DmText.t17, weight: .semibold))
                     .kerning(-0.17)
                     .foregroundColor(Color.dmInk)
-                if let subtitle, !subtitle.isEmpty {
+                // 有面包屑时它占第二行（两者不会同时出现）。
+                if !crumbs.isEmpty {
+                    crumbRow
+                } else if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: DmText.t12))
                         .foregroundColor(Color.dmInk3)
@@ -1081,6 +1118,46 @@ struct DmPageHead<Trailing: View>: View {
         .padding(.top, DmSpace.s20)
         .padding(.horizontal, DmSpace.s24)
         .padding(.bottom, DmSpace.s12)
+    }
+
+    /// 面包屑一行：段与段之间 `s4`，分隔符 `chevron-right` 取 `ic-12` / `ink-3`；
+    /// 可点的段悬停转 `ink`，当前段常态就压 `ink` + 500（原型 `.crumb b`）。
+    private var crumbRow: some View {
+        HStack(spacing: DmSpace.s4) {
+            ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
+                if index > 0 {
+                    LucideIcon("chevron-right", size: DmIcon.i12)
+                        .foregroundColor(Color.dmInk3)
+                }
+                if let action = crumb.action {
+                    CrumbSegment(title: crumb.title, action: action)
+                } else {
+                    Text(crumb.title)
+                        .font(.system(size: DmText.t13, weight: .medium))
+                        .foregroundColor(Color.dmInk)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+}
+
+/// 面包屑里可点的一段。做成一个独立视图是因为它要挂悬停态（`@State` 不能写在
+/// `ForEach` 的闭包里）。
+private struct CrumbSegment: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: DmText.t13))
+            .foregroundColor(isHovered ? Color.dmInk : Color.dmInk3)
+            .lineLimit(1)
+            .contentShape(Rectangle())
+            .trackingHover($isHovered)
+            .onTapGesture(perform: action)
     }
 }
 
