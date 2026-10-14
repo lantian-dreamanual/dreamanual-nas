@@ -44,6 +44,22 @@ struct RootView: View {
         .overlay { fileMenuLayer }
         // 提示条挂在根上：曲库表与播放条两处评分入口都落到同一条上。
         .dmToast($state.toast)
+        // 选目标弹窗（复制 / 移动共用）与它的撞名弹窗。**挂在写操作弹窗之前** ——
+        // 层序靠后 = 压在上面，而「新建文件夹」是从选目标弹窗里开的，它得盖住弹窗
+        // 自己（「确定」弹窗也一样）。
+        .dmModal(
+            isPresented: state.showsTransferPicker,
+            onDismiss: { state.cancelTransfer() }
+        ) {
+            TransferPickerCard()
+        }
+        // 复制 / 移动撞名：整批一次问（替换 / 跳过）。收掉它等于退回选目标挑别的目录。
+        .dmModal(
+            isPresented: state.showsTransferConflict,
+            onDismiss: { state.transfers.clearConflict() }
+        ) {
+            TransferConflictCard()
+        }
         // 写操作弹窗（新建文件夹 / 重命名 / 删除确认）挂在根上 —— 遮罩要盖住整个窗口，
         // 连播放条一起。挂在最后，它会盖住上面的菜单层与提示条。
         .dmModal(
@@ -117,9 +133,10 @@ struct RootView: View {
     /// 文件列表的右键菜单层：与歌曲菜单同构（一层透明遮罩接「点别处关闭」，菜单卡按
     /// 指针摆、越界收回窗口内）。
     ///
-    /// 项按**选中集合**出：单选才给「重命名」（文件再多一条「下载」），多选只有「删除」。
-    /// 多文件下载要一次挑目录再逐个落盘，那是上传那一批的事 —— 现在给个只能下一个的
-    /// 「下载（3 个文件）」反而误导。
+    /// 项按**选中集合**出：单选的文件多一条「下载」、单选多一条「重命名」；「复制到…」
+    /// 「移动到…」按选中集合生效，所以单选多选都在（原型「目录行 / 文件行」那一版就是
+    /// 这几项）。移动要来源目录可写，不可写时那一条不出现（与工具条同一个判据）；
+    /// 复制不挑来源。
     @ViewBuilder
     private var fileMenuLayer: some View {
         GeometryReader { geo in
@@ -131,18 +148,29 @@ struct RootView: View {
                         .onTapGesture { state.closeFileMenu() }
 
                     DmMenuCard(width: FileMenu.width) {
-                        if request.entries.count == 1, let entry = request.entries.first {
-                            if !entry.isDirectory {
-                                DmMenuRow(title: "下载", icon: "download") {
-                                    state.closeFileMenu()
-                                    Task { await state.download(file: entry) }
-                                }
+                        if request.entries.count == 1, let entry = request.entries.first,
+                           !entry.isDirectory {
+                            DmMenuRow(title: "下载", icon: "download") {
+                                state.closeFileMenu()
+                                Task { await state.download(file: entry) }
                             }
+                        }
+                        DmMenuRow(title: "复制到…", icon: "copy") {
+                            state.closeFileMenu()
+                            state.beginTransfer(.copy)
+                        }
+                        if state.files.currentCanWrite {
+                            DmMenuRow(title: "移动到…", icon: "folder-input") {
+                                state.closeFileMenu()
+                                state.beginTransfer(.move)
+                            }
+                        }
+                        DmMenuSeparator()
+                        if request.entries.count == 1, let entry = request.entries.first {
                             DmMenuRow(title: "重命名", icon: "pencil") {
                                 state.closeFileMenu()
                                 state.openFileDialog(.rename(entry))
                             }
-                            DmMenuSeparator()
                         }
                         DmMenuRow(title: FileMenu.deleteTitle(request.entries), icon: "trash") {
                             state.closeFileMenu()
@@ -177,8 +205,8 @@ enum SongMenu {
 
 /// 文件列表右键菜单的摆位与行数。宽与项高与歌曲菜单同档。
 ///
-/// 行数要按实际出的项算 —— 只有**单选**才给「重命名」（文件再多一条「下载」），
-/// 多选时只有一条「删除」。高估了，菜单会被窗口底边顶回来一截；低估了会被切掉底。
+/// 行数要按实际出的项算：**复制到… / 移动到… / 删除**三条恒在，单选加「重命名」，
+/// 单选的文件再加「下载」。高估了，菜单会被窗口底边顶回来一截；低估了会被切掉底。
 enum FileMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
@@ -187,10 +215,15 @@ enum FileMenu {
     private static let inset: CGFloat = 8
 
     /// 菜单里有几行（不含分隔线）。
+    ///
+    /// 「移动到…」在目录不可写时不出现 —— 这一条按**乐观**计（多算一行只是往上挪
+    /// 几个点），省得为一个边角把判据传两遍。
     static func rowCount(_ entries: [FileEntry]) -> Int {
-        guard entries.count == 1 else { return 1 }
-        // 目录不给「下载」—— 单个目录只能改名与删除。
-        return entries[0].isDirectory ? 2 : 3
+        var rows = 3
+        guard entries.count == 1 else { return rows }
+        rows += 1
+        if !entries[0].isDirectory { rows += 1 }
+        return rows
     }
 
     /// 删除那一项的文案：多项带个数（原型「删除（3 个）」）。

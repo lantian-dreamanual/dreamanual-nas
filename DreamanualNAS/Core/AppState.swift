@@ -79,6 +79,8 @@ final class AppState {
     /// 上传队列（进度 / 取消 / 撞名三选都在里面）。与文件页同一归属 —— 传着东西
     /// 切去听歌再切回来，进度得还在。
     let uploads = UploadQueue()
+    /// 复制 / 移动的批次状态（模式 / 来源 / 撞名判定）+ 选目标弹窗。归属同上。
+    let transfers = FileTransfer()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -301,13 +303,16 @@ final class AppState {
     /// 文件管理的弹窗请求。挂全局而不是 `FilesView` 的 `@State`：弹窗要盖住整个窗口
     /// （连播放条一起），而且冒烟通路得在视图之外把它摆出来截图核对。
     enum FileDialog: Identifiable {
-        case newFolder
+        /// 在哪个目录里建 —— 建的位置要跟着**开它的地方**走：工具条上建在浏览到的
+        /// 当前目录，选目标弹窗里建在**用户选中的目标**上（在那儿新建往往正是为了
+        /// 把它当目标，建到别处等于白建）。
+        case newFolder(in: String)
         case rename(FileEntry)
         case delete([FileEntry])
 
         var id: String {
             switch self {
-            case .newFolder: return "newfolder"
+            case .newFolder(let path): return "newfolder:\(path)"
             case .rename(let entry): return "rename:\(entry.path)"
             case .delete(let entries): return "delete:\(entries.count)"
             }
@@ -343,10 +348,14 @@ final class AppState {
     static let illegalNameCharacters = CharacterSet(charactersIn: "\\/:*?\"<>|")
 
     /// 新建文件夹。**先查重名** —— 服务端对已存在的名字回成功，靠返回码判会报成新建好了。
+    ///
+    /// 两个调用点：文件管理的工具条（`in` = 当前浏览目录）与选目标弹窗的脚部（`in` =
+    /// 用户选中的目标）。后者建完**顺手把新文件夹选成目标** —— 用户在那儿新建，想去的
+    /// 就是它。
     func createFolder(named name: String) async {
+        guard let dialog = fileDialog, case .newFolder(let directory) = dialog else { return }
         guard let manager = sessionManager else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let directory = files.currentPath
         do {
             if try await FileStation.exists(manager, in: directory, name: trimmed) {
                 showToast("这个目录里已经有叫「\(trimmed)」的项了", .err)
@@ -355,7 +364,14 @@ final class AppState {
             try await FileStation.createFolder(manager, path: directory, name: trimmed)
             closeFileDialog()
             showToast("已新建「\(trimmed)」", .ok)
-            await files.refresh(manager, username: username)
+            if directory == files.currentPath {
+                await files.refresh(manager, username: username)
+            } else {
+                // 建在选目标弹窗里：只重拉那一层，并把新夹选成目标。
+                let path = directory.hasSuffix("/") ? directory + trimmed : directory + "/" + trimmed
+                await transfers.picker.reload(directory, on: manager)
+                transfers.picker.select(path)
+            }
         } catch {
             showToast(error.localizedDescription, .err)
         }
@@ -485,6 +501,123 @@ final class AppState {
         }
     }
 
+    // MARK: - 文件管理 · 复制 / 移动
+
+    /// 工具条上的「复制到…」「移动到…」：带上当前选中项，开选目标弹窗。
+    ///
+    /// **只有移动要来源目录可写** —— 复制是读来源、写目标，来源只读照样能复制。
+    func beginTransfer(_ mode: FileTransfer.Mode) {
+        guard sessionManager != nil else { return }
+        let picked = files.selectedEntries
+        guard !picked.isEmpty else { return }
+        if mode == .move, !files.currentCanWrite {
+            showToast("这个目录不可写，移不动里面的东西", .err)
+            return
+        }
+        transfers.begin(mode, sources: picked, currentPath: files.currentPath)
+        Task {
+            await transfers.picker.open(
+                currentPath: files.currentPath, shares: files.shares, on: sessionManager
+            )
+        }
+    }
+
+    func cancelTransfer() {
+        transfers.cancel()
+    }
+
+    /// 选目标弹窗／撞名弹窗的开合状态 —— 根视图照它挂遮罩。
+    var showsTransferPicker: Bool { transfers.isOpen && transfers.conflict == nil }
+    var showsTransferConflict: Bool { transfers.conflict != nil }
+
+    /// 弹窗上确认：先在目标层查一遍撞名，没撞的直接跑，撞了先问。
+    ///
+    /// 🔴 **撞名必须客户端先查**：撞名的文件服务端会跳过，任务却照报 `finished` +
+    /// `success`（`skipstatus` 只说明「有同名项」，撞名的目录它还会照合并）——
+    /// 返回码在这件事上什么都没说。
+    func confirmTransfer() async {
+        guard let manager = sessionManager, let mode = transfers.mode,
+              transfers.blockingReason == nil else { return }
+        let destination = transfers.picker.target
+        let sources = transfers.sources
+        do {
+            let page = try await FileStation.list(
+                manager, path: destination, sort: FileStation.defaultSort,
+                limit: FileStation.treeFetchLimit
+            )
+            let taken = Set(page.entries.map(\.name))
+            let clashes = sources.filter { taken.contains($0.name) }
+            if clashes.isEmpty {
+                await runTransfer(sources, to: destination, mode: mode, overwrite: true, skipped: 0)
+            } else {
+                transfers.raiseConflict(FileTransfer.Conflict(
+                    mode: mode, destination: destination, clashes: clashes,
+                    clean: sources.filter { !taken.contains($0.name) }
+                ))
+            }
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 撞名弹窗上的一票。
+    ///
+    /// 替换 = 整个批次 `overwrite=true` 发过去（文件真覆盖，目录按服务端规则合并）；
+    /// 跳过 = **只把没撞名的那几项发过去** —— 服务端对撞名目录是合并、不是跳过，
+    /// 靠 `overwrite=false` 表达不出「跳过目录」这件事。
+    func resolveTransfer(_ choice: FileTransfer.ConflictChoice) async {
+        guard let conflict = transfers.conflict else { return }
+        transfers.clearConflict()
+        guard transfers.mode != nil else { return }
+        switch choice {
+        case .replace:
+            await runTransfer(conflict.clashes + conflict.clean, to: conflict.destination,
+                              mode: conflict.mode, overwrite: true, skipped: 0)
+        case .skip:
+            await runTransfer(conflict.clean, to: conflict.destination,
+                              mode: conflict.mode, overwrite: false, skipped: conflict.clashes.count)
+        }
+    }
+
+    /// 真跑那一趟：异步任务 → 报一句 → 收弹窗 → 重拉列表。
+    private func runTransfer(
+        _ entries: [FileEntry],
+        to destination: String,
+        mode: FileTransfer.Mode,
+        overwrite: Bool,
+        skipped: Int
+    ) async {
+        guard let manager = sessionManager else { return }
+        transfers.setBusy(true)
+        defer { transfers.setBusy(false) }
+        do {
+            let task = try await FileStation.copyMove(
+                manager, paths: entries.map(\.path), to: destination,
+                move: mode == .move, overwrite: overwrite
+            )
+            transfers.cancel()
+            showToast(task.failed
+                      ? task.failureText
+                      : Self.transferText(mode: mode, done: entries.count, skipped: skipped,
+                                          destination: destination),
+                      task.failed ? .err : .ok)
+        } catch {
+            transfers.cancel()
+            showToast(error.localizedDescription, .err)
+        }
+        await files.refresh(manager, username: username)
+    }
+
+    /// 结果那句话。没跳过的只说去了哪儿；跳过了把两个数都报出来。
+    static func transferText(
+        mode: FileTransfer.Mode, done: Int, skipped: Int, destination: String
+    ) -> String {
+        let place = DestinationPicker.shortPath(destination)
+        if skipped == 0 { return "已\(mode.verb) \(done) 项到「\(place)」" }
+        if done == 0 { return "\(skipped) 项同名，已跳过" }
+        return "已\(mode.verb) \(done) 项到「\(place)」，跳过 \(skipped) 项同名"
+    }
+
     // MARK: - 文件右键菜单
 
     /// 文件列表的右键菜单请求。与歌曲菜单同一归属（挂全局）—— 菜单要浮在整个窗口
@@ -544,6 +677,9 @@ final class AppState {
             if fileMenu != nil { closeFileMenu(); return true }
             // 冲突弹窗也是模态的，Esc 一样要能收 —— 收掉等于取消这一批上传。
             if uploads.conflict != nil { cancelUploads(); return true }
+            // 复制 / 移动的撞名弹窗 Esc 退回选目标（换个目录再试）；选目标弹窗 Esc 整个收掉。
+            if transfers.conflict != nil { transfers.clearConflict(); return true }
+            if transfers.isOpen { cancelTransfer(); return true }
         }
         let modifiers = flags.intersection(.deviceIndependentFlagsMask)
         // Cmd+A：文件管理页全选当前列表。这条放在「⌘ 组合一律放行」**之前** ——
@@ -924,6 +1060,14 @@ final class AppState {
     ///   · `conflict[=<名字>]` 造一个与当前目录某项同名的临时文件丢进队列，把撞名弹窗摆出来；
     ///   · `drop` 摆出拖入高亮（真拖拽 AI 发不出来，只能这么看形态）；
     ///   · `cancelcheck` 传一个 3 MB 测试件、1.5 秒后取消，核对队列状态与现场清理；
+    ///   · `copy` / `move` 把选目标弹窗摆出来（工具条那两个入口，真机上点不了）；
+    ///   · `pick=<字>` 往弹窗搜索框里填字（空值清掉），看筛选态；
+    ///   · `pickexpand=<路径>` 在弹窗的树里展开 / 收起一层（逐级懒加载）；
+    ///   · `pickselect=<名字或路径>` 选目标，报出确认按钮的禁用原因（空 = 可以确认）；
+    ///   · `pickconfirm` 走弹窗上的确认（撞名会弹第二张，不撞直接跑）；
+    ///   · `cmcheck` 在**自建沙箱**里跑一遍复制 + 移动，回读核对后拆掉沙箱；
+    ///   · `cmdialog` 搭一个注定撞名的沙箱、把撞名弹窗摆出来停住（沙箱留给 `cmclean` 收）；
+    ///   · `cmclean` 把 `cmdialog` 留下的沙箱收干净；
     ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
     func smokeFiles(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
@@ -990,6 +1134,33 @@ final class AppState {
                 NSLog("[files] 摆出拖入高亮（传到 %@）", files.currentPath)
             } else if token == "cancelcheck" {
                 await smokeCancelCheck(manager)
+            } else if token == "copy" || token == "move" {
+                smokeOpenTransfer(token == "move" ? .move : .copy)
+            } else if token.hasPrefix("pick=") {
+                await smokePick(String(token.dropFirst("pick=".count)))
+            } else if token.hasPrefix("pickexpand=") {
+                let path = String(token.dropFirst("pickexpand=".count))
+                await transfers.picker.toggleExpand(path, on: manager)
+                NSLog("[files] 选目标树「%@」→ %@ · 共 %@ 行",
+                      path, transfers.picker.isExpanded(path) ? "已展开" : "已收起",
+                      String(transfers.picker.rows.count))
+            } else if token.hasPrefix("pickselect=") {
+                await smokePickSelect(String(token.dropFirst("pickselect=".count)))
+            } else if token == "pickconfirm" {
+                await waitPickerReady()
+                NSLog("[files] 选目标确认：%@ → %@（原因 %@）",
+                      transfers.mode?.title ?? "?",
+                      transfers.picker.target, transfers.blockingReason ?? "无")
+                await confirmTransfer()
+                NSLog("[files] 选目标确认落地 → 撞名弹窗 %@ · 弹窗还开着 %@",
+                      transfers.conflict == nil ? "没出" : "出了（\(transfers.conflict?.clashes.count ?? 0) 项）",
+                      transfers.isOpen ? "是" : "否")
+            } else if token == "cmcheck" {
+                await smokeCopyMoveCheck(manager)
+            } else if token == "cmdialog" {
+                await smokeCopyMoveDialog(manager)
+            } else if token == "cmclean" {
+                await smokeCopyMoveClean(manager)
             } else {
                 NSLog("[files] 认不出指令「%@」", token)
             }
@@ -1022,7 +1193,7 @@ final class AppState {
     private func smokeFileDialog(_ which: String) {
         switch which {
         case "newfolder":
-            openFileDialog(.newFolder)
+            openFileDialog(.newFolder(in: files.currentPath))
         case "rename":
             guard let entry = files.singleSelection ?? files.entries.first else { return }
             files.select(entry)
@@ -1102,6 +1273,239 @@ final class AppState {
         } else {
             NSLog("[files] 写自检 5 拆沙箱 → ✗ 列表里找不到沙箱（自己去看一眼）")
         }
+    }
+
+    // MARK: - 冒烟：选目标弹窗与复制 / 移动
+
+    /// 冒烟用：把选目标弹窗摆出来。真机上点不了工具条那两个按钮，形态只能这么看。
+    private func smokeOpenTransfer(_ mode: FileTransfer.Mode) {
+        if files.selection.isEmpty, let first = files.entries.first { files.select(first) }
+        guard !files.selection.isEmpty else {
+            NSLog("[files] 列表是空的，选目标弹窗开不出来")
+            return
+        }
+        beginTransfer(mode)
+        NSLog("[files] 摆出选目标弹窗：%@ · 来源 %@ 项 · 默认目标 %@",
+              mode.title, String(files.selection.count), files.currentPath)
+    }
+
+    /// 等选目标弹窗开完。`beginTransfer` 里把弹窗开到默认目标那一步是**异步**的，而它
+    /// 开完会把 `query` 清零、把树拉齐 —— 不等它落地，后面填的搜索词会被抹掉、选的行
+    /// 也找不到（真机首跑就踩了：日志说筛出 8 行，截图还是树）。
+    private func waitPickerReady() async {
+        let want = files.currentPath
+        for _ in 0..<100 {
+            if transfers.picker.target == want, !transfers.picker.isLoading { return }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
+    /// 冒烟用：往弹窗的搜索框里填字（输入即筛选）。空串清掉、回到树。
+    private func smokePick(_ text: String) async {
+        await waitPickerReady()
+        transfers.picker.query = text
+        // 筛选是纯本地计算，给一拍让视图落定再报。
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        NSLog("[files] 选目标搜索「%@」→ %@ 行 · 目标 %@",
+              text, String(transfers.picker.rows.count), transfers.picker.target)
+    }
+
+    /// 冒烟用：选一个目标。参数给名字（前缀匹配）或整条路径都认。
+    /// 顺带把**确认按钮的禁用原因**报出来 —— 这是这一步真正要核对的（空 = 能确认）。
+    private func smokePickSelect(_ text: String) async {
+        await waitPickerReady()
+        guard let row = transfers.picker.rows.first(where: {
+            $0.path == text || $0.name == text || $0.path.hasSuffix("/" + text)
+        }) else {
+            NSLog("[files] 选目标：列表里找不到「%@」（现有 %@ 行）",
+                  text, String(transfers.picker.rows.count))
+            return
+        }
+        transfers.picker.select(row.path)
+        NSLog("[files] 选目标「%@」(%@) → 确认%@ · 原因 %@",
+              row.name, row.path,
+              transfers.canConfirm ? "可以点" : "灰着",
+              transfers.blockingReason ?? "无")
+    }
+
+    /// 「复制 / 移动一趟走完」的冒烟：在**当前目录下自建一个沙箱**，里面分「源」「目标」
+    /// 两个夹，源里放两个文件：先整批复制过去（核对目标里有、源还在），再把源里剩下那个
+    /// 移动过去（核对目标里有、源里没了）。最后拆掉整个沙箱。
+    ///
+    /// 走的是与界面同一套动作（`beginTransfer` → `picker.select` → `confirmTransfer`），
+    /// 中间不发合成鼠标事件（点了也没用，见工程坑）。判成败一律**回读目录列表**，
+    /// 不看返回码 —— 这条接口返回码说不了事（见 `FileStation.copyMove` 那五条）。
+    private func smokeCopyMoveCheck(_ manager: SessionManager) async {
+        let root = files.currentPath
+        guard !root.isEmpty else {
+            NSLog("[files] 复制自检：当前目录为空，跳过")
+            return
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        let boxName = "DreamanualCMUI_\(stamp)"
+        let box = "\(root)/\(boxName)"
+        let src = "\(box)/源"
+        let dst = "\(box)/目标"
+        NSLog("[files] 复制自检：在 %@ 下建沙箱 %@", root, boxName)
+
+        // 0. 搭沙箱：源 / 目标两个夹，源里放两个本机测试件。
+        try? await FileStation.createFolder(manager, path: root, name: boxName)
+        try? await FileStation.createFolder(manager, path: box, name: "源")
+        try? await FileStation.createFolder(manager, path: box, name: "目标")
+        let local = FileManager.default.temporaryDirectory
+        for name in ["a.txt", "b.txt"] {
+            let url = local.appendingPathComponent("DreamanualCM_\(name)")
+            try? "dreamanual copy smoke \(name)".data(using: .utf8)?.write(to: url)
+            try? await FileStation.upload(manager, fileURL: url, name: name, to: src) { _, _ in }
+        }
+        async let srcPage0 = try? FileStation.list(
+            manager, path: src, sort: FileStation.defaultSort, limit: FileStation.treeFetchLimit)
+        let inSource = Set((await srcPage0?.entries ?? []).map(\.name))
+        NSLog("[files] 复制自检 0 搭沙箱 → 源里有 %@",
+              inSource.sorted().joined(separator: " / "))
+
+        // 1. 复制：进源、全选、开弹窗、选目标、确认。
+        await files.open(src, on: manager)
+        files.selectAll()
+        beginTransfer(.copy)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        transfers.picker.select(dst)
+        let reason = transfers.blockingReason
+        NSLog("[files] 复制自检 1 准备 → 选中 %@ 项 · 目标 %@ · 禁用原因 %@",
+              String(files.selection.count), dst, reason ?? "无")
+        await confirmTransfer()
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let dstAfterCopy = await names(in: dst, on: manager)
+        let srcAfterCopy = await names(in: src, on: manager)
+        NSLog("[files] 复制自检 2 核对 → 目标里有 %@ · 源里还有 %@",
+              dstAfterCopy.sorted().joined(separator: " / "),
+              srcAfterCopy.sorted().joined(separator: " / "))
+
+        // 2. 再移动同样的两项过去 —— 这一步**必然撞名**（目标里已经有这一份了），
+        //    正好把「客户端先查撞名」与两条路都走一遍：先「跳过」，再「替换」。
+        await files.open(src, on: manager)
+        files.selectAll()
+        beginTransfer(.move)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        transfers.picker.select(dst)
+        NSLog("[files] 复制自检 3 移动 → 选中 %@ 项 · 目标 %@ · 禁用原因 %@",
+              String(files.selection.count), dst, transfers.blockingReason ?? "无")
+        await confirmTransfer()
+        let clashes = transfers.conflict?.clashes.count
+        NSLog("[files] 复制自检 3b 撞名 → %@",
+              clashes == nil ? "没查到 ✗" : "查到 \(clashes!) 项 ✓")
+        await resolveTransfer(.skip)
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        let srcAfterSkip = await names(in: src, on: manager)
+        let dstAfterSkip = await names(in: dst, on: manager)
+        NSLog("[files] 复制自检 4 跳过 → 源里 %@ · 目标里 %@",
+              srcAfterSkip.sorted().joined(separator: " / "),
+              dstAfterSkip.sorted().joined(separator: " / "))
+
+        // 3. 同一批再走一次、这回选「替换」，源应该被搬空。
+        await files.open(src, on: manager)
+        files.selectAll()
+        beginTransfer(.move)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        transfers.picker.select(dst)
+        await confirmTransfer()
+        await resolveTransfer(.replace)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let srcAfterMove = await names(in: src, on: manager)
+        let dstAfterMove = await names(in: dst, on: manager)
+        NSLog("[files] 复制自检 5 替换并移动 → 源里 %@ · 目标里 %@",
+              srcAfterMove.isEmpty ? "空了 ✓" : "还有 " + srcAfterMove.sorted().joined(separator: " / "),
+              dstAfterMove.sorted().joined(separator: " / "))
+
+        // 4. 撞名那条：把目标里的东西再复制一次到目标自己（应当被界面拦下）。
+        await files.open(dst, on: manager)
+        if let first = files.entries.first {
+            files.select(first)
+            beginTransfer(.copy)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            transfers.picker.select(dst)
+            NSLog("[files] 复制自检 6 目标=来源 → 确认%@ · 原因 %@",
+                  transfers.canConfirm ? "可以点 ✗" : "灰着 ✓",
+                  transfers.blockingReason ?? "无")
+            cancelTransfer()
+        }
+
+        // 5. 拆沙箱。
+        await files.open(root, on: manager)
+        if let boxEntry = files.entries.first(where: { $0.name == boxName }) {
+            files.select(boxEntry)
+            await delete(files.selectedEntries)
+            let gone = !files.entries.contains { $0.name == boxName }
+            NSLog("[files] 复制自检 7 拆沙箱 → %@", gone ? "✓ 已清干净" : "✗ 还在，手动去删")
+        } else {
+            NSLog("[files] 复制自检 7 拆沙箱 → ✗ 列表里找不到沙箱")
+        }
+        for name in ["a.txt", "b.txt"] {
+            try? FileManager.default.removeItem(at: local.appendingPathComponent("DreamanualCM_\(name)"))
+        }
+    }
+
+    /// 拉一层的条目名（沙箱核对用）。
+    private func names(in path: String, on manager: SessionManager) async -> [String] {
+        let page = try? await FileStation.list(
+            manager, path: path, sort: FileStation.defaultSort, limit: FileStation.treeFetchLimit)
+        return (page?.entries ?? []).map(\.name)
+    }
+
+    /// 冒烟用：搭一个**注定撞名**的沙箱，把复制 / 移动的撞名弹窗摆出来停住（截图核对形态）。
+    ///
+    /// 真机上点不了按钮，撞名弹窗只有靠这条通路才看得到。⚠️ **沙箱留在盘上**（停在这里没法
+    /// 自拆），核对完用 `cmclean` 收掉。
+    private func smokeCopyMoveDialog(_ manager: SessionManager) async {
+        let root = files.currentPath
+        guard !root.isEmpty else { return }
+        let stamp = Int(Date().timeIntervalSince1970)
+        let boxName = "DreamanualCMUI_\(stamp)"
+        let box = "\(root)/\(boxName)"
+        let src = "\(box)/源"
+        let dst = "\(box)/目标"
+        try? await FileStation.createFolder(manager, path: root, name: boxName)
+        try? await FileStation.createFolder(manager, path: box, name: "源")
+        try? await FileStation.createFolder(manager, path: box, name: "目标")
+        let local = FileManager.default.temporaryDirectory
+        for name in ["潮汐.txt", "夜色.txt", "旧梦.txt"] {
+            let url = local.appendingPathComponent("DreamanualCMDlg_\(name)")
+            try? "dreamanual copy dialog \(name)".data(using: .utf8)?.write(to: url)
+            try? await FileStation.upload(manager, fileURL: url, name: name, to: src) { _, _ in }
+            try? await FileStation.upload(manager, fileURL: url, name: name, to: dst) { _, _ in }
+            try? FileManager.default.removeItem(at: url)
+        }
+        await files.open(src, on: manager)
+        files.selectAll()
+        beginTransfer(.copy)
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        transfers.picker.select(dst)
+        await confirmTransfer()
+        NSLog("[files] 撞名弹窗已摆出：%@ · 目标 %@ · 撞名 %@ 项 · 剩下 %@ 项不撞",
+              transfers.mode?.title ?? "?",
+              DestinationPicker.shortPath(dst),
+              String(transfers.conflict?.clashes.count ?? 0),
+              String(transfers.conflict?.clean.count ?? 0))
+        NSLog("[files] 沙箱留在 %@ —— 核对完用 cmclean 收掉", boxName)
+    }
+
+    /// 冒烟用：把 `cmdialog` 留下的沙箱收干净（连同以前跑剩的）。
+    private func smokeCopyMoveClean(_ manager: SessionManager) async {
+        let root = files.currentPath
+        guard !root.isEmpty else { return }
+        guard let page = try? await FileStation.list(
+            manager, path: root, sort: FileStation.defaultSort, limit: FileStation.treeFetchLimit
+        ) else { return }
+        let stale = page.entries.filter { $0.name.hasPrefix("DreamanualCMUI_") }
+        guard !stale.isEmpty else {
+            NSLog("[files] 没有要收的沙箱")
+            return
+        }
+        let task = try? await FileStation.delete(manager, paths: stale.map(\.path))
+        await files.refresh(manager, username: username)
+        let left = files.entries.filter { $0.name.hasPrefix("DreamanualCMUI_") }
+        NSLog("[files] 收沙箱 %@ 个 → %@", String(stale.count),
+              (task?.failed ?? true) || !left.isEmpty ? "✗ 还剩 \(left.count) 个" : "✓ 干净")
     }
 
     /// 「上传一趟走完」的冒烟：把一个本机文件（或文件夹）传到当前目录，每秒打一次进度。

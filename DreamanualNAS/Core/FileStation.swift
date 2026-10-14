@@ -143,6 +143,10 @@ struct FileTask: Equatable {
     /// 0–1。小文件太快时服务端给 1，而 `total` / `processed_size` 常是 0。
     let progress: Double
     let errors: [FileTaskError]
+    /// `skipstatus.status`：**只说明这一批里有没有同名项**（`all` / `some`），
+    /// 不是「跳过」的判据 —— 目录撞名时它照样报 `all`，而内容其实是合并了的
+    /// （2026-10-14 实测）。要不要跳过由客户端先判，见 `FileTransfer`。
+    let skipStatus: String?
 
     var failed: Bool { !errors.isEmpty }
 
@@ -302,7 +306,7 @@ enum FileStation {
     ///     status 的 `errors[]` 里、目录还在 → 判成败只看 `errors`；
     ///   · 批量删里**不存在的条目被静默忽略**，不会出现在 `errors` 里。
     static func delete(_ manager: SessionManager, paths: [String]) async throws -> FileTask {
-        guard !paths.isEmpty else { return FileTask(finished: true, progress: 1, errors: []) }
+        guard !paths.isEmpty else { return FileTask(finished: true, progress: 1, errors: [], skipStatus: nil) }
         let raw = try await manager.call(
             kind: .file,
             api: "SYNO.FileStation.Delete",
@@ -317,6 +321,63 @@ enum FileStation {
         return try await awaitTask(
             manager, api: "SYNO.FileStation.Delete", version: 2,
             taskid: taskid, timeout: taskTimeout
+        )
+    }
+
+    /// 复制 / 移动（`CopyMove` v3 `start` + `status` 轮询）。**异步任务**，与删除同形。
+    ///
+    /// 五条实测口径（2026-10-14 补测，`experiments/shuffle-lab/fswrite11.py`）：
+    ///   · 目的目录的参数名是 **`dest_folder_path`**（`dest_folder` / `dst` 一律回 `400`）；
+    ///   · `start` 对**不存在的源路径也回 `success` + `taskid`** —— 点对点应答只证明
+    ///     「参数合法」，成败必须看任务；
+    ///   · 撞名文件 + `overwrite=false` → **跳过**（目标内容不动）；撞名目录 → **合并**，
+    ///     两个值都一样（`overwrite` 只管文件）；
+    ///   · 🔴 **`name` / `new_name` / `rename_to` 三个键都被忽略**（三个都试过，复制过去
+    ///     仍是原名）→ 接口**不能给新来的一份改名**，「保留两者」做不了，
+    ///     所以复制 / 移动的撞名只有「替换 / 跳过」两选；
+    ///   · 目标 = 源自己 / 源的子目录 → 任务层拦下（`errors[{1003, path}]`），不是静默。
+    ///
+    /// - Parameter move: `true` = 移动（`remove_src=true`）；`false` = 复制。
+    static func copyMove(
+        _ manager: SessionManager,
+        paths: [String],
+        to destination: String,
+        move: Bool,
+        overwrite: Bool
+    ) async throws -> FileTask {
+        guard !paths.isEmpty else { return FileTask(finished: true, progress: 1, errors: [], skipStatus: nil) }
+        let raw = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.CopyMove",
+            version: 3,
+            method: "start",
+            params: [
+                "path": jsonArray(paths),
+                "dest_folder_path": destination,
+                "remove_src": move ? "true" : "false",
+                "overwrite": overwrite ? "true" : "false",
+            ]
+        )
+        let data = (raw as? [String: Any]) ?? [:]
+        guard let taskid = data["taskid"] as? String else {
+            throw QuickConnectError.badResponse("复制 / 移动没有回任务号")
+        }
+        return try await awaitTask(
+            manager, api: "SYNO.FileStation.CopyMove", version: 3,
+            taskid: taskid, timeout: taskTimeout
+        )
+    }
+
+    /// 停掉一个复制 / 移动任务。实测 `CopyMove` **有** `stop` 方法（回 `success`），
+    /// 是给「大目录传到一半想反悔」留的；本批界面没挂取消（复制走的是 NAS 本地磁盘，
+    /// 不占中继带宽，弹窗一关就等结果）。
+    static func stopCopyMove(_ manager: SessionManager, taskid: String) async throws {
+        _ = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.CopyMove",
+            version: 3,
+            method: "stop",
+            params: ["taskid": taskid]
         )
     }
 
@@ -399,7 +460,8 @@ enum FileStation {
         return FileTask(
             finished: (dict["finished"] as? Bool) ?? false,
             progress: (dict["progress"] as? NSNumber)?.doubleValue ?? 0,
-            errors: errors
+            errors: errors,
+            skipStatus: (dict["skipstatus"] as? [String: Any])?["status"] as? String
         )
     }
 

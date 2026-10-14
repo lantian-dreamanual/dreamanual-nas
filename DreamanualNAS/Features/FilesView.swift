@@ -76,12 +76,15 @@ struct FilesView: View {
     /// （`perm.acl.write`）。
     private var writable: Bool { model.currentCanWrite }
 
-    /// 工具条：新建文件夹 / 上传 / 下载 / 重命名 / 删除 —— 已接线的动作（原型那一排
-    /// 与顺序一致）。复制 / 移动到在下一批（要选目标弹窗），先不放只能点没反应的按钮。
+    /// 工具条：新建文件夹 / 上传 / 下载 / 复制到… / 移动到… / 重命名 / 删除 —— 已接线的
+    /// 动作（原型那一排与顺序一致）。
+    ///
+    /// 复制与移动**各占一个入口**，不做「复制 / 粘贴 / 剪切」三件套：剪贴板状态要用户
+    /// 记着「粘到哪、粘没粘过」，两个入口各弹一次选目标就都省了（原型注明）。
     private var toolbar: some View {
         HStack(spacing: DmSpace.s8) {
             action("新建文件夹", icon: "folder-plus", enabled: writable) {
-                state.openFileDialog(.newFolder)
+                state.openFileDialog(.newFolder(in: model.currentPath))
             }
             action("上传", icon: "upload", enabled: writable) {
                 state.pickAndUpload()
@@ -90,6 +93,14 @@ struct FilesView: View {
                    enabled: model.singleSelection?.isDirectory == false) {
                 guard let entry = model.singleSelection else { return }
                 Task { await state.download(file: entry) }
+            }
+            action("复制到…", icon: "copy",
+                   enabled: !model.selection.isEmpty) {
+                state.beginTransfer(.copy)
+            }
+            action("移动到…", icon: "folder-input",
+                   enabled: writable && !model.selection.isEmpty) {
+                state.beginTransfer(.move)
             }
             action("重命名", icon: "pencil",
                    enabled: writable && model.singleSelection != nil) {
@@ -102,10 +113,6 @@ struct FilesView: View {
             }
 
             Spacer(minLength: 0)
-
-            Text("复制 / 移动到在下一批")
-                .font(.system(size: DmText.t11))
-                .foregroundColor(Color.dmInk3)
         }
         .padding(.horizontal, DmSpace.s24)
         .padding(.bottom, DmSpace.s12)
@@ -804,10 +811,11 @@ struct FileDialogCard: View {
 
     var body: some View {
         switch dialog {
-        case .newFolder:
-            nameDialog(title: "新建文件夹", confirm: "创建")
+        case .newFolder(let directory):
+            nameDialog(title: "新建文件夹", confirm: "创建", in: directory)
         case .rename(let entry):
-            nameDialog(title: "重命名", confirm: "重命名", entry: entry)
+            nameDialog(title: "重命名", confirm: "重命名",
+                       in: state.files.currentPath, entry: entry)
         case .delete(let entries):
             deleteDialog(entries)
         }
@@ -817,9 +825,10 @@ struct FileDialogCard: View {
 
     /// 新建文件夹与重命名共用：位置行 + 名称字段 + 提示行。**输入框里只有主干**，
     /// 扩展名以静态文本跟在框后 —— 改名时最常见的手误就是把 `.mp3` 一起删掉。
-    private func nameDialog(title: String, confirm: String, entry: FileEntry? = nil) -> some View {
+    private func nameDialog(title: String, confirm: String,
+                            in directory: String, entry: FileEntry? = nil) -> some View {
         DmModalCard(title: title, onClose: { state.closeFileDialog() }) {
-            locationRow
+            locationRow(directory)
 
             VStack(alignment: .leading, spacing: DmSpace.s6) {
                 FormLabel("名称")
@@ -855,12 +864,12 @@ struct FileDialogCard: View {
 
     /// 弹窗里那行「位置」（原型 `.mv-path`）：`music › 华语 › 2024`。
     /// 路径从尾部截断 —— 用户要确认的是「在哪个目录」，末尾那一段最要紧。
-    private var locationRow: some View {
+    private func locationRow(_ directory: String) -> some View {
         HStack(spacing: DmSpace.s8) {
             Text("位置")
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk3)
-            Text(state.files.pathSegments.joined(separator: " › "))
+            Text(DestinationPicker.shortPath(directory))
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk)
                 .lineLimit(1)
@@ -896,14 +905,22 @@ struct FileDialogCard: View {
     /// 是合法的（`same6.txt` → `Same6.TXT`），把「与我同名」当重名会把这种改名拦掉。
     private func validate(_ text: String) {
         switch dialog {
-        case .newFolder:
-            problem = AppState.nameProblem(text, among: state.files.entries)
+        case .newFolder(let directory):
+            problem = AppState.nameProblem(text, among: entries(in: directory))
         case .rename(let entry):
             problem = AppState.nameProblem(Self.fullName(text, of: entry),
                                            among: state.files.entries, excluding: entry)
         case .delete:
             problem = nil
         }
+    }
+
+    /// 建文件夹那一层的清单，用来判重名。建在当前浏览目录时就是列表里那份；
+    /// 建在选目标弹窗里那层时，用弹窗**已经拉过**的那一份，不为这个再发一次请求
+    /// （没拉过就给空 —— 少一次本地拦，服务端那条路还有 `exists` 兜着）。
+    private func entries(in directory: String) -> [FileEntry] {
+        if directory == state.files.currentPath { return state.files.entries }
+        return state.transfers.picker.loadedChildren(of: directory) ?? []
     }
 
     // MARK: - 删除确认
@@ -940,7 +957,6 @@ struct FileDialogCard: View {
         case .delete: return ""
         }
     }
-
     /// 去掉扩展名的主干。**目录不切** —— 专辑目录常写成 `2018.2019` 这种，
     /// 拿 `pathExtension` 一切就剩「2018」，改名会改掉一半。
     static func stem(of entry: FileEntry) -> String {

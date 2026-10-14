@@ -410,4 +410,12 @@ final class FileBrowser {
         guard parts.count > 1 else { return nil }
         return "/" + parts.dropLast().joined(separator: "/")
     }
+
+    /// 任意路径的上一级。选目标弹窗的筛选结果要显示「这一条在哪儿」用它 ——
+    /// 与 `parentPath` 同一个算法，只是不吃实例状态。
+    static func parent(of path: String) -> String {
+        let parts = path.split(separator: "/")
+        guard parts.count > 1 else { return "/" }
+        return "/" + parts.dropLast().joined(separator: "/")
+    }
 }
