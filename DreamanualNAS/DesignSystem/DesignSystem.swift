@@ -228,6 +228,15 @@ struct LucideIcon: View {
         // 意象，逐个问过 `NSImage(systemSymbolName:)` 确实存在（`sum` 也在，
         // 但它是求和的符号，用在单条上不准）。取消计算复用 `circle-x`。
         "ruler": "ruler",
+        // 系统状态页那一批（2026-10-14）。五枚逐个问过 `NSImage(systemSymbolName:)`：
+        // `thermometer` / `cpu` / `memorychip` / `clock` / `internaldrive` 都在
+        // （`cpu` 与 `memorychip` 是 SF 的原生名，别再试 `chip` / `ram`）。
+        // `hard-drive` 走 `internaldrive`：机器里那两块是内置盘，不是外置盒。
+        "thermometer": "thermometer",
+        "cpu": "cpu",
+        "memory-stick": "memorychip",
+        "clock": "clock",
+        "hard-drive": "internaldrive",
     ]
 }
 
@@ -974,6 +983,64 @@ struct DmBanner: View {
         .padding(.vertical, DmSpace.s8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.dmWarnSoft)
+    }
+}
+
+/// 状态徽章（第八节「状态徽章与分类标签」）：底**统一 `panel-2` + `line-2` 发丝**、
+/// 圆角 `r-6`、内边距纵向 `s2` 横向 `s6`、字 11/500。
+///
+/// 族色**只进文字与图标**，不铺自己的 `soft` 实色底 —— 族 500 压 soft 够不到 3:1，
+/// 所以字的档取 `-ink-strong`（族 400）；中性态取 `ink-2`、强调态取 `accent-2`
+/// （2026-10-09 用户定版）。高度不写死：`s2` 内边距 + 11 号字自然长出 18。
+///
+/// 落点先例：投资监控 `MarketStatusBadge` ↔ 音频转换 `FileStatusBadge` ↔
+/// 密码管理 `.pill`。**NAS 这一端到系统状态页才第一次落**（此前一屏都没有徽章）。
+struct DmBadge: View {
+    /// 语气档：中性 / 正常（ok）/ 注意（warn）/ 异常（danger）/ 强调（accent）。
+    enum Tone {
+        case neutral, ok, warn, danger, accent
+
+        var ink: Color {
+            switch self {
+            case .neutral: return Color.dmInk2
+            case .ok: return Color.dmOkInkStrong
+            case .warn: return Color.dmWarnInkStrong
+            case .danger: return Color.dmDangerInkStrong
+            case .accent: return Color.dmAccent2
+            }
+        }
+    }
+
+    private let text: String
+    private let icon: String?
+    private let tone: Tone
+
+    init(_ text: String, icon: String? = nil, tone: Tone = .neutral) {
+        self.text = text
+        self.icon = icon
+        self.tone = tone
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s4) {
+            if let icon {
+                LucideIcon(icon, size: DmIcon.i12)
+                    .foregroundColor(tone.ink)
+            }
+            Text(text)
+                .font(.system(size: DmText.t11, weight: .medium))
+                .foregroundColor(tone.ink)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, DmSpace.s6)
+        .padding(.vertical, DmSpace.s2)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r6).fill(Color.dmPanel2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r6)
+                .stroke(Color.dmLine2, lineWidth: DmLine.hairline)
+        )
     }
 }
 

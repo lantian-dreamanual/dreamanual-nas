@@ -1,0 +1,406 @@
+import AppKit
+import SwiftUI
+
+/// 系统状态页的状态（快照 / 取数阶段）。
+///
+/// 与 `LibraryModel` 同一归属：挂在 `AppState` 上而不是视图的 `@State` ——
+/// 切去听歌再切回来，温度与容量不该重新转一次圈；冒烟通路也要能在视图之外
+/// 把它摆到各个状态。
+@MainActor
+@Observable
+final class SystemStatusModel {
+    enum Phase: Equatable {
+        case idle
+        case loading
+        case ready
+        case failed(String)
+
+        var isBusy: Bool { self == .loading }
+    }
+
+    private(set) var phase: Phase = .idle
+    /// 四块各自可能缺（中继链路上几条接口的成功率本来就参差）。
+    private(set) var snapshot: SystemSnapshot?
+
+    /// 取一次。`force` 为假且已有快照时不动 —— 换模块回来不该白发一轮请求。
+    func load(on manager: SessionManager?, force: Bool = false) async {
+        guard let manager else { return }
+        if !force, snapshot != nil || phase == .loading { return }
+        phase = .loading
+        let result = await SystemStatusAPI.fetch(manager)
+        if result.isEmpty {
+            // 四块全空才算失败。一句一条地把原因串起来，比「读取失败」有用。
+            phase = .failed(result.failures.joined(separator: "；"))
+            return
+        }
+        snapshot = result
+        phase = .ready
+    }
+
+    /// 没取回来的那几块，拼成一句给提示条。
+    var failureNote: String? {
+        guard let snapshot, !snapshot.failures.isEmpty else { return nil }
+        return "这次没读到 —— " + snapshot.failures.joined(separator: "；")
+    }
+
+    /// 断开时清掉 —— 换了机器或换了一条链路，旧快照里的温度与容量都不作数了。
+    func clear() {
+        snapshot = nil
+        phase = .idle
+    }
+
+    /// 冒烟专用：把某一块抹掉，看「缺一块」那张卡与那条提示条。
+    ///
+    /// 真机上造不出一次干净的部分失败（要把某条接口单独打断），而这条路径正是
+    /// 「四条接口互相独立」这个设计的落点，得看一眼。`block` 认
+    /// `device` / `load` / `storage` / `health`。
+    func smokeDrop(_ block: String) {
+        guard var snapshot else { return }
+        switch block {
+        case "device": snapshot.device = nil; snapshot.failures.append("机器信息：冒烟抹掉")
+        case "load": snapshot.load = nil; snapshot.failures.append("负载：冒烟抹掉")
+        case "storage": snapshot.storage = nil; snapshot.failures.append("容量：冒烟抹掉")
+        case "health": snapshot.health = nil; snapshot.failures.append("系统状态：冒烟抹掉")
+        default: NSLog("[status] 抹不掉「%@」", block); return
+        }
+        self.snapshot = snapshot
+    }
+}
+
+/// 系统状态。
+///
+/// 形态照原型 `design/界面原型.html` 的系统状态屏：页头（副行写固件与开机时长、
+/// 右端链路徽章 + 刷新）→ 四张状态卡 → 存储与硬盘。
+///
+/// **只读半**：温度 / CPU / 内存 / 运行时长 / 容量 / 硬盘。关机与重启、开关机计划
+/// 是下一批（原型下半屏那两张卡），真关机还没执行过，得挑时间单独验。
+///
+/// 与原型的三处偏离，都是接口决定的，不是设计取舍：
+///   ① 原型每块盘一条进度条 —— 服务端**不给单盘已用量**（SHR 之下盘也不是各自
+///      独立的卷），进度条只能给存储空间，硬盘卡改成一行一块盘（温度 / 状态 / 读写）；
+///   ② 原型的 CPU 卡写「4 核 · 负载 0.42」——本机 `cpu_cores` 是 2（R1600 是 2 核 4 线程，
+///      服务端只报物理核），负载照 `1min_load / 100` 显示；
+///   ③ 原型的页头没有告警位 —— 这里在页头下挂提示条，只在服务端报了
+///      「上次崩溃」或「扩展网卡不兼容」时出现。
+struct StatusView: View {
+    @Environment(AppState.self) private var state
+
+    private var model: SystemStatusModel { state.status }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DmPageHead("系统状态", subtitle: subtitle) {
+                if let link = state.linkMode {
+                    DmBadge(link.label, icon: "wifi", tone: .accent)
+                }
+                IconButton(iconName: "refresh-cw") {
+                    Task { await model.load(on: state.sessionManager, force: true) }
+                }
+            }
+
+            // 系统自己报了事才出提示条（原型没有这一条，接口有就摆上）。
+            if let health = model.snapshot?.health, !health.isNormal {
+                ForEach(health.warnings, id: \.self) { warning in
+                    DmBanner(icon: "triangle-alert", text: warning)
+                }
+            }
+
+            // 部分失败：四块里缺了一两块。整屏不空白，缺的那块在，这张条在。
+            if let note = model.failureNote {
+                DmBanner(icon: "triangle-alert", text: note)
+            }
+
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // 主内容区取 `panel`（第一节落位口径）。
+        .background(Color.dmPanel)
+        .task { await model.load(on: state.sessionManager) }
+    }
+
+    /// 副行：固件 + 开机时长（原型「DSM 7.4.1 · 开机 27 天 4 小时」那一行）。
+    private var subtitle: String? {
+        guard let device = model.snapshot?.device else { return nil }
+        return "\(device.firmware) · \(device.uptimePhrase)"
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        // 有快照就一直画它 —— 刷新时不要把已经看到的数换成转圈。
+        if let snapshot = model.snapshot, !snapshot.isEmpty {
+            cards(snapshot)
+        } else if case .failed(let reason) = model.phase {
+            StatusNotice(icon: "circle-x", title: "没能读到系统状态", note: reason,
+                         actionTitle: "重试") {
+                Task { await model.load(on: state.sessionManager, force: true) }
+            }
+        } else {
+            StatusNotice(icon: "loader", title: "正在读取系统状态…",
+                         note: "四条接口并发发出：机器信息、负载、容量、系统状态。")
+        }
+    }
+
+    /// 四张状态卡 + 存储与硬盘两卡。并排的卡**由最高的那张定高**（原型
+    /// `.grid2` 那句「并排两张由 grid 拉到等高，向高的看齐」）。
+    private func cards(_ snapshot: SystemSnapshot) -> some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: DmSpace.s12) {
+                HStack(alignment: .top, spacing: DmSpace.s12) {
+                    ForEach(SystemStatusAPI.stats(snapshot), id: \.label) { stat in
+                        StatusStatCard(stat: stat)
+                    }
+                }
+
+                HStack(alignment: .top, spacing: DmSpace.s12) {
+                    StorageCard(volume: snapshot.storage?.volumes.first,
+                                load: snapshot.load)
+                    DiskCard(disks: snapshot.storage?.disks ?? [],
+                             load: snapshot.load)
+                }
+            }
+            .padding(.horizontal, DmSpace.s24)
+            .padding(.bottom, DmSpace.s20)
+        }
+    }
+}
+
+// ============ 卡片 ============
+
+/// 一张状态卡（原型 `.stat`）：11 的标签行（图标 + 字）、20 的主值（末尾小字是单位）、
+/// 11 的脚注。底 `panel-2`、圆角 `r-12`、发丝描边、内边距 `s14`。
+private struct StatusStatCard: View {
+    let stat: SystemStat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DmSpace.s6) {
+                LucideIcon(stat.icon, size: DmIcon.i12)
+                    .foregroundColor(Color.dmInk3)
+                Text(stat.label)
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: DmSpace.s2) {
+                Text(stat.value)
+                    .font(.system(size: DmText.t20, weight: .semibold))
+                    .kerning(-0.4)
+                    .monospacedDigit()
+                    .foregroundColor(Color.dmInk)
+                if !stat.unit.isEmpty {
+                    Text(stat.unit)
+                        .font(.system(size: DmText.t12))
+                        .foregroundColor(Color.dmInk3)
+                }
+            }
+            .padding(.top, DmSpace.s6)
+
+            Text(stat.note)
+                .font(.system(size: DmText.t11))
+                .monospacedDigit()
+                .foregroundColor(stat.isWarning ? Color.dmWarnInkStrong : Color.dmInk3)
+                .lineLimit(1)
+                .padding(.top, DmSpace.s4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(DmSpace.s14)
+        .dmCard()
+    }
+}
+
+/// 存储空间卡（原型硬盘卡的位置）：卡头（名字 + 读写徽章）→ 进度条 → 脚注。
+///
+/// 进度条画的是**卷**的已用占比。原型这里是每块盘一条，接口不给单盘已用量，
+/// 所以这一格只能落在存储空间上；单盘信息在右边那张卡。
+private struct StorageCard: View {
+    let volume: StorageVolume?
+    let load: SystemLoad?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DmSpace.s8) {
+                Text(volume?.name ?? "存储空间")
+                    .font(.system(size: DmText.t13, weight: .semibold))
+                    .foregroundColor(Color.dmInk)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let rate = ioBadge {
+                    DmBadge(rate, icon: "gauge", tone: .neutral)
+                }
+            }
+            .padding(.bottom, DmSpace.s10)
+
+            DmProgressBar(value: volume?.usedPercent ?? 0)
+                .padding(.top, DmSpace.s8)
+
+            Text(footnote)
+                .font(.system(size: DmText.t11))
+                .monospacedDigit()
+                .foregroundColor(Color.dmInk3)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, DmSpace.s8)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(DmSpace.s14)
+        .dmCard()
+    }
+
+    /// 卷的读写合计（`space.volume[]`）。**按 `loadID` 对**，不按 `id`
+    /// —— 两边的卷名一个带下划线一个不带（见 `StorageVolume.loadID`）。
+    private var ioBadge: String? {
+        guard let volume, let row = load?.volume(volume.loadID) else { return nil }
+        let total = row.readBytesPerSec + row.writeBytesPerSec
+        return "读写 " + SystemStatusAPI.rateText(total)
+    }
+
+    private var footnote: String {
+        guard let volume else { return "没读到容量" }
+        let used = FileEntry.byteText(volume.usedBytes)
+        let total = FileEntry.byteText(volume.totalBytes)
+        let percent = String(format: "%.1f%%", volume.usedPercent * 100)
+        return "已用 \(used) / \(total)（\(percent)）· 可用 \(FileEntry.byteText(volume.freeBytes))"
+            + (volume.isHealthy ? "" : " · \(volume.status)")
+    }
+}
+
+/// 硬盘卡（列表卡：卡头 + 一行一块盘）。每行给温度、状态徽章与瞬时读写。
+private struct DiskCard: View {
+    let disks: [StorageDisk]
+    let load: SystemLoad?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DmSpace.s8) {
+                Text("硬盘")
+                    .font(.system(size: DmText.t13, weight: .semibold))
+                    .foregroundColor(Color.dmInk)
+                Spacer(minLength: 0)
+                if !disks.isEmpty {
+                    Text("\(disks.count) 块")
+                        .font(.system(size: DmText.t11))
+                        .foregroundColor(Color.dmInk3)
+                }
+            }
+            .padding(.horizontal, DmSpace.s14)
+            .padding(.top, DmSpace.s14)
+            .padding(.bottom, DmSpace.s10)
+
+            if disks.isEmpty {
+                Text("没读到硬盘清单")
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+                    .padding(.horizontal, DmSpace.s14)
+                    .padding(.bottom, DmSpace.s14)
+            } else {
+                ForEach(Array(disks.enumerated()), id: \.element.id) { index, disk in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Color.dmLine)
+                            .frame(height: DmLine.hairline)
+                    }
+                    DiskRow(disk: disk, load: load?.load(for: disk.id))
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // 列表卡：内边距 0，行自带内边距（第八节「卡片」）。
+        .dmCard()
+    }
+}
+
+/// 一块盘的一行（原型 `.srow`：内边距 12/14，行间发丝）。
+private struct DiskRow: View {
+    let disk: StorageDisk
+    let load: DiskLoad?
+
+    var body: some View {
+        HStack(spacing: DmSpace.s12) {
+            LucideIcon("hard-drive", size: DmIcon.i16)
+                .foregroundColor(Color.dmInk2)
+
+            VStack(alignment: .leading, spacing: DmSpace.s2) {
+                Text(disk.name)
+                    .font(.system(size: DmText.t13))
+                    .foregroundColor(Color.dmInk)
+                Text(detail)
+                    .font(.system(size: DmText.t11))
+                    .monospacedDigit()
+                    .foregroundColor(Color.dmInk3)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 0)
+
+            if let rate {
+                Text(rate)
+                    .font(.system(size: DmText.t11))
+                    .monospacedDigit()
+                    .foregroundColor(Color.dmInk3)
+            }
+
+            DmBadge(statusText, tone: disk.isHealthy ? .ok : .danger)
+        }
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.vertical, DmSpace.s10)
+    }
+
+    /// 型号 · 容量 · 温度。剩余寿命按 `trustable` 判 —— 机械盘回的是
+    /// `{"trustable": true, "value": -1}`，`-1` 是「不适用」，直接显示就是「-1%」。
+    private var detail: String {
+        var parts: [String] = []
+        if !disk.model.isEmpty { parts.append(disk.model) }
+        parts.append(FileEntry.byteText(disk.sizeBytes))
+        parts.append("\(disk.temperature) °C")
+        if disk.remainLifeTrustable, disk.remainLifePercent >= 0 {
+            parts.append("寿命 \(disk.remainLifePercent)%")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var rate: String? {
+        guard let load else { return nil }
+        return "读 \(SystemStatusAPI.rateText(load.readBytesPerSec))"
+            + " · 写 \(SystemStatusAPI.rateText(load.writeBytesPerSec))"
+    }
+
+    private var statusText: String {
+        if disk.isHealthy { return "正常" }
+        return disk.status.isEmpty ? "异常" : disk.status
+    }
+}
+
+/// 空态 / 载入 / 错误三种静场（与文件页 `FilesNotice`、曲库页 `LibraryNotice` 同一形态）。
+private struct StatusNotice: View {
+    let icon: String
+    let title: String
+    let note: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: DmSpace.s12) {
+            LucideIcon(icon, size: DmIcon.i24)
+                .foregroundColor(Color.dmInk3)
+            Text(title)
+                .font(.system(size: DmText.t15, weight: .semibold))
+                .foregroundColor(Color.dmInk2)
+            Text(note)
+                .font(.system(size: DmText.t12))
+                .foregroundColor(Color.dmInk3)
+                .multilineTextAlignment(.center)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(SecondaryButtonStyle())
+                    .padding(.top, DmSpace.s2)
+            }
+        }
+        .padding(DmSpace.s24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

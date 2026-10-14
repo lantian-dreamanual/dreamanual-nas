@@ -61,13 +61,20 @@ struct FileEntry: Identifiable, Equatable {
     /// 一行里给「大小」列用的原始字节数（排序、合计都读它；目录记 0）。
     var byteCount: Int64 { isDirectory ? 0 : (size ?? 0) }
 
+    /// 字节数 → 人话（`3.88 MB` / `16.37 TB`），文件列表与系统状态页共用。
+    ///
+    /// TB 档是系统状态页那批补的：盘 16.37 TB、卷 15.71 TB，走 GB 档会显示成
+    /// 「16764.00 GB」。文件列表那边不会有这么大的单件，档位加上对它没影响。
     static func byteText(_ bytes: Int64) -> String {
         let unit: Double = 1024
         let value = Double(bytes)
         if bytes < 1024 { return "\(bytes) B" }
         if value < unit * unit { return String(format: "%.1f KB", value / unit) }
         if value < unit * unit * unit { return String(format: "%.1f MB", value / unit / unit) }
-        return String(format: "%.2f GB", value / unit / unit / unit)
+        if value < unit * unit * unit * unit {
+            return String(format: "%.2f GB", value / unit / unit / unit)
+        }
+        return String(format: "%.2f TB", value / unit / unit / unit / unit)
     }
 
     /// 列表里的时间戳：`2026-10-13 21:04`。列宽 150 正好放得下，不写秒。

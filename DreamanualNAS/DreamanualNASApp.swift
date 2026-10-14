@@ -71,6 +71,11 @@ struct DreamanualNASApp: App {
                     if let command = ProcessInfo.processInfo.environment["DM_FILES"] {
                         await state.smokeFiles(command)
                     }
+                    // DM_STATUS=<指令>：把系统状态页摆到指定状态，供真机截图核对。
+                    // 与那两条同一理由：AI 点不了 UI，页头那个刷新钮也点不了。
+                    if let command = ProcessInfo.processInfo.environment["DM_STATUS"] {
+                        await state.smokeStatus(command)
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。

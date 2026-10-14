@@ -391,16 +391,8 @@ private struct MainAreaView: View {
                 // 文件管理自带页头（标题 + 面包屑），不走外面这一条。
                 FilesView()
             } else if state.module == .status {
-                VStack(alignment: .leading, spacing: 0) {
-                    DmPageHead(state.module.title)
-
-                    ModulePlaceholder(
-                        icon: "gauge",
-                        title: "系统状态",
-                        note: "关机与重启、读写开关机计划",
-                        next: ["状态卡片（CPU / 内存 / 存储 / 温度）", "关机与重启", "开关机计划"]
-                    )
-                }
+                // 系统状态自带页头（标题 + 固件与开机时长 + 链路徽章），不走外面这一条。
+                StatusView()
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     DmPageHead(state.module.title)
@@ -412,49 +404,6 @@ private struct MainAreaView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // 主内容区取 `panel`（第一节落位口径：主区 panel、卡片 panel-2、悬停 panel-3）。
         .background(Color.dmPanel)
-    }
-}
-
-/// 尚未实现的模块占位：写清「这里会有什么」，不写假的进度状态。
-private struct ModulePlaceholder: View {
-    let icon: String
-    let title: String
-    let note: String
-    let next: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DmSpace.s14) {
-            HStack(spacing: DmSpace.s8) {
-                LucideIcon(icon, size: DmIcon.i16)
-                    .foregroundColor(Color.dmAccent)
-                Text(title)
-                    .font(.system(size: DmText.t13, weight: .medium))
-                    .foregroundColor(Color.dmInk)
-            }
-            Text(note)
-                .font(.system(size: DmText.t12))
-                .foregroundColor(Color.dmInk3)
-            VStack(alignment: .leading, spacing: DmSpace.s6) {
-                ForEach(next, id: \.self) { item in
-                    HStack(alignment: .top, spacing: DmSpace.s8) {
-                        Circle()
-                            .fill(Color.dmInk3)
-                            .frame(width: 4, height: 4)
-                            .padding(.top, DmSpace.s6)
-                        Text(item)
-                            .font(.system(size: DmText.t12))
-                            .foregroundColor(Color.dmInk2)
-                    }
-                }
-            }
-            Text("这一屏还没接数据 —— 地基（连接 / 双会话 / 保活 / 外壳）已通。")
-                .font(.system(size: DmText.t11))
-                .foregroundColor(Color.dmInk3)
-        }
-        .padding(DmSpace.s14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .dmCard()
-        .padding(.horizontal, DmSpace.s24)
     }
 }
 

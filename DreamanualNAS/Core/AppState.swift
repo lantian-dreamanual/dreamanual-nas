@@ -52,6 +52,19 @@ final class AppState {
         }
     }
 
+    /// 走的是哪条路：`direct` = 直连地址（局域网 / Tailscale 覆盖），
+    /// `relay` = QuickConnect 中继。
+    enum LinkMode {
+        case direct, relay
+
+        var label: String {
+            switch self {
+            case .direct: return "直连"
+            case .relay: return "中继"
+            }
+        }
+    }
+
     // MARK: - 连接表单（持久化，口令除外）
 
     var qcID: String { didSet { defaults.set(qcID, forKey: Keys.qcID) } }
@@ -63,6 +76,12 @@ final class AppState {
     private(set) var phase: Phase = .idle
     /// 端点描述，连上之后显示在侧栏底部（走中继还是直连、主机端口、区域）。
     private(set) var endpointLabel = ""
+    /// 链路的形态（状态页页头那颗徽章用）。
+    ///
+    /// 单独成一个枚举而不是去 `endpointLabel` 里认字符串：链路是**行为差别**，
+    /// 不只是文案差别 —— 实测同一批请求，局域网直连的 `DirSize` 成功率
+    /// 4/10、QuickConnect 中继 2/10（`接口结论.md` 第十节），页头上看得见才有用。
+    private(set) var linkMode: LinkMode?
     private(set) var module: Module = .music
     private(set) var sessionManager: SessionManager?
     /// 播放引擎：连上之后创建，断开即卸。曲库页与播放条都读它。
@@ -84,6 +103,9 @@ final class AppState {
     /// 文件管理页的搜索状态（关键词 / 重试次数 / 结果 / 分页）。归属同上 ——
     /// 换模块再回来，结果还在；冒烟通路也要能在视图之外把它摆到各个状态。
     let search = FileSearch()
+    /// 系统状态页的快照（机器信息 / 负载 / 容量 / 健康标志四块，各自可选）。
+    /// 归属同上：换模块回来不该重新转一次圈。
+    let status = SystemStatusModel()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -1279,6 +1301,157 @@ final class AppState {
         }
     }
 
+    /// `DM_STATUS=<指令>` 时由入口调用：把系统状态页摆到指定状态，供真机截图核对。
+    ///
+    /// 与曲库 / 文件两条同一理由 —— AI 点不了 UI（没有辅助功能权限，点击被静默丢弃）。
+    /// 指令逗号分隔：
+    ///   · `open` 切到系统状态页，等第一次取数落地（缺省动作，光给别的记号也算）；
+    ///   · `refresh` 再取一次，走页头刷新钮的同一个入口 `load(force:)`，报耗时；
+    ///   · `dump` 把解析后的数打到日志 —— 屏幕上**看不出来**的那几件（`up_time`
+    ///     怎么切的、负载除没除 100、卷名跟 `space.volume[]` 对上没有）就靠它对；
+    ///   · `drop=<块>` 抹掉一块看「部分失败」（`device` / `load` / `storage` / `health`）
+    ///     —— 真机上造不出干净的部分失败（要把某条接口单独打断）；
+    ///   · `clear` 清掉快照，回到载入初态。
+    ///
+    /// 顺序即字面顺序：`clear` 之后再 `drop=` 是抹不掉的（手上没快照），要抹就先抹。
+    func smokeStatus(_ command: String) async {
+        guard isConnected, let manager = sessionManager else {
+            NSLog("[status] 未连接，跳过（phase=%@）", String(describing: phase))
+            return
+        }
+        // 系统状态不是默认模块（默认落在听歌页）—— 先切过去，否则这一页根本没上屏。
+        select(.status)
+        await status.load(on: manager)
+        // 取数是并发的，落屏还要一帧；等一拍再截图 / 打点。
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        dumpStatus()
+
+        for raw in command.split(separator: ",") {
+            let token = raw.trimmingCharacters(in: .whitespaces)
+            if token.isEmpty { continue }
+            if token == "open" || token == "dump" {
+                continue    // 上面已经切过来并打过一份
+            } else if token == "refresh" {
+                let started = Date()
+                await status.load(on: manager, force: true)
+                let cost = String(format: "%.2f", Date().timeIntervalSince(started))
+                NSLog("[status] 刷新一次，耗时 %@ 秒 → %@",
+                      cost, status.snapshot == nil ? "没读到" : "有快照")
+                dumpStatus()
+            } else if token.hasPrefix("drop=") {
+                let block = String(token.dropFirst("drop=".count))
+                status.smokeDrop(block)
+                NSLog("[status] 抹掉「%@」→ 提示条：%@", block, status.failureNote ?? "（没有缺口）")
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            } else if token == "clear" {
+                status.clear()
+                NSLog("[status] 清掉快照 → 回到载入初态")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } else {
+                NSLog("[status] 认不出指令「%@」", token)
+            }
+        }
+    }
+
+    /// 冒烟用：把系统状态页上屏那几件数打到日志，供与接口原始读数逐项对照。
+    ///
+    /// 四张卡一律走界面同一条路（`SystemStatusAPI.stats`）—— 打的是「屏幕上是什么」，
+    /// 不是「我以为是什么」；其余分块打全，因为界面上有些数根本没露（平均负载 5/15 分钟、
+    /// 卷的忙闲、`deviceBytes` 与 `totalBytes` 谁是谁）。
+    private func dumpStatus() {
+        guard let snapshot = status.snapshot else {
+            NSLog("[status] 还没有快照（phase=%@）", String(describing: status.phase))
+            return
+        }
+        NSLog("[status] 链路 %@ · 快照到手 %@ 块 · 缺的：%@",
+              linkMode?.label ?? "—",
+              String(4 - snapshot.failures.count),
+              snapshot.failures.isEmpty ? "无" : snapshot.failures.joined(separator: " / "))
+
+        if let device = snapshot.device {
+            NSLog("[status] 机器 %@ · 固件 %@ · 序列号 %@",
+                  device.model, device.firmware, device.serial)
+            NSLog("[status] CPU %@ %@ · %@ 核 · %@ MHz ｜ 内存 %@ ｜ 已开机 %@ 秒 = %@",
+                  device.cpuFamily, device.cpuSeries, String(device.cpuCores),
+                  String(device.cpuClockMHz), FileEntry.byteText(device.ramBytes),
+                  String(device.uptimeSeconds), device.uptimePhrase)
+            NSLog("[status] 开机时刻（本机时钟倒推）%@ ｜ 服务端温度 %@ °C · 告警 %@",
+                  SystemStatusAPI.bootStamp.string(from: device.bootedAt),
+                  String(device.temperature), device.temperatureWarn ? "是" : "否")
+        } else {
+            NSLog("[status] 机器信息：缺")
+        }
+
+        if let load = snapshot.load {
+            NSLog("[status] CPU 用户 %@%% + 系统 %@%% = %@%%（DSM 利用率口径）· I/O 等待 %@%%",
+                  String(load.cpuUser), String(load.cpuSystem),
+                  String(load.cpuUsage), String(load.cpuIO))
+            NSLog("[status] 平均负载 1/5/15 分钟 %@ / %@ / %@（服务端原值已除 100）",
+                  String(format: "%.2f", load.load1), String(format: "%.2f", load.load5),
+                  String(format: "%.2f", load.load15))
+            NSLog("[status] 内存 %@%% ｜ 总 %@ · 可用 %@ · 缓存 %@",
+                  String(load.memoryPercent), FileEntry.byteText(load.memoryTotalBytes),
+                  FileEntry.byteText(load.memoryAvailableBytes),
+                  FileEntry.byteText(load.memoryCachedBytes))
+            for row in load.volumes {
+                NSLog("[status]   卷读数「%@」→ 读 %@ · 写 %@ · 忙 %@%%",
+                      row.id, SystemStatusAPI.rateText(row.readBytesPerSec),
+                      SystemStatusAPI.rateText(row.writeBytesPerSec), String(row.utilization))
+            }
+            for row in load.disks {
+                NSLog("[status]   盘读数「%@」→ 读 %@ · 写 %@ · 忙 %@%%",
+                      row.id, SystemStatusAPI.rateText(row.readBytesPerSec),
+                      SystemStatusAPI.rateText(row.writeBytesPerSec), String(row.utilization))
+            }
+        } else {
+            NSLog("[status] 负载：缺")
+        }
+
+        if let storage = snapshot.storage {
+            for volume in storage.volumes {
+                NSLog("[status] 卷 %@（服务端 id %@ · num_id %@ · %@ · %@）%@ ｜ 已用 %@ / %@（%@%%）"
+                      + " ｜ 可用 %@ ｜ total_device %@",
+                      volume.name, volume.id, String(volume.numID), volume.fsType, volume.raidType,
+                      volume.isHealthy ? "正常" : volume.status,
+                      FileEntry.byteText(volume.usedBytes), FileEntry.byteText(volume.totalBytes),
+                      String(format: "%.1f", volume.usedPercent * 100),
+                      FileEntry.byteText(volume.freeBytes),
+                      FileEntry.byteText(volume.deviceBytes))
+                // 这一行的判据就是「卷名两边不一样」那件事 —— 按 `id` 对必挂。
+                let matched = snapshot.load?.volume(volume.loadID)
+                NSLog("[status]   卷读写匹配：loadID「%@」%@ ｜ id「%@」%@ ｜ 配上那份 读 %@ · 写 %@",
+                      volume.loadID, matched == nil ? "没配上" : "配上",
+                      volume.id, snapshot.load?.volume(volume.id) == nil ? "没配上" : "配上",
+                      SystemStatusAPI.rateText(matched?.readBytesPerSec ?? -1),
+                      SystemStatusAPI.rateText(matched?.writeBytesPerSec ?? -1))
+            }
+            for disk in storage.disks {
+                NSLog("[status] 盘 %@（%@ · %@）· %@ · %@ °C · %@ · 寿命 %@",
+                      disk.id, disk.name, disk.model,
+                      disk.isHealthy ? "正常" : disk.status,
+                      String(disk.temperature), FileEntry.byteText(disk.sizeBytes),
+                      disk.remainLifeTrustable && disk.remainLifePercent >= 0
+                          ? "\(disk.remainLifePercent)%" : "不适用（trustable=\(disk.remainLifeTrustable)）")
+            }
+        } else {
+            NSLog("[status] 容量：缺")
+        }
+
+        if let health = snapshot.health {
+            NSLog("[status] 健康 崩溃 %@ · 扩展网卡不兼容 %@ ｜ 提示条 %@",
+                  health.crashed ? "是" : "否", health.nicIncompatible ? "是" : "否",
+                  health.warnings.isEmpty ? "无" : health.warnings.joined(separator: " / "))
+        } else {
+            NSLog("[status] 健康：缺")
+        }
+
+        for stat in SystemStatusAPI.stats(snapshot) {
+            NSLog("[status] 卡片「%@」= %@%@ ｜ %@%@",
+                  stat.label, stat.value, stat.unit, stat.note,
+                  stat.isWarning ? "（告警色）" : "")
+        }
+    }
+
     /// 冒烟用：提交一次搜索，等它跑到底，把三种结局（出数 / 真零 / 重试耗尽）都报出来。
     ///
     /// 这条**真的等**（假空最坏十几次、每次约 1 秒），因为「重试」正是这一步要核对的东西 ——
@@ -2143,6 +2316,7 @@ final class AppState {
                 // 直连覆盖：局域网或 Tailscale。这条路的证书是 NAS 自签的，要放行。
                 client = SynologyClient(host: direct.host, port: direct.port, allowSelfSigned: true)
                 endpointLabel = "直连 \(direct.host):\(direct.port)"
+                linkMode = .direct
             } else {
                 guard !qc.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID，或填一个直连地址") }
                 let endpoint = try await resolver.resolve(id: qc)
@@ -2150,6 +2324,7 @@ final class AppState {
                 client = SynologyClient(host: endpoint.host, port: endpoint.port, allowSelfSigned: false)
                 let region = endpoint.region.map { " · \($0)" } ?? ""
                 endpointLabel = "QuickConnect\(region) · \(endpoint.host):\(endpoint.port)"
+                linkMode = .relay
             }
 
             phase = .loggingIn
@@ -2201,6 +2376,8 @@ final class AppState {
         }
         sessionManager = nil
         endpointLabel = ""
+        linkMode = nil
+        status.clear()
         phase = .idle
     }
 
