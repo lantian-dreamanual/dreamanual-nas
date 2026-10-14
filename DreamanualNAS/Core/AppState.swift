@@ -578,6 +578,47 @@ final class AppState {
                     continue
                 }
                 library.setVisible(field, false)
+            } else if token.hasPrefix("click=") {
+                NSLog("[library] 收到 click 指令「%@」", token)
+                let name = String(token.dropFirst("click=".count))
+                guard let field = TrackField(rawValue: name) else {
+                    NSLog("[library] 认不出字段「%@」", name)
+                    continue
+                }
+                await waitForHeaderFrames()
+                let sent = await clickHeader(field)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                NSLog("[library] 合成点击表头「%@」：%@ → 排序 %@",
+                      field.label, sent ? "已发出" : "没有位置",
+                      library.sort.map { "\($0.field.rawValue) \($0.direction)" } ?? "默认")
+            } else if token.hasPrefix("drag=") {
+                let spec = token.dropFirst("drag=".count).split(separator: ":")
+                guard spec.count == 2,
+                      let from = TrackField(rawValue: String(spec[0])),
+                      let to = TrackField(rawValue: String(spec[1])) else {
+                    NSLog("[library] 认不出拖动指令「%@」", token)
+                    continue
+                }
+                await waitForHeaderFrames()
+                let sent = await dragHeader(from, to)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                NSLog("[library] 合成拖动「%@ → %@」：%@ → 列序 %@",
+                      from.label, to.label, sent ? "已发出" : "没有位置",
+                      library.visibleColumns.map(\.rawValue).joined(separator: "、"))
+            } else if token.hasPrefix("draghold=") {
+                let spec = token.dropFirst("draghold=".count).split(separator: ":")
+                guard spec.count == 2,
+                      let from = TrackField(rawValue: String(spec[0])),
+                      let to = TrackField(rawValue: String(spec[1])) else {
+                    NSLog("[library] 认不出拖动指令「%@」", token)
+                    continue
+                }
+                await waitForHeaderFrames()
+                let sent = await dragHeader(from, to, release: false)
+                NSLog("[library] 拖住不放「%@ → %@」：%@ —— 界面停在正在拖那一帧，"
+                      + "等着被截图（这一趟的进程随后就杀掉，不会真把列序写进用户偏好）",
+                      from.label, to.label, sent ? "已按住" : "没有位置")
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
             } else {
                 NSLog("[library] 认不出指令「%@」", token)
             }
@@ -594,6 +635,100 @@ final class AppState {
               String(library.total))
         let head = library.songs.prefix(8).map { "\($0.title)[\($0.year.map(String.init) ?? "-")]" }
         NSLog("[library] 前八条 %@", head.joined(separator: " / "))
+    }
+
+    /// 等表头把各列位置报上来。视图是逐帧长出来的，进程刚起那会儿还没有位置。
+    private func waitForHeaderFrames() async {
+        for attempt in 0..<20 {
+            if !library.headerFrames.isEmpty { return }
+            if attempt == 0 || attempt == 19 {
+                NSLog("[library] 第 %d 次等表头位置：%@", attempt + 1,
+                      library.headerFrames.isEmpty ? "还没有" : "有了")
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
+    /// 合成一次鼠标点击到表头某列上。**走真事件链**（`NSApp.postEvent`，与真鼠标
+    /// 同一条路）—— 用来证明「点表头 → 排序」这条接线是通的。
+    ///
+    /// AI 环境点不了 UI（`cliclick` / `osascript` 没有辅助功能权限，点击被静默丢弃），
+    /// 而表头点击从没被真机验证过（上面那些 `sort=` 指令走的是模型层，绕过了点击）
+    /// —— 合成事件是这条路的唯一验法。
+    private func clickHeader(_ field: TrackField) async -> Bool {
+        guard let window = hostingWindow(), let point = headerPoint(field) else {
+            return false
+        }
+        await activateForSyntheticInput(window)
+        sendMouse(.leftMouseDown, at: point, in: window)
+        sendMouse(.leftMouseUp, at: point, in: window)
+        return true
+    }
+
+    /// 合成一次拖动（按下源列 → 拖到目标列 → 松手），验「拖动表头改列序」。
+    /// 中间插几步：位移要过 6pt 阈值才认成拖动，一步到位会被当成点击。
+    ///
+    /// `release: false` = 拖到位不松手，让界面停在「正在拖」那一帧上 —— 拖动中的
+    /// 虚线框、手柄图标、落点竖线只在那一瞬存在，抓图核对只能这么抓（`draghold=`）。
+    @discardableResult
+    private func dragHeader(_ from: TrackField, _ to: TrackField,
+                            release: Bool = true) async -> Bool {
+        guard let window = hostingWindow(),
+              let start = headerPoint(from),
+              let end = headerPoint(to) else { return false }
+        await activateForSyntheticInput(window)
+        sendMouse(.leftMouseDown, at: start, in: window)
+        for step in 1...6 {
+            let t = CGFloat(step) / 6
+            sendMouse(.leftMouseDragged,
+                      at: CGPoint(x: start.x + (end.x - start.x) * t,
+                                  y: start.y + (end.y - start.y) * t),
+                      in: window)
+        }
+        if release { sendMouse(.leftMouseUp, at: end, in: window) }
+        return true
+    }
+
+    /// 合成鼠标事件之前必须把 app 与窗口弄到前台。
+    ///
+    /// 2026-10-14 实测：直起二进制时 app 不在前台（`NSApp.isActive = false`），
+    /// 这时窗口**直接丢掉**鼠标事件 —— 表头位置算得再准也没用（诊断日志里
+    /// 「命中 PlatformGroupContainer 但排序不变」就是这一条）。
+    /// 真用户点击时窗口当然是活跃的，这一步是把前置条件摆回真实场景。
+    private func activateForSyntheticInput(_ window: NSWindow) async {
+        // `.activateIgnoringOtherApps` 在 macOS 14 起已废弃（本就无效果），只留
+        // `.activateAllWindows`；真正的「到前台」由下面 `NSApp.activate()` 负责。
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        // 激活要经 WindowServer 生效，给它一拍再发事件。
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        NSLog("[library] 合成前：app 在前台=%@ · 窗口是 key=%@",
+              NSApp.isActive ? "是" : "否", window.isKeyWindow ? "是" : "否")
+    }
+
+    /// 表头某列的窗口坐标（格子的中心）。
+    ///
+    /// 位置由 `HeaderGrabber` 自己报上来（`convert(bounds, to: nil)`，就是窗口坐标），
+    /// 与 `NSEvent.mouseEvent` 要的坐标同一套 —— 中间不翻转、不换算。
+    /// 2026-10-14 之前这里走的是「SwiftUI `.global` 里翻 y 再 `content.convert`」，
+    /// 那两步都是猜的（`.global` 与内容坐标是不是同一原点没验过），猜错的表现就是
+    /// 事件落在表头下方一行、点了等于没点。
+    private func headerPoint(_ field: TrackField) -> CGPoint? {
+        guard let frame = library.headerFrames[field] else { return nil }
+        return CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    private func sendMouse(_ type: NSEvent.EventType, at point: CGPoint, in window: NSWindow) {
+        guard let event = NSEvent.mouseEvent(
+            with: type, location: point, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1
+        ) else { return }
+        // 走 app 的事件队列（`postEvent`），**不是** `window.sendEvent`：
+        // 真鼠标事件也是先进队列、再由 run loop 派发给窗口，这条路与键盘冒烟同一套。
+        NSApp.postEvent(event, atStart: false)
     }
 
     /// `DM_UI=<逗号分隔>` 时由入口调用：把窗口与右键那套摆到指定状态，供真机核对。

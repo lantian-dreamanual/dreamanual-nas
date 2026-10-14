@@ -199,6 +199,10 @@ struct LucideIcon: View {
         "list-start": "text.insert",
         "download": "arrow.down.circle",
         "trash": "trash",
+        // 表头拖动手柄（2026-10-14）。⚠️ SF 里**没有** `grip` 与 2×3 的点阵
+        // （`grip` / `circle.grid.2x3` / `dot.grid.2x3` 三个名字逐个核过，都不存在）。
+        // 取语义同族的 `line.3.horizontal`（macOS 列表重排手柄的画法）。
+        "grip-vertical": "line.3.horizontal",
     ]
 }
 
@@ -859,6 +863,111 @@ struct RightClickCatcher: NSViewRepresentable {
             let inContent = content.convert(event.locationInWindow, from: nil)
             // AppKit 原点在左下、SwiftUI 在左上。
             onRightClick?(CGPoint(x: inContent.x, y: content.bounds.height - inContent.y))
+        }
+    }
+}
+
+/// 表头一格上的鼠标接管层：点击、拖动、松手都从 **AppKit 层**拿。
+///
+/// 为什么不用 SwiftUI 的 `onTapGesture` / `DragGesture`：合成鼠标事件
+/// （`NSEvent.mouseEvent` + `NSApp.postEvent`，与 `DM_KEYS` 同一套做法）
+/// **进不了 SwiftUI 的手势系统** —— 2026-10-14 实测：同一位置 AppKit 探针收得到
+/// `mouseDown`，递到 SwiftUI 却是零回调；而 `cliclick` / `osascript` 这类真发事件的
+/// 工具在本机没有辅助功能权限、点击被静默丢弃。走 AppKit 层（与 `RightClickCatcher`
+/// 同一套），冒烟通路就能自己合成事件核对「点表头 → 排序」「拖表头 → 换列序」。
+///
+/// 位置与回调统一给**窗口坐标**（`event.locationInWindow` 与 `convert(bounds, to: nil)`
+/// 本来就是同一套，左下原点）—— 中间不做任何翻转与换算。
+///
+/// 为什么不换算成 SwiftUI 那套「左上原点内容坐标」：2026-10-14 实测，`.global` 报上来的
+/// 位置与内容坐标**是不是同一个原点没验过**，翻一次 y 就多一次猜；猜错的表现是
+/// 合成事件落在表头下方一行、点了等于没点。两套坐标干脆都别用，只留 AppKit 自己那一套。
+///
+/// `acceptsFirstMouse` 给真：窗口没激活时第一次点击也直接生效，不会先被「激活窗口」吃掉。
+struct HeaderGrabber: NSViewRepresentable {
+    /// 没拖动的按下抬起 = 点击。
+    let onClick: () -> Void
+    /// 拖动中（位移已超过阈值）。
+    let onDrag: (CGPoint) -> Void
+    /// 松手（拖过才回调；没拖走的点击归 `onClick`）。
+    let onDrop: (CGPoint) -> Void
+    /// 能拖的格子才起拖动；不能拖的（主键列）只报点击。
+    let isDraggable: Bool
+    /// 本格在窗口坐标里的位置。改列序的落点判定靠它，冒烟通路找格子也靠它。
+    let onFrame: (CGRect) -> Void
+
+    func makeNSView(context: Context) -> GrabberView {
+        let view = GrabberView()
+        view.apply(self)
+        return view
+    }
+
+    func updateNSView(_ view: GrabberView, context: Context) {
+        view.apply(self)
+    }
+
+    final class GrabberView: NSView {
+        /// 拖动判定阈值：位移小于它算点击（一格上既是按钮又是拖柄）。
+        private static let threshold: CGFloat = 6
+
+        private var onClick: (() -> Void)?
+        private var onDrag: ((CGPoint) -> Void)?
+        private var onDrop: ((CGPoint) -> Void)?
+        private var onFrame: ((CGRect) -> Void)?
+        private var isDraggable = true
+
+        private var start: CGPoint?
+        private var moved = false
+        /// 上次报出去的位置。位置没变就不重复回调 —— 免得每次布局都写一遍模型。
+        private var reported: CGRect?
+
+        func apply(_ owner: HeaderGrabber) {
+            onClick = owner.onClick
+            onDrag = owner.onDrag
+            onDrop = owner.onDrop
+            onFrame = owner.onFrame
+            isDraggable = owner.isDraggable
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reportFrame()
+        }
+
+        override func layout() {
+            super.layout()
+            reportFrame()
+        }
+
+        /// 把本格的位置报给调用点。窗口坐标 = `convert(bounds, to: nil)`。
+        private func reportFrame() {
+            guard window != nil else { return }
+            let frame = convert(bounds, to: nil)
+            guard frame != reported else { return }
+            reported = frame
+            onFrame?(frame)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            start = event.locationInWindow
+            moved = false
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard isDraggable, let start else { return }
+            let now = event.locationInWindow
+            if !moved, hypot(now.x - start.x, now.y - start.y) >= Self.threshold {
+                moved = true
+            }
+            if moved { onDrag?(now) }
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if moved { onDrop?(event.locationInWindow) } else { onClick?() }
+            start = nil
+            moved = false
         }
     }
 }

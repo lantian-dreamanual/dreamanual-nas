@@ -73,8 +73,15 @@ final class LibraryModel {
     /// 表头排序。`nil` = 服务端默认顺序（曲库写入的先后）—— 表头一个箭头都不亮。
     /// 跨来源保留：在曲库按年份排过，切到歌单还是按年份看，这才合用。
     private(set) var sort: SongSort?
-    /// 显示的列。恒含 `.title`（主键列不可隐藏）—— 存的也只有可隐藏的那几列。
-    private(set) var visibleColumns: Set<TrackField> = Set(TrackField.allCases)
+    /// 显示的列，**有序** —— 数组顺序就是列的先后，表头拖动改的就是它。
+    /// 恒含 `.title`：主键列不可隐藏，且钉在首位（它是唯一自适应宽的一列，
+    /// 挪到中间会让「吸收余量」的行为落在中间，后面的固定列位置随窗口宽漂）。
+    private(set) var visibleColumns: [TrackField] = TrackField.allCases
+    /// 表头各格在**窗口坐标**里的位置。落点判定不用它（表头自己那份 `@State` 更近），
+    /// 它是给冒烟通路定位用的：AI 点不了 UI，只能合成鼠标事件，「点哪一格」得先数出来。
+    /// 加 `@ObservationIgnored`：它是量出来的读数，不是状态，写它不该触发重绘
+    /// （否则每次布局都重绘表头，还可能自己把自己转起来）。
+    @ObservationIgnored var headerFrames: [TrackField: CGRect] = [:]
     /// 字段配置菜单开合。挂模型上而不是表视图的 `@State`：这一页会随沉浸模式
     /// 上下层级，状态跟着视图走就丢；真机核对也要能从入口把它展开（见 `DM_LIBRARY`）。
     var showsFieldMenu = false
@@ -412,17 +419,44 @@ final class LibraryModel {
     func isVisible(_ field: TrackField) -> Bool { visibleColumns.contains(field) }
 
     /// 勾 / 取消一列。标题是主键列 —— `canHide` 为假时直接不理会。
+    ///
+    /// 重新显示一列时插回**默认顺序里的位置**（插在前一个默认序可见列的后面），
+    /// 不是插到末尾：这样「藏了再显示」与「恢复默认字段」的结果一致，
+    /// 列序不会被勾选动作搅乱、拖动排好的顺序也不会被一次勾选打散。
     func setVisible(_ field: TrackField, _ visible: Bool) {
         guard field.canHide else { return }
-        if visible { visibleColumns.insert(field) } else { visibleColumns.remove(field) }
-        defaults.set(TrackField.allCases.filter { visibleColumns.contains($0) }.map(\.rawValue),
-                     forKey: PrefKey.columns)
+        if visible {
+            guard !visibleColumns.contains(field) else { return }
+            let defaultOrder = TrackField.allCases
+            let index = defaultOrder.firstIndex(of: field) ?? defaultOrder.count
+            let anchor = defaultOrder[..<index].last { visibleColumns.contains($0) }
+            let at = anchor.flatMap { visibleColumns.firstIndex(of: $0) }.map { $0 + 1 } ?? 1
+            visibleColumns.insert(field, at: min(at, visibleColumns.count))
+        } else {
+            visibleColumns.removeAll { $0 == field }
+        }
+        storeColumns()
     }
 
-    /// 恢复默认字段：八列全开。
+    /// 表头拖动改列序：把一列挪到第 `index` 位（**落点列的下标**，即插到它前面）。
+    /// 标题列钉在首位 —— 它不可拖，落点计算也把它排除在外（最小落点是 1）。
+    func moveColumn(_ field: TrackField, to index: Int) {
+        guard field.canHide, let from = visibleColumns.firstIndex(of: field) else { return }
+        visibleColumns.remove(at: from)
+        // 移除后下标会左移一格：落点在被拖列右边时目标下标要减一。
+        let target = min(max(1, index > from ? index - 1 : index), visibleColumns.count)
+        visibleColumns.insert(field, at: target)
+        storeColumns()
+    }
+
+    /// 恢复默认字段：八列全开、回到默认顺序。
     func resetColumns() {
-        visibleColumns = Set(TrackField.allCases)
+        visibleColumns = TrackField.allCases
         defaults.removeObject(forKey: PrefKey.columns)
+    }
+
+    private func storeColumns() {
+        defaults.set(visibleColumns.map(\.rawValue), forKey: PrefKey.columns)
     }
 
     /// 分页的两路必须服务端排序（理由见 `toggleSort`）。
@@ -469,13 +503,16 @@ final class LibraryModel {
         return SongSort(field: field, ascending: ascending)
     }
 
-    /// 读回列显隐。没存过就是全开；存过的内容里无论有没有标题列，标题都在
-    /// —— 主键列不可隐藏，这条不能靠存出来的数据保证。
-    private static func storedColumns() -> Set<TrackField> {
+    /// 读回列序。没存过就是默认顺序；存过的里无论有没有标题列，标题都在
+    /// 首位 —— 主键列不可隐藏，这条不能靠存出来的数据保证。
+    /// 顺手去重：存档被手改过也别让一列在表头出现两次。
+    private static func storedColumns() -> [TrackField] {
         guard let raw = UserDefaults.standard.array(forKey: PrefKey.columns) as? [String] else {
-            return Set(TrackField.allCases)
+            return TrackField.allCases
         }
-        return Set(raw.compactMap(TrackField.init(rawValue:))).union([.title])
+        var seen = Set<TrackField>()
+        let order = raw.compactMap(TrackField.init(rawValue:)).filter { seen.insert($0).inserted }
+        return [.title] + order.filter { $0 != .title }
     }
 
     // MARK: 内部
@@ -768,9 +805,10 @@ enum TrackMetrics {
 
     /// 表格内容宽。视口比它宽时标题列吸收余量（铺满），比它窄时**横向滚动**
     /// —— 表头与行在同一个滚动容器里，一起滚，列不会各滚各的。
-    static func contentWidth(viewport: CGFloat, visible: Set<TrackField>) -> CGFloat {
-        let fixed = TrackField.allCases
-            .filter { $0 != .title && visible.contains($0) }
+    /// 固定列合计**与列序无关**（求和），所以这里只按「显示了哪几列」算。
+    static func contentWidth(viewport: CGFloat, visible: [TrackField]) -> CGFloat {
+        let fixed = visible
+            .filter { $0 != .title }
             .reduce(CGFloat.zero) { $0 + $1.fixedWidth }
         return max(viewport, titleMinWidth + fixed + configWidth)
     }
@@ -802,11 +840,13 @@ private struct TrackTable: View {
                     VStack(spacing: 0) {
                         TrackHeader(
                             sort: model.sort,
-                            visible: model.visibleColumns,
+                            columns: model.visibleColumns,
                             onSort: { field in
                                 Task { await model.toggleSort(field, on: manager) }
                             },
-                            onConfigure: { model.showsFieldMenu = true }
+                            onConfigure: { model.showsFieldMenu = true },
+                            onMove: { field, index in model.moveColumn(field, to: index) },
+                            onFrames: { frames in model.headerFrames = frames }
                         )
 
                         ScrollView {
@@ -885,17 +925,32 @@ private struct TrackTable: View {
 
 /// 表头：每一列都可点 —— 点了按这一列排，同一列再点换方向（正序 `chevron-up` /
 /// 倒序 `chevron-down`，只有当前排序列带箭头）。一列都没点时是服务端默认顺序。
-/// 最右一格是字段配置。
+/// 能隐的列还能拖 —— 按下拖过阈值就是改列序，拖动中的列画虚线框 + 主色字 +
+/// 拖动手柄，落点画主色竖线。最右一格是字段配置（不可拖、也不当落点）。
 private struct TrackHeader: View {
     let sort: SongSort?
-    let visible: Set<TrackField>
+    /// 列序。与行共用同一份 —— 表头拖动改的就是它。
+    let columns: [TrackField]
     let onSort: (TrackField) -> Void
     let onConfigure: () -> Void
+    /// 拖动落点：把一列插到第 `index` 位。
+    let onMove: (TrackField, Int) -> Void
+    /// 各格的位置（窗口坐标）报出去。落点判定在本视图里自己用，报出去是给冒烟通路
+    /// 定位用的 —— AI 点不了 UI，只能自己合成鼠标事件，得先知道各格在哪儿。
+    let onFrames: ([TrackField: CGRect]) -> Void
+
+    /// 正在拖的列（拖动中它画虚线框 + 主色字 + 拖动手柄图标）。
+    @State private var dragging: TrackField?
+    /// 拖动中指针的落点（窗口坐标 x）—— 竖线画在它对应的列边界上。
+    @State private var dropX: CGFloat?
+    /// 各格的位置（**窗口坐标**，与 `dropX` 同一套）。落点判定靠它 —— 列宽不是定值
+    /// （标题列自适应），只能等 AppKit 那边实测报上来。
+    @State private var frames: [TrackField: CGRect] = [:]
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(TrackField.allCases) { field in
-                if visible.contains(field) { sortCell(field) }
+            ForEach(columns) { field in
+                sortCell(field)
             }
             configCell
         }
@@ -907,26 +962,95 @@ private struct TrackHeader: View {
     @ViewBuilder
     private func sortCell(_ field: TrackField) -> some View {
         let isActive = sort?.field == field
+        let isDragging = dragging == field
 
-        Button { onSort(field) } label: {
-            HStack(spacing: DmSpace.s2) {
-                Text(field.label)
-                    .font(.system(size: DmText.t11, weight: .bold))
-                    .kerning(0.33)
-                if isActive {
-                    LucideIcon(sort?.ascending == false ? "chevron-down" : "chevron-up",
-                               size: DmIcon.i10)
-                        .foregroundColor(Color.dmAccent2)
-                }
+        HStack(spacing: DmSpace.s2) {
+            Text(field.label)
+                .font(.system(size: DmText.t11, weight: .bold))
+                .kerning(0.33)
+            if isActive {
+                LucideIcon(sort?.ascending == false ? "chevron-down" : "chevron-up",
+                           size: DmIcon.i10)
+                    .foregroundColor(Color.dmAccent2)
             }
-            .foregroundColor(Color.dmInk3)
-            .padding(.horizontal, TrackMetrics.padH)
-            .padding(.vertical, DmSpace.s8)
-            .modifier(ColumnWidth(field: field))
-            .contentShape(Rectangle())
+            if isDragging {
+                // 拖动中的列挂手柄图标（SF 里没有 lucide 的 grip-vertical，
+                // 取语义同族的 `line.3.horizontal`，见设计规范「图标名两套」）。
+                LucideIcon("grip-vertical", size: DmIcon.i10)
+                    .foregroundColor(Color.dmAccent2)
+            }
         }
-        .buttonStyle(.plain)
-        .help("按\(field.label)排序")
+        .foregroundColor(isDragging ? Color.dmAccent2 : Color.dmInk3)
+        .padding(.horizontal, TrackMetrics.padH)
+        .padding(.vertical, DmSpace.s8)
+        .modifier(ColumnWidth(field: field))
+        .contentShape(Rectangle())
+        // 一个格子上两个动作：点 = 排序、拖 = 改列序。用 AppKit 接管层而不是
+        // SwiftUI 手势 —— 手势那条路合成事件验不到（见 `HeaderGrabber`）。
+        .overlay { grabber(field) }
+        .overlay {
+            if isDragging {
+                RoundedRectangle(cornerRadius: DmRadius.r4)
+                    .strokeBorder(style: StrokeStyle(lineWidth: DmLine.base, dash: [3, 2]))
+                    .foregroundColor(Color.dmAccent2)
+            }
+        }
+        // 落点竖线：插在这一格之前 / 插在最后一格之后，都画在主色竖线上。
+        .overlay(alignment: .leading) {
+            if dropIndexIfDragging == columns.firstIndex(of: field) { dropLine }
+        }
+        .overlay(alignment: .trailing) {
+            if dropIndexIfDragging == columns.count, field == columns.last { dropLine }
+        }
+        .help(field.canHide ? "点按排序 · 拖动改列序" : "点按排序")
+    }
+
+    /// 表头一格的鼠标接管层：点击排序、拖动改列序（位移判定在 AppKit 那一侧）。
+    /// 位置也由它报上来（`onFrame`）—— 本格多宽、在窗口的哪儿，它自己最清楚。
+    private func grabber(_ field: TrackField) -> some View {
+        HeaderGrabber(
+            onClick: { onSort(field) },
+            onDrag: { point in
+                dragging = field
+                dropX = point.x
+            },
+            onDrop: { point in
+                let index = dropIndex(at: point.x)
+                dragging = nil
+                dropX = nil
+                onMove(field, index)
+            },
+            isDraggable: field.canHide,
+            onFrame: { frame in
+                frames[field] = frame
+                onFrames(frames)
+            }
+        )
+    }
+
+    /// 拖动中要插到第几列之前。没在拖就是 `nil`（竖线一个都不画）。
+    private var dropIndexIfDragging: Int? {
+        guard dragging != nil, let dropX else { return nil }
+        return dropIndex(at: dropX)
+    }
+
+    /// 落点插到第几列之前：指针在某列的左半边 → 插到它前面，右半边 → 插到它后面。
+    /// 标题列不可拖、也不当落点（它是首位，最小落点是 1）。
+    /// 比的是窗口坐标的 x —— 与 `dropX`、与各格报上来的位置同一套。
+    private func dropIndex(at x: CGFloat) -> Int {
+        for (index, field) in columns.enumerated() where field.canHide {
+            guard let frame = frames[field] else { continue }
+            if x < frame.midX { return index }
+        }
+        return columns.count
+    }
+
+    /// 落点竖线（原型 `box-shadow:-2px 0 0` 那条）。线宽取尺度档里的 `line.bold`（3）
+    /// —— 1px 在这张表上太轻，压不住。
+    private var dropLine: some View {
+        Rectangle()
+            .fill(Color.dmAccent2)
+            .frame(width: DmLine.bold, height: TrackMetrics.headerHeight)
     }
 
     /// 字段配置（原型 `.tbl th.th-cfg`：列宽 32、按钮右贴、右留 `s6`）。
@@ -962,8 +1086,9 @@ struct TrackRow: View {
     let song: AudioSong
     let isSelected: Bool
     var isPlaying: Bool = false
-    /// 显示的列。默认全开 —— 队列行与单视图台架那两处不关心列配置。
-    var visible: Set<TrackField> = Set(TrackField.allCases)
+    /// 显示的列，**有序** —— 顺序即列序，与表头共用同一份。
+    /// 默认全开：队列行与单视图台架那两处不关心列配置。
+    var visible: [TrackField] = TrackField.allCases
     /// 行尾空道宽。曲库表填 `TrackMetrics.configWidth`（与表头那格字段配置对齐），
     /// 没有这一格的表（队列）留 0。
     var trailingLane: CGFloat = 0
@@ -982,7 +1107,7 @@ struct TrackRow: View {
         song: AudioSong,
         isSelected: Bool,
         isPlaying: Bool = false,
-        visible: Set<TrackField> = Set(TrackField.allCases),
+        visible: [TrackField] = TrackField.allCases,
         trailingLane: CGFloat = 0,
         onSelect: @escaping () -> Void,
         onPlay: (() -> Void)? = nil,
@@ -1018,27 +1143,9 @@ struct TrackRow: View {
             // 自适应列会被压成 0、整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
             .frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity, alignment: .leading)
 
-            if visible.contains(.artist) { plain(song.artist, field: .artist) }
-            if visible.contains(.album) { plain(song.album, field: .album) }
-            if visible.contains(.genre) {
-                plain(song.genreTags.joined(separator: " · "), field: .genre)
-            }
-            if visible.contains(.year) { dim(song.yearText, field: .year) }
-
-            if visible.contains(.duration) { dim(song.durationText, field: .duration) }
-            if visible.contains(.track) { dim(song.track.map(String.init) ?? "", field: .track) }
-
-            if visible.contains(.rating) {
-                // 未评分的行**悬停才浮出空星** —— 浮出来即「这一格能点」。
-                // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
-                RatingStars(
-                    rating: song.rating,
-                    isSelected: isPlaying,
-                    revealsEmpty: isHovered && onRate != nil,
-                    onRate: onRate
-                )
-                .padding(.trailing, DmSpace.s8)
-                .modifier(ColumnWidth(field: .rating))
+            // 列序由模型给，行跟着表头一起换位（表头拖动改列序时两边同步）。
+            ForEach(visible.filter { $0 != .title }) { field in
+                cell(field)
             }
 
             if trailingLane > 0 {
@@ -1063,6 +1170,39 @@ struct TrackRow: View {
             if let onContextMenu {
                 RightClickCatcher(onRightClick: onContextMenu)
             }
+        }
+    }
+
+    /// 一格。标题列不走这里 —— 它要内嵌封面、吃自适应宽，单独画在上面。
+    /// 每列的画法只此一处：加一列改 `TrackField` 与这里两处。
+    @ViewBuilder
+    private func cell(_ field: TrackField) -> some View {
+        switch field {
+        case .title:
+            EmptyView()
+        case .artist:
+            plain(song.artist, field: .artist)
+        case .album:
+            plain(song.album, field: .album)
+        case .genre:
+            plain(song.genreTags.joined(separator: " · "), field: .genre)
+        case .year:
+            dim(song.yearText, field: .year)
+        case .duration:
+            dim(song.durationText, field: .duration)
+        case .track:
+            dim(song.track.map(String.init) ?? "", field: .track)
+        case .rating:
+            // 未评分的行**悬停才浮出空星** —— 浮出来即「这一格能点」。
+            // 右留 `s8`：5 颗星 60 宽正好落进 68 的列里，右缘与表头对齐。
+            RatingStars(
+                rating: song.rating,
+                isSelected: isPlaying,
+                revealsEmpty: isHovered && onRate != nil,
+                onRate: onRate
+            )
+            .padding(.trailing, DmSpace.s8)
+            .modifier(ColumnWidth(field: .rating))
         }
     }
 

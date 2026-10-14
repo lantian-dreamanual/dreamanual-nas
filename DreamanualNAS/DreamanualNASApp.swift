@@ -58,6 +58,9 @@ struct DreamanualNASApp: App {
                     }
                     // DM_LIBRARY=<指令>：把曲库页摆到指定排序 / 列显隐 / 菜单展开
                     // 状态，供真机截图核对（同理由：AI 点不了 UI）。
+                    // `click=` / `drag=` / `draghold=` 三个记号例外 —— 它们合成真鼠标
+                    // 事件，走的是「点表头」「拖表头」这两条界面接线本身；
+                    // `draghold=` 是拖到位不松手，好把「正在拖」那一帧截下来。
                     if let command = ProcessInfo.processInfo.environment["DM_LIBRARY"] {
                         await state.smokeLibrary(command)
                     }
