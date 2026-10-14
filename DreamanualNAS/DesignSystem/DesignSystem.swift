@@ -224,6 +224,10 @@ struct LucideIcon: View {
         "upload": "square.and.arrow.up",
         "copy": "doc.on.doc",
         "folder-input": "arrow.right.square",
+        // 目录大小那一批（2026-10-14）。「量一下这个文件夹多大」——`ruler` 是量尺寸的
+        // 意象，逐个问过 `NSImage(systemSymbolName:)` 确实存在（`sum` 也在，
+        // 但它是求和的符号，用在单条上不准）。取消计算复用 `circle-x`。
+        "ruler": "ruler",
     ]
 }
 

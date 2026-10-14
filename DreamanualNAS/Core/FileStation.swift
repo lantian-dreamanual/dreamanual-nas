@@ -133,6 +133,47 @@ struct FilePage {
     let total: Int
 }
 
+/// 一个目录的体积（`DirSize` 的 `status` 那一份）。
+///
+/// 字段就是服务端给的三件套：`total_size` / `num_dir` / `num_file`，**没有 `progress`**
+/// —— 所以界面上「正在计算」只能是个转圈，画不出百分比。
+struct DirectorySize: Equatable {
+    let bytes: Int64
+    let directories: Int
+    let files: Int
+
+    var text: String { FileEntry.byteText(bytes) }
+
+    /// 悬停 / 副行里那句「12 个文件夹 · 340 个文件」。
+    var detailText: String { "\(directories) 个文件夹 · \(files) 个文件" }
+}
+
+/// 搜索命中的一条。
+///
+/// 🔴 **只有三个字段**（`name` / `path` / `isdir`）—— `additional` 加上去也不认
+/// （2026-10-14 实测：带了 `size,time,perm,type`，条目还是那三个键）。
+/// 所以结果行**没有大小与时间**可以显示，只给名字、所在位置与「是不是目录」。
+struct FileSearchHit: Identifiable, Equatable {
+    let name: String
+    let path: String
+    let isDirectory: Bool
+
+    var id: String { path }
+    /// 所在目录（结果行右侧那条路径）。
+    var parent: String { FileBrowser.parent(of: path) }
+}
+
+/// 搜索 `list` 的一次应答。三种状态分开（`接口结论.md` 第七节末）：
+/// 还在跑（`total` 是过程值）/ 跑完（`total` 是终值）/ **假空**（连 `total` 键都没有）。
+struct FileSearchPage {
+    let hits: [FileSearchHit]
+    /// **`nil` 就是假空** —— 应答里没有 `total` 键，服务端这次什么都没给。
+    let total: Int?
+    let finished: Bool
+
+    var isFakeEmpty: Bool { finished && total == nil }
+}
+
 /// 一个文件任务的落地结果（`CopyMove` / `Delete` / `DirSize` 的 `status` 那一份）。
 ///
 /// 🔴 `finished` 只说明任务停了，**不代表做成了** —— 判成败看 `errors`。
@@ -422,6 +463,171 @@ enum FileStation {
             manager, path: directory, sort: FileStation.defaultSort, limit: treeFetchLimit
         )
         return page.entries.contains { $0.name == name }
+    }
+
+    // MARK: - 搜索（Search v2）
+
+    /// 起一次搜索（`Search` v2 `start`）。`pattern` 是**名字子串**：不吃通配符
+    /// （`*.mp3` 回 0），大小写不敏感，中文照搜（实测 `饼羊` 命中 7 条）。
+    ///
+    /// 🔴 `start` 回 `success` + `taskid` **不证明这个任务真的建起来了**（与
+    /// `CopyMove` 同族），而且搜索的坑在 `list` 那一侧（假空），所以这里只负责拿任务号。
+    static func searchStart(
+        _ manager: SessionManager,
+        folder: String,
+        pattern: String
+    ) async throws -> String {
+        let raw = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.Search",
+            version: 2,
+            method: "start",
+            params: ["folder_path": folder, "pattern": pattern, "recursive": "true"]
+        )
+        let data = (raw as? [String: Any]) ?? [:]
+        guard let taskid = data["taskid"] as? String, !taskid.isEmpty else {
+            throw QuickConnectError.badResponse("搜索没有回任务号")
+        }
+        return taskid
+    }
+
+    /// 取一页结果（`Search` v2 `list`）。
+    ///
+    /// 三种应答必须分清（`接口结论.md` 第七节末）：还在跑 → `finished = false`、`total` 是
+    /// **已索引条数的过程值**（只会涨，不能当结果数）；跑完 → `finished = true` + `total`
+    /// 是终值；🔴 **假空** → `finished = true` 而**连 `total` 键都没有** —— 服务端这次什么
+    /// 都没给，不是「0 条」。真零长这样：`{"files": [], "finished": true, "total": 0}`。
+    ///
+    /// ⚠️ 条目只有 `name` / `path` / `isdir` 三个键（`additional` 不认）。
+    static func searchPage(
+        _ manager: SessionManager,
+        taskid: String,
+        offset: Int,
+        limit: Int
+    ) async throws -> FileSearchPage {
+        let raw = try await manager.call(
+            kind: .file,
+            api: "SYNO.FileStation.Search",
+            version: 2,
+            method: "list",
+            params: ["taskid": taskid, "offset": String(offset), "limit": String(limit)]
+        )
+        let data = (raw as? [String: Any]) ?? [:]
+        let files = (data["files"] as? [[String: Any]]) ?? []
+        return FileSearchPage(
+            hits: files.map { dict in
+                FileSearchHit(
+                    name: (dict["name"] as? String) ?? "",
+                    path: (dict["path"] as? String) ?? "",
+                    isDirectory: (dict["isdir"] as? Bool) ?? false
+                )
+            },
+            // 🔴 没有 `total` 键就是假空 —— 不能用 `?? 0` 吞掉这个区别。
+            total: integer(data["total"]).map(Int.init),
+            finished: (data["finished"] as? Bool) ?? false
+        )
+    }
+
+    /// 停掉一次搜索。假空之后要 stop 再重来（实测这么写才出得来结果）。
+    static func searchStop(_ manager: SessionManager, taskid: String) async {
+        _ = try? await manager.call(
+            kind: .file, api: "SYNO.FileStation.Search", version: 2,
+            method: "stop", params: ["taskid": taskid]
+        )
+    }
+
+    /// 把任务连同结果一起清掉（`clean` 实测存在，回 `{}`；`delete` / `clear` 回 `103`）。
+    /// **界面搜完要 clean** —— 不清就在服务端攒任务。
+    static func searchClean(_ manager: SessionManager, taskid: String) async {
+        _ = try? await manager.call(
+            kind: .file, api: "SYNO.FileStation.Search", version: 2,
+            method: "clean", params: ["taskid": taskid]
+        )
+    }
+
+    // MARK: - 目录大小（DirSize v2）
+
+    /// 算一个或多个目录的体积（`DirSize` v2 `start` + `status` 轮询）。
+    ///
+    /// 四条实测口径（2026-10-14，`experiments/shuffle-lab/dirsearch1–6.py`）：
+    ///   · `path` 给 **JSON 数组串**，多个目录会**求和**（实测两条路径的值精确等于各自之和）；
+    ///     给表单重复参数（`path=a&path=b`）只算**最后一条** —— 别用那个写法；
+    ///   · 🔴 `status` 会**随机回 `599`**，而且那是**这个任务号坏了**，不是读一次抖一下
+    ///     （实测一个坏号连读 12 次全是 599）。`start` 回 `success` + `taskid` 同样不证明
+    ///     任务建起来了 → 判据是「**首次 `status` 不成功就丢掉任务号、换一次 `start`**」。
+    ///     坏号在第一次轮询就看得出来（约 0.2 秒），所以重试很便宜；实测小目录平均要 3~5 次；
+    ///   · **没有 `progress`**，只有 `total_size` / `num_dir` / `num_file` → 界面只能显示「正在计算」；
+    ///   · 慢：`/music`（9368 目录 / 18080 文件）实测 **29 秒** → 界面必须按需触发、不能进目录就算。
+    ///
+    /// - Parameter attempts: `start` 重试上限。实测成功率低：同一个目录打 10 次，**局域网直连**
+    ///   认 4 次、**QuickConnect 中继**认 2 次（2026-10-14 对照，链路差异不在接口）；
+    ///   一个坏号在第一次轮询就看得出来，所以重试很便宜。给 10 次约九成能成。
+    static func directorySize(
+        _ manager: SessionManager,
+        paths: [String],
+        attempts: Int = 10
+    ) async throws -> DirectorySize {
+        guard !paths.isEmpty else { return DirectorySize(bytes: 0, directories: 0, files: 0) }
+        var lastError: Error?
+        for _ in 0..<max(1, attempts) {
+            var taskid = ""
+            do {
+                let raw = try await manager.call(
+                    kind: .file, api: "SYNO.FileStation.DirSize", version: 2, method: "start",
+                    params: ["path": jsonArray(paths)]
+                )
+                let data = (raw as? [String: Any]) ?? [:]
+                taskid = (data["taskid"] as? String) ?? ""
+                guard !taskid.isEmpty else {
+                    lastError = QuickConnectError.badResponse("算目录大小没有回任务号")
+                    continue
+                }
+                return try await awaitDirectorySize(manager, taskid: taskid)
+            } catch let error as SynologyError where error.code == Self.badTaskCode {
+                // 这个任务号是坏的 —— 收掉它，换一次 start 重来。
+                lastError = error
+                if !taskid.isEmpty { await stopDirectorySize(manager, taskid: taskid) }
+            }
+        }
+        throw lastError ?? QuickConnectError.badResponse("算不出这个文件夹的大小")
+    }
+
+    /// 算完了但用户不等了（`DirSize` **有** `stop`，实测回 `success`）。
+    static func stopDirectorySize(_ manager: SessionManager, taskid: String) async {
+        _ = try? await manager.call(
+            kind: .file, api: "SYNO.FileStation.DirSize", version: 2,
+            method: "stop", params: ["taskid": taskid]
+        )
+    }
+
+    /// 🔴 `599` = 「这个任务号查不到」。实测里 `DirSize` 的任务号有一半左右是坏的，
+    /// 而且坏号**一直坏**（连读 12 次全是 599），所以它是重试的判据。
+    static let badTaskCode = 599
+
+    /// 大目录也算得完：`/music` 实测 29 秒，给足一倍余量。
+    static let dirSizeTimeout: TimeInterval = 90
+
+    private static func awaitDirectorySize(
+        _ manager: SessionManager,
+        taskid: String
+    ) async throws -> DirectorySize {
+        let deadline = Date().addingTimeInterval(dirSizeTimeout)
+        while Date() < deadline {
+            let raw = try await manager.call(
+                kind: .file, api: "SYNO.FileStation.DirSize", version: 2,
+                method: "status", params: ["taskid": taskid]
+            )
+            let data = (raw as? [String: Any]) ?? [:]
+            if (data["finished"] as? Bool) == true {
+                return DirectorySize(
+                    bytes: integer(data["total_size"]) ?? 0,
+                    directories: integer(data["num_dir"]).map(Int.init) ?? 0,
+                    files: integer(data["num_file"]).map(Int.init) ?? 0
+                )
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        throw QuickConnectError.badResponse("算目录大小超时（\(Int(dirSizeTimeout)) 秒）")
     }
 
     /// 等一个文件任务落地（`status` 轮询）。`CopyMove` / `Delete` / `DirSize` 都是这个形状。

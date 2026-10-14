@@ -7,8 +7,8 @@ import SwiftUI
 /// 逐级懒加载、子层过长只列前几项）+ 右侧（页头与面包屑 / 工具条 / 上传行 / 表 / 状态栏）。
 ///
 /// 已落地：浏览、排序、分页、缩略图、下载、从曲库「在文件管理中显示」跳过来，
-/// 写操作第一批（多选勾选列 / 新建文件夹 / 重命名 / 删除），以及上传（拖入或选文件、
-/// 撞名三选、进度与取消）。复制 / 移动到与搜索留给下一批 —— 它们各自要选目标弹窗。
+/// 写操作（多选勾选列 / 新建文件夹 / 重命名 / 删除 / 上传 / 复制 / 移动），
+/// 以及搜索（工具条右端那个框，走服务端）与按需算目录大小。
 struct FilesView: View {
     @Environment(AppState.self) private var state
 
@@ -16,6 +16,7 @@ struct FilesView: View {
     /// 从曲库跳过来，都不该把浏览位置丢掉。
     private var model: FileBrowser { state.files }
     private var uploads: UploadQueue { state.uploads }
+    private var search: FileSearch { state.search }
 
     /// 拖入高亮的开关。状态落在 `uploads` 上而不是本视图 —— 冒烟通路要能把它摆出来，
     /// 视图自己的 `@State` 外面够不着。
@@ -76,6 +77,11 @@ struct FilesView: View {
     /// （`perm.acl.write`）。
     private var writable: Bool { model.currentCanWrite }
 
+    /// 浏览态（没在搜索）。搜索态下列表被结果整块替掉，而工具条那些动作按的是
+    /// **浏览列表里那份选中集合** —— 它此刻看不见，所以一律灰掉：点一行结果跳过去，
+    /// 在浏览态里再操作。
+    private var browse: Bool { !search.isActive }
+
     /// 工具条：新建文件夹 / 上传 / 下载 / 复制到… / 移动到… / 重命名 / 删除 —— 已接线的
     /// 动作（原型那一排与顺序一致）。
     ///
@@ -83,36 +89,49 @@ struct FilesView: View {
     /// 记着「粘到哪、粘没粘过」，两个入口各弹一次选目标就都省了（原型注明）。
     private var toolbar: some View {
         HStack(spacing: DmSpace.s8) {
-            action("新建文件夹", icon: "folder-plus", enabled: writable) {
+            action("新建文件夹", icon: "folder-plus", enabled: browse && writable) {
                 state.openFileDialog(.newFolder(in: model.currentPath))
             }
-            action("上传", icon: "upload", enabled: writable) {
+            action("上传", icon: "upload", enabled: browse && writable) {
                 state.pickAndUpload()
             }
             action("下载", icon: "download",
-                   enabled: model.singleSelection?.isDirectory == false) {
+                   enabled: browse && model.singleSelection?.isDirectory == false) {
                 guard let entry = model.singleSelection else { return }
                 Task { await state.download(file: entry) }
             }
             action("复制到…", icon: "copy",
-                   enabled: !model.selection.isEmpty) {
+                   enabled: browse && !model.selection.isEmpty) {
                 state.beginTransfer(.copy)
             }
             action("移动到…", icon: "folder-input",
-                   enabled: writable && !model.selection.isEmpty) {
+                   enabled: browse && writable && !model.selection.isEmpty) {
                 state.beginTransfer(.move)
             }
             action("重命名", icon: "pencil",
-                   enabled: writable && model.singleSelection != nil) {
+                   enabled: browse && writable && model.singleSelection != nil) {
                 guard let entry = model.singleSelection else { return }
                 state.openFileDialog(.rename(entry))
             }
             action("删除", icon: "trash",
-                   enabled: writable && !model.selection.isEmpty) {
+                   enabled: browse && writable && !model.selection.isEmpty) {
                 state.openFileDialog(.delete(model.selectedEntries))
             }
 
             Spacer(minLength: 0)
+
+            // 搜索框在工具条**右端**（原型 `.toolbar .right`，宽 200）。
+            //
+            // 🔴 这一条是**提交式**（回车才搜），不是曲库那种输入即筛：服务端搜一次要
+            // 2–9 秒、还会随机返回假空让你重试，输入即搜会把每个键都变成一次全库遍历。
+            // 点清除钮也是走 `onSubmit`（组件内部清完字就回调），空串在 `FileSearch.run`
+            // 里当「退出搜索」处理。
+            DmSearchField(
+                text: Binding(get: { search.query }, set: { search.query = $0 }),
+                placeholder: "搜索文件",
+                onSubmit: { Task { await state.submitFileSearch() } }
+            )
+            .frame(width: FilesMetrics.searchWidth)
         }
         .padding(.horizontal, DmSpace.s24)
         .padding(.bottom, DmSpace.s12)
@@ -237,7 +256,9 @@ struct FilesView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let message = model.errorMessage {
+        if search.isActive {
+            searchContent
+        } else if let message = model.errorMessage {
             FilesNotice(
                 icon: "triangle-alert",
                 title: "读不到这个目录",
@@ -268,6 +289,47 @@ struct FilesView: View {
         }
     }
 
+    /// 搜索态：进度行 / 空结果 / 结果列表三选一（列表被结果整块替掉）。
+    ///
+    /// 「正在重试」是一等状态、不是错误 —— 服务端会随机返回假空（应答里连 `total`
+    /// 都没有），原型把这一行画成与上传行同款的一条，这里照它落。
+    @ViewBuilder
+    private var searchContent: some View {
+        if search.isRunning {
+            searchRow(icon: "loader", title: "正在搜索…", detail: search.progressNote,
+                      tone: .normal, actionTitle: "停止") {
+                Task { await state.cancelFileSearch() }
+            }
+        } else if search.phase == .failed {
+            searchRow(icon: "triangle-alert", title: "没能搜成",
+                      detail: search.errorMessage ?? "", tone: .danger, actionTitle: "重试") {
+                Task { await state.submitFileSearch() }
+            }
+        } else if search.hits.isEmpty {
+            FilesNotice(
+                icon: "search",
+                title: "没有匹配的项",
+                note: "在「\(search.folder)」里找「\(search.query)」"
+            )
+        } else {
+            SearchHitList(search: search, manager: state.sessionManager) { hit in
+                Task { await state.openSearchHit(hit) }
+            }
+        }
+    }
+
+    /// 搜索进度 / 失败那一行（与上传行同款，`DmUploadRow`）。
+    private func searchRow(icon: String, title: String, detail: String,
+                           tone: DmUploadTone, actionTitle: String,
+                           action: @escaping () -> Void) -> some View {
+        DmUploadRow(icon: icon, title: title, detail: detail, tone: tone) {
+            Button(actionTitle, action: action)
+                .buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(.horizontal, DmSpace.s24)
+        .padding(.bottom, DmSpace.s12)
+    }
+
     /// 拖入时的那一圈提示：主色虚线描边 + `accent-soft` 底（与树上拖动目标的形态同款）。
     /// 整块不允许命中 —— 它只报状态，点击照旧落到下面的行上。
     @ViewBuilder
@@ -294,10 +356,12 @@ struct FilesView: View {
     }
 
     /// 状态栏（原型 `.statusbar`）：上沿发丝、左右 `s24`、上下 `s8`、字 11 / `ink-3`。
-    /// 有选中时报条数与合计大小（目录不计数 —— 它的体积要 `DirSize` 才有，下一批接）。
+    /// 搜索态报结果条数，浏览态报条数与选中合计。
     private var statusBar: some View {
         HStack(spacing: DmSpace.s12) {
-            if model.selection.isEmpty {
+            if search.isActive {
+                Text(search.resultNote)
+            } else if model.selection.isEmpty {
                 Text("共 \(model.displayTotal) 项")
             } else {
                 Text("已选中 \(model.selection.count) 项\(byteSuffix)")
@@ -315,10 +379,21 @@ struct FilesView: View {
         }
     }
 
-    /// 合计大小后缀。只选了目录时是空的 —— 写上「0 B」等于说这些目录是空的。
+    /// 合计大小后缀。三条都可能出现，各自写清楚：
+    ///   · 算出来的合计（文件按列表自带的 `size`，算过的目录按 `DirSize` 的数）；
+    ///   · 「正在计算…」—— `DirSize` 没有 `progress` 字段，给不出百分比；
+    ///   · 「N 个文件夹未计」—— 目录体积**不预先算**（按需触发），没算过的那几个不能
+    ///     装作计进去了。只选了目录时这里就是全部 —— 写「0 B」等于说这些目录是空的。
     private var byteSuffix: String {
+        var parts: [String] = []
         let bytes = model.selectionBytes
-        return bytes > 0 ? " · \(FileEntry.byteText(bytes))" : ""
+        if bytes > 0 { parts.append(FileEntry.byteText(bytes)) }
+        if model.isMeasuring {
+            parts.append("正在计算…")
+        } else if model.unmeasuredDirectoryCount > 0 {
+            parts.append("\(model.unmeasuredDirectoryCount) 个文件夹未计")
+        }
+        return parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
     }
 }
 
@@ -464,6 +539,9 @@ enum FilesMetrics {
     static let glyphSide: CGFloat = 28
     /// 勾选列宽（原型 `colgroup` 首列 32、`td.cbc` 且右侧不留白）。
     static let checkWidth: CGFloat = 32
+    /// 搜索框宽（原型 `.toolbar .right` 里 `.searchbox{width:200px}`）。
+    /// 与选目标弹窗那个不同档：那个在弹窗里占满一行，这个挤在工具条右端。
+    static let searchWidth: CGFloat = 200
 
     /// 内容宽 = `max(视口, 勾选列 + 名称保底 + 固定列之和)`；视口更宽时名称列吸收余量。
     static func contentWidth(viewport: CGFloat) -> CGFloat {
@@ -519,6 +597,9 @@ private struct FilesTable: View {
                             ForEach(model.entries) { entry in
                                 FileRow(
                                     entry: entry,
+                                    // 目录的大小要问 `DirSize`（按需算的那一份），
+                                    // 所以这一格的文案从模型拿 —— 文件是列表自带的 `size`。
+                                    sizeText: model.sizeText(for: entry),
                                     isSelected: model.isSelected(entry.path),
                                     isChecked: model.isSelected(entry.path),
                                     manager: manager
@@ -614,6 +695,9 @@ private struct FilesTable: View {
 
 struct FileRow: View {
     let entry: FileEntry
+    /// 大小那一格的文案。**不由 `entry.sizeText` 直接给** —— 目录的体积是算出来的
+    /// （`FileBrowser.sizeText(for:)`），文件才是列表自带的那一份。
+    let sizeText: String
     let isSelected: Bool
     /// 勾选框状态。与 `isSelected` 目前同源（选中即勾上），分开写是为了让「选中」
     /// 与「勾上」两件事各自可改 —— 表头全选、Cmd 加选都只动其中一侧时不必两边一起动。
@@ -649,7 +733,9 @@ struct FileRow: View {
             .padding(.horizontal, FilesMetrics.padH)
             .modifier(FileColumnWidth(field: .name))
 
-            cell(entry.sizeText, field: .size)
+            // 大小格吃参数不吃 `entry.sizeText` —— 目录的体积在 `sizes` 缓存里，
+            // 条目本身永远没有（`List` 不给目录字节数）。
+            cell(sizeText, field: .size)
             cell(entry.modifiedText, field: .mtime)
         }
         .frame(height: FilesMetrics.rowHeight)
@@ -733,9 +819,85 @@ struct FileGlyph: View {
     }
 }
 
+/// 搜索结果列表。
+///
+/// 与浏览表**不是同一张表**：搜索结果只有 `name` / `path` / `isdir` 三个字段
+/// （`additional` 不认），给不出大小与时间，也就没什么可排的。所以这里走**平铺结果行**
+/// —— 名称 + 右侧「所在位置」，形态与选目标弹窗里那些命中行同款（那一处也是
+/// 「名字 + 它在哪里」）。分页沿用同一行「已载入 N 项，继续载入」。
+///
+/// **行不可多选**：搜索是「找到它」那一步，点一行就跳回浏览态到它所在的位置，
+/// 复制 / 移动 / 删除在那边做（那边才有选中集合）。
+private struct SearchHitList: View {
+    let search: FileSearch
+    let manager: SessionManager?
+    let onOpen: (FileSearchHit) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(search.hits) { hit in
+                    SearchHitRow(hit: hit) { onOpen(hit) }
+                }
+                if search.hasMore {
+                    FileLoadMoreRow(
+                        loaded: search.hits.count,
+                        isLoading: search.isLoadingMore
+                    ) {
+                        Task { await search.loadMore(on: manager) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 搜索结果的一行：图形格（28，与表行同宽所以名字对齐）+ 名称 + 右侧所在位置。
+///
+/// 🔴 图标只分「目录 / 文件」两档：搜索结果里**没有 `additional.type`**，而类型图标
+/// 是按它分派的（不从文件名切扩展名 —— 大小写与多后缀都会判错）。所以文件一律给
+/// 通用 `file`，不猜它是不是音频。
+private struct SearchHitRow: View {
+    let hit: FileSearchHit
+    let onOpen: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            LucideIcon(hit.isDirectory ? "folder" : "file", size: DmIcon.i16)
+                .foregroundColor(hit.isDirectory ? Color.dmInk2 : Color.dmInk3)
+                .frame(width: FilesMetrics.glyphSide, height: FilesMetrics.glyphSide)
+
+            Text(hit.name)
+                .font(.system(size: DmText.t13, weight: .medium))
+                .foregroundColor(ListRowState.primaryForeground(isSelected: false))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: DmSpace.s12)
+
+            // 「在哪儿」这一格：同名的文件到处都是，结果行不写位置等于没找到。
+            Text(DestinationPicker.shortPath(hit.parent))
+                .font(.system(size: DmText.t12))
+                .foregroundColor(ListRowState.secondaryForeground(isSelected: false, hovered: isHovered))
+                .lineLimit(1)
+                .truncationMode(.head)
+        }
+        .padding(.horizontal, FilesMetrics.padH)
+        .frame(height: FilesMetrics.rowHeight)
+        .background(ListRowState.background(isSelected: false, hovered: isHovered))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
+        }
+        .contentShape(Rectangle())
+        .trackingHover($isHovered)
+        .onTapGesture(perform: onOpen)
+    }
+}
+
 /// 分页那一行：滚到底自动要下一页，也可以点。
-private struct FileLoadMoreRow: View {
-    let loaded: Int
+private struct FileLoadMoreRow: View {    let loaded: Int
     let isLoading: Bool
     let onLoad: () -> Void
 

@@ -133,10 +133,11 @@ struct RootView: View {
     /// 文件列表的右键菜单层：与歌曲菜单同构（一层透明遮罩接「点别处关闭」，菜单卡按
     /// 指针摆、越界收回窗口内）。
     ///
-    /// 项按**选中集合**出：单选的文件多一条「下载」、单选多一条「重命名」；「复制到…」
-    /// 「移动到…」按选中集合生效，所以单选多选都在（原型「目录行 / 文件行」那一版就是
-    /// 这几项）。移动要来源目录可写，不可写时那一条不出现（与工具条同一个判据）；
-    /// 复制不挑来源。
+    /// 项按**选中集合**出：单选的文件多一条「下载」、单选的目录多一条「计算大小」
+    /// （正在算时换成「取消计算」、算过换成「重新计算大小」）；单选多一条「重命名」。
+    /// 「复制到…」「移动到…」按选中集合生效，所以单选多选都在（原型「目录行 / 文件行」
+    /// 那一版就是这几项）。移动要来源目录可写，不可写时那一条不出现（与工具条同一个
+    /// 判据）；复制不挑来源。
     @ViewBuilder
     private var fileMenuLayer: some View {
         GeometryReader { geo in
@@ -170,6 +171,22 @@ struct RootView: View {
                             DmMenuRow(title: "重命名", icon: "pencil") {
                                 state.closeFileMenu()
                                 state.openFileDialog(.rename(entry))
+                            }
+                            // 目录的体积只能问 `DirSize`（慢、且要重试），所以恒是
+                            // 用户点了才算；这一行按状态换字：没算过 / 正在算 / 算过了。
+                            if entry.isDirectory {
+                                if state.files.isMeasuring {
+                                    DmMenuRow(title: "取消计算", icon: "circle-x") {
+                                        state.closeFileMenu()
+                                        state.cancelFileMeasure()
+                                    }
+                                } else {
+                                    let measured = state.files.sizes[entry.path] != nil
+                                    DmMenuRow(title: measured ? "重新计算大小" : "计算大小", icon: "ruler") {
+                                        state.closeFileMenu()
+                                        Task { await state.measureFileSelection() }
+                                    }
+                                }
                             }
                         }
                         DmMenuRow(title: FileMenu.deleteTitle(request.entries), icon: "trash") {
@@ -205,8 +222,10 @@ enum SongMenu {
 
 /// 文件列表右键菜单的摆位与行数。宽与项高与歌曲菜单同档。
 ///
-/// 行数要按实际出的项算：**复制到… / 移动到… / 删除**三条恒在，单选加「重命名」，
-/// 单选的文件再加「下载」。高估了，菜单会被窗口底边顶回来一截；低估了会被切掉底。
+/// 行数要按实际出的项算：**复制到… / 移动到… / 删除**三条恒在；单选再多**两条**
+/// ——「重命名」，以及按类型二选一的「下载」（文件）或「计算大小 / 取消计算 /
+/// 重新计算大小」（目录）。所以单选恒是 5 行、多选 3 行，不再分文件与目录。
+/// 高估了，菜单会被窗口底边顶回来一截；低估了会被切掉底。
 enum FileMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
@@ -219,11 +238,7 @@ enum FileMenu {
     /// 「移动到…」在目录不可写时不出现 —— 这一条按**乐观**计（多算一行只是往上挪
     /// 几个点），省得为一个边角把判据传两遍。
     static func rowCount(_ entries: [FileEntry]) -> Int {
-        var rows = 3
-        guard entries.count == 1 else { return rows }
-        rows += 1
-        if !entries[0].isDirectory { rows += 1 }
-        return rows
+        entries.count == 1 ? 5 : 3
     }
 
     /// 删除那一项的文案：多项带个数（原型「删除（3 个）」）。

@@ -363,9 +363,70 @@ final class FileBrowser {
         return picked.count == 1 ? picked[0] : nil
     }
 
-    /// 选中项的字节合计（目录记 0，见 `FileEntry.byteCount`）。
+    // MARK: - 目录大小
+    //
+    // 目录的体积要问 `DirSize`，而它：① 慢（`/music` 实测 29 秒）；② 不稳（任务号一半
+    // 左右是坏的，要重试，见 `FileStation.directorySize`）；③ **没有 progress 字段**。
+    // 三条加起来决定了界面上的做法：**只按需算、只算一个**。
+    //
+    // 「只算一个」还有一条接口理由：`path` 给多条时服务端只回**一个合计值**，分不到
+    // 每一条头上（实测两条路径返回的是两者之和）。要逐条给就得逐条起任务，选中一多
+    // 就翻几倍地发请求 —— 而「这个文件夹多大」本来就是一次问一个的事。
+
+    /// 算过的目录体积。**只在本次会话里留着** —— 目录内容随时在变，落盘就成了假数。
+    private(set) var sizes: [String: DirectorySize] = [:]
+    /// 正在算的那些（只有一个）。
+    private(set) var measuring: Set<String> = []
+    /// 上一次没算成的原因（状态栏与 Toast 读它）。
+    private(set) var measureError: String?
+
+    /// 大小列那一格的文字：文件用列表自带的 `size`，目录用算出来的那份，没算过留空
+    /// —— 写「0 B」等于说这个目录是空的。
+    func sizeText(for entry: FileEntry) -> String {
+        if !entry.isDirectory { return entry.sizeText }
+        return sizes[entry.path]?.text ?? ""
+    }
+
+    var isMeasuring: Bool { !measuring.isEmpty }
+
+    /// 能不能算大小：**选中恰好一个、还没算过的目录**，且当前没有别的计算在跑。
+    var canMeasureSelection: Bool {
+        guard measuring.isEmpty, let only = singleSelection else { return false }
+        return only.isDirectory && sizes[only.path] == nil
+    }
+
+    /// 算选中那一个目录的体积（`DirSize`，带重试）。
+    ///
+    /// 计算期间不在界面上挡任何东西：状态栏文案换成「正在计算…」，
+    /// 右键菜单那一条换成「取消计算」（`DirSize` 有 `stop`）。
+    func measureSelection(on manager: SessionManager?) async {
+        guard let manager, let only = singleSelection, only.isDirectory else { return }
+        guard measuring.isEmpty else { return }
+        measuring = [only.path]
+        measureError = nil
+        defer { measuring.removeAll() }
+        do {
+            sizes[only.path] = try await FileStation.directorySize(manager, paths: [only.path])
+        } catch {
+            measureError = error.localizedDescription
+        }
+    }
+
+    /// 用户不等了。**不删已经算过的**，只是不再等这一条。
+    func cancelMeasure() {
+        measuring.removeAll()
+    }
+
+    /// 选中项的字节合计：文件按 `size`，目录按**算过的那份**（没算过的不计）。
     var selectionBytes: Int64 {
-        selectedEntries.reduce(0) { $0 + $1.byteCount }
+        selectedEntries.reduce(0) { total, entry in
+            total + (entry.isDirectory ? (sizes[entry.path]?.bytes ?? 0) : entry.byteCount)
+        }
+    }
+
+    /// 选中里还有几个目录没算过大小 —— 状态栏要写明「这几个没计进去」。
+    var unmeasuredDirectoryCount: Int {
+        selectedEntries.filter { $0.isDirectory && sizes[$0.path] == nil }.count
     }
 
     /// 把选中集里已经不在这份列表里的路径清掉。刷新、翻页、切排序之后调用 ——
@@ -411,9 +472,10 @@ final class FileBrowser {
         return "/" + parts.dropLast().joined(separator: "/")
     }
 
-    /// 任意路径的上一级。选目标弹窗的筛选结果要显示「这一条在哪儿」用它 ——
+    /// 任意路径的上一级。选目标弹窗的筛选结果、搜索结果行都要显示「这一条在哪儿」用它 ——
     /// 与 `parentPath` 同一个算法，只是不吃实例状态。
-    static func parent(of path: String) -> String {
+    /// `nonisolated`：纯字符串运算，`FileSearchHit`（不在主线程隔离里）也要调它。
+    nonisolated static func parent(of path: String) -> String {
         let parts = path.split(separator: "/")
         guard parts.count > 1 else { return "/" }
         return "/" + parts.dropLast().joined(separator: "/")

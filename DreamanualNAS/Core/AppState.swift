@@ -81,6 +81,9 @@ final class AppState {
     let uploads = UploadQueue()
     /// 复制 / 移动的批次状态（模式 / 来源 / 撞名判定）+ 选目标弹窗。归属同上。
     let transfers = FileTransfer()
+    /// 文件管理页的搜索状态（关键词 / 重试次数 / 结果 / 分页）。归属同上 ——
+    /// 换模块再回来，结果还在；冒烟通路也要能在视图之外把它摆到各个状态。
+    let search = FileSearch()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -279,6 +282,64 @@ final class AppState {
         }
         let ext = StreamLoader.fileExtension(of: song)
         return ext.isEmpty ? base : "\(base).\(ext)"
+    }
+
+    // MARK: - 文件管理 · 搜索
+
+    /// 搜索框回车（或清除钮）进来的那条路。
+    ///
+    /// 范围 = **当前所在目录往下递归** —— 文件管理里「搜索」是指着这一层找东西，
+    /// 不是全库找（全库那种留给选目标弹窗的客户端筛选）。空串在 `FileSearch.run`
+    /// 里当「退出搜索」处理。
+    func submitFileSearch() async {
+        await search.run(search.query, in: files.currentPath, on: sessionManager)
+    }
+
+    /// 搜索进度行上那个「停止」。
+    func cancelFileSearch() async {
+        await search.clear(on: sessionManager)
+    }
+
+    /// 点一行搜索结果：跳回浏览态，落到它所在的位置上。
+    ///
+    /// 这是搜索结果行**唯一**的动作（结果行不可多选）：搜索负责「找到」，复制 / 移动 /
+    /// 删除在浏览态做 —— 那边才有选中集合。目录直接进去；文件进它所在目录并**选中它**，
+    /// 于是下载 / 重命名 / 删除接着就能用。
+    func openSearchHit(_ hit: FileSearchHit) async {
+        let manager = sessionManager
+        await search.clear(on: manager)
+        if hit.isDirectory {
+            await files.open(hit.path, on: manager)
+            return
+        }
+        let folder = hit.parent
+        await files.open(folder, on: manager)
+        if let entry = files.entries.first(where: { $0.path == hit.path }) {
+            files.select(entry)
+        }
+    }
+
+    // MARK: - 文件管理 · 目录大小
+
+    /// 算选中那个目录的体积（右键菜单那一项）。
+    ///
+    /// `DirSize` 慢且不稳（一次问一个目录，内部带重试），所以不在界面上挡任何东西：
+    /// 状态栏会显示「正在计算…」，算完数值进那一行的大小列。失败给一条提示，
+    /// 不弹窗 —— 它是顺手问一句的事。
+    func measureFileSelection() async {
+        guard let manager = sessionManager else { return }
+        await files.measureSelection(on: manager)
+        if let message = files.measureError {
+            showToast(message, .err)
+        } else if let entry = files.singleSelection,
+                  let size = files.sizes[entry.path] {
+            showToast("\(entry.name) · \(size.text)（\(size.detailText)）", .ok)
+        }
+    }
+
+    /// 用户不等了（状态栏 / 菜单里那一项）。
+    func cancelFileMeasure() {
+        files.cancelMeasure()
     }
 
     // MARK: - 在文件管理中显示
@@ -680,6 +741,12 @@ final class AppState {
             // 复制 / 移动的撞名弹窗 Esc 退回选目标（换个目录再试）；选目标弹窗 Esc 整个收掉。
             if transfers.conflict != nil { transfers.clearConflict(); return true }
             if transfers.isOpen { cancelTransfer(); return true }
+            // 搜索态：Esc 退出搜索回浏览态（结果行只负责「找到」，跳回去才谈得上操作）。
+            // 收尾要调接口（stop + clean），所以甩进一个 Task —— `handleKey` 是同步的。
+            if search.isActive {
+                Task { await cancelFileSearch() }
+                return true
+            }
         }
         let modifiers = flags.intersection(.deviceIndependentFlagsMask)
         // Cmd+A：文件管理页全选当前列表。这条放在「⌘ 组合一律放行」**之前** ——
@@ -1068,6 +1135,14 @@ final class AppState {
     ///   · `cmcheck` 在**自建沙箱**里跑一遍复制 + 移动，回读核对后拆掉沙箱；
     ///   · `cmdialog` 搭一个注定撞名的沙箱、把撞名弹窗摆出来停住（沙箱留给 `cmclean` 收）；
     ///   · `cmclean` 把 `cmdialog` 留下的沙箱收干净；
+    ///   · `search=<字>` 提交一次搜索（**真的等它跑完**，含假空重试），把结局与用掉几次
+    ///     `start` 报出来；
+    ///   · `searchbg=<字>` 同上但**不等结果** —— 用来截「正在搜索 / 正在重试」那一屏；
+    ///   · `searchmore` 拉搜索结果下一页（任务还活着，走偏移取）；
+    ///   · `searchhit=<序号>` 点第 N 条结果（1 起数），走「跳回浏览态」那条接线；
+    ///   · `searchclear` 退出搜索（与 Esc / 清除钮同一条路）；
+    ///   · `dirsize[=<文件夹名>]` 选一条目录并算它的体积（右键菜单那一项），
+    ///     不给名字取列表里第一条目录；
     ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
     func smokeFiles(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
@@ -1161,6 +1236,28 @@ final class AppState {
                 await smokeCopyMoveDialog(manager)
             } else if token == "cmclean" {
                 await smokeCopyMoveClean(manager)
+            } else if token.hasPrefix("searchbg=") {
+                // 不等它跑完：用来截「正在搜索 / 正在重试」那一屏，收尾用 searchclear。
+                search.query = String(token.dropFirst("searchbg=".count))
+                Task { await submitFileSearch() }
+                NSLog("[files] 搜索「%@」已发出（不等结果，当场是「%@」）",
+                      search.query, search.progressNote)
+            } else if token.hasPrefix("search=") {
+                await smokeSearch(String(token.dropFirst("search=".count)))
+            } else if token == "searchmore" {
+                await search.loadMore(on: manager)
+                NSLog("[files] 搜索翻页 → 手上 %@ 条 · total %@ · 还有更多 %@",
+                      String(search.hits.count), String(search.total),
+                      search.hasMore ? "是" : "否")
+            } else if token.hasPrefix("searchhit=") {
+                await smokeSearchHit(String(token.dropFirst("searchhit=".count)))
+            } else if token == "searchclear" {
+                await cancelFileSearch()
+                NSLog("[files] 退出搜索 → 搜索态 %@ · 当前 %@",
+                      search.isActive ? "还在" : "已退", files.currentPath)
+            } else if token == "dirsize" || token.hasPrefix("dirsize=") {
+                await smokeDirSize(token.hasPrefix("dirsize=")
+                    ? String(token.dropFirst("dirsize=".count)) : nil)
             } else {
                 NSLog("[files] 认不出指令「%@」", token)
             }
@@ -1176,6 +1273,74 @@ final class AppState {
         NSLog("[files] 前八条 %@", files.entries.prefix(8)
             .map { "\($0.name)\($0.isDirectory ? "/" : "")" }.joined(separator: " / "))
         NSLog("[files] 树前十行 %@", files.treeRows.prefix(10).map(\.name).joined(separator: " / "))
+        if search.isActive {
+            NSLog("[files] 搜索态「%@」→ %@ · 用掉 %@ 次 start", search.query,
+                  search.resultNote, String(search.attempt))
+        }
+    }
+
+    /// 冒烟用：提交一次搜索，等它跑到底，把三种结局（出数 / 真零 / 重试耗尽）都报出来。
+    ///
+    /// 这条**真的等**（假空最坏十几次、每次约 1 秒），因为「重试」正是这一步要核对的东西 ——
+    /// 界面上那句「第 N 次 / 上限 12 次」在这里看得出来。
+    private func smokeSearch(_ keyword: String) async {
+        search.query = keyword
+        let started = Date()
+        await submitFileSearch()
+        let cost = String(format: "%.1f", Date().timeIntervalSince(started))
+        NSLog("[files] 搜索「%@」@ %@ → %@ · 用掉 %@ 次 start · 耗时 %@ 秒",
+              keyword, search.folder, search.resultNote, String(search.attempt), cost)
+        for (index, hit) in search.hits.prefix(6).enumerated() {
+            NSLog("[files]   结果 %@. %@ %@",
+                  String(index + 1), hit.isDirectory ? "目录" : "文件", hit.path)
+        }
+    }
+
+    /// 冒烟用：点第 N 条结果（1 起数），走「跳回浏览态、落到它所在位置」那条接线。
+    private func smokeSearchHit(_ text: String) async {
+        guard let index = Int(text), index >= 1, search.hits.count >= index else {
+            NSLog("[files] 结果里没有第「%@」条（手上 %@ 条）", text, String(search.hits.count))
+            return
+        }
+        let hit = search.hits[index - 1]
+        await openSearchHit(hit)
+        NSLog("[files] 点结果 %@（%@ %@）→ 当前 %@ · 选中 %@ 项 · 搜索态 %@",
+              text, hit.isDirectory ? "目录" : "文件", hit.path, files.currentPath,
+              String(files.selection.count), search.isActive ? "还在" : "已退")
+    }
+
+    /// 冒烟用：挑一条目录算体积（右键菜单里那一项）。
+    ///
+    /// 不给名字就取列表里第一条目录。真机上 AI 点不了右键菜单，只能走模型层。
+    /// 会说清楚「用的是哪条路」—— 与菜单项同一个入口 `measureFileSelection`。
+    private func smokeDirSize(_ name: String?) async {
+        let target: FileEntry?
+        if let name {
+            target = files.entries.first {
+                ($0.name == name || $0.name.hasPrefix(name)) && $0.isDirectory
+            }
+        } else {
+            target = files.entries.first(where: \.isDirectory)
+        }
+        guard let entry = target else {
+            NSLog("[files] 当前目录里没有要算的文件夹（%@）", name ?? "没给名字")
+            return
+        }
+        files.select(entry)
+        NSLog("[files] 算「%@」体积（%@）…", entry.name, files.canMeasureSelection ? "可以算" : "入口是灰的")
+        let started = Date()
+        await measureFileSelection()
+        let cost = String(format: "%.1f", Date().timeIntervalSince(started))
+        if let size = files.sizes[entry.path] {
+            NSLog("[files] 算「%@」体积：%@（%@）· 耗时 %@ 秒 · 表里那一格显示「%@」",
+                  entry.name, size.text, size.detailText, cost, files.sizeText(for: entry))
+        } else {
+            NSLog("[files] 算「%@」体积没成（%@）· 耗时 %@ 秒",
+                  entry.name, files.measureError ?? "没说原因", cost)
+        }
+        NSLog("[files] 选中合计 %@ 字节 · 没计的文件夹 %@ 个 · 还在算 %@",
+              String(files.selectionBytes), String(files.unmeasuredDirectoryCount),
+              files.isMeasuring ? "是" : "否")
     }
 
     /// 冒烟用：按名字勾上一条（前缀匹配，省得把长文件名整个打出来）。
