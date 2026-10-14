@@ -76,6 +76,9 @@ final class AppState {
     /// 文件管理页的状态（共享夹 / 目录树 / 当前目录 / 排序 / 选中 / 分页）。
     /// 与曲库同一归属：换模块、从曲库跳过来都不该把浏览位置丢掉。
     let files = FileBrowser()
+    /// 上传队列（进度 / 取消 / 撞名三选都在里面）。与文件页同一归属 —— 传着东西
+    /// 切去听歌再切回来，进度得还在。
+    let uploads = UploadQueue()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -410,6 +413,78 @@ final class AppState {
         }
     }
 
+    // MARK: - 文件管理 · 上传
+
+    /// 打开系统的选文件面板，挑完就传到当前目录。
+    ///
+    /// 面板是 AppKit 的模态（`runModal`）—— 它就是系统那一套，与第八节的自绘弹窗
+    /// 不冲突：自绘弹窗管的是「应用自己的界面」，选本机文件这件事没有别的做法。
+    /// 文件与文件夹都能选：文件夹按原型支持（里面的每个文件各自成一项）。
+    func pickAndUpload() {
+        guard sessionManager != nil else { return }
+        guard files.currentCanWrite else {
+            showToast("这个目录不可写，换个位置再传", .err)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "上传"
+        panel.message = "选文件或文件夹，传到「\(files.currentPath)」"
+        guard panel.runModal() == .OK else { return }
+        upload(urls: panel.urls)
+    }
+
+    /// 开传。撞名与否由队列自己先查，冲突时它会停下来问用户。
+    ///
+    /// 列表**只有装满整层才算数**时才顺手交给队列：界面上那张表是一页（1000 项），
+    /// `/music` 有 3622 项 —— 拿首页当全部会把首页之外的撞名全漏掉（2026-10-14
+    /// 冒烟抓到的真问题：测试件落在第 4 页，撞名检查没看见，直接传了第二份上去）。
+    /// 装不下就让队列自己去拉满一层，多一趟往返换判定准确。
+    func upload(urls: [URL]) {
+        guard let manager = sessionManager, !urls.isEmpty else { return }
+        guard files.currentCanWrite else {
+            showToast("这个目录不可写，换个位置再传", .err)
+            return
+        }
+        uploads.onBatchEnd = { [weak self] in await self?.finishUploadBatch() }
+        let target = files.currentPath
+        let complete = files.entries.count >= files.total ? files.entries : nil
+        Task {
+            await uploads.prepare(urls: urls, target: target,
+                                  knownEntries: target == files.currentPath ? complete : nil,
+                                  manager: manager)
+        }
+    }
+
+    /// 冲突弹窗上的一票。
+    func resolveUploadConflict(_ choice: UploadQueue.ConflictChoice, applyToAll: Bool) {
+        guard let manager = sessionManager else { return }
+        Task { await uploads.resolve(choice, applyToAll: applyToAll, manager: manager) }
+    }
+
+    /// 取消这一批（正在传的那一条断掉，剩下的不再传）。
+    func cancelUploads() {
+        guard uploads.items.contains(where: { $0.state == .uploading }) || uploads.conflict != nil else { return }
+        uploads.cancel()
+    }
+
+    /// 一批传完（或停下）之后：收掉结束的行、重拉列表、报一句结果。
+    ///
+    /// 收尾提示只报「传完了多少」——失败那一项在列表上方那一行里写着原因，
+    /// 再弹一条一样的提示只是噪音。
+    func finishUploadBatch() async {
+        guard let manager = sessionManager else { return }
+        let done = uploads.items.filter { $0.state == .done && !$0.isDirectory }.count
+        let failed = uploads.items.contains { if case .failed = $0.state { return true } else { return false } }
+        uploads.dismissFinished()
+        await files.refresh(manager, username: username)
+        if !failed, done > 0 {
+            showToast("已上传 \(done) 项", .ok)
+        }
+    }
+
     // MARK: - 文件右键菜单
 
     /// 文件列表的右键菜单请求。与歌曲菜单同一归属（挂全局）—— 菜单要浮在整个窗口
@@ -467,6 +542,8 @@ final class AppState {
         if code == 53 {
             if songMenu != nil { closeSongMenu(); return true }
             if fileMenu != nil { closeFileMenu(); return true }
+            // 冲突弹窗也是模态的，Esc 一样要能收 —— 收掉等于取消这一批上传。
+            if uploads.conflict != nil { cancelUploads(); return true }
         }
         let modifiers = flags.intersection(.deviceIndependentFlagsMask)
         // Cmd+A：文件管理页全选当前列表。这条放在「⌘ 组合一律放行」**之前** ——
@@ -842,6 +919,11 @@ final class AppState {
     ///   · `dialog=newfolder|rename|delete` 把某一张写操作弹窗摆出来（截图核对形态）；
     ///   · `menu` 摆出文件右键菜单；
     ///   · `writecheck` 在**自建沙箱**里跑一遍建夹 → 改名 → 删除，最后拆掉沙箱；
+    ///   · `upload=<本机路径>` 把一个本机文件 / 文件夹传到当前目录（走界面上同一条路），
+    ///     每秒打一次进度，撞名会停下等用户；
+    ///   · `conflict[=<名字>]` 造一个与当前目录某项同名的临时文件丢进队列，把撞名弹窗摆出来；
+    ///   · `drop` 摆出拖入高亮（真拖拽 AI 发不出来，只能这么看形态）；
+    ///   · `cancelcheck` 传一个 3 MB 测试件、1.5 秒后取消，核对队列状态与现场清理；
     ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
     func smokeFiles(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
@@ -897,6 +979,17 @@ final class AppState {
                 smokeFileMenu()
             } else if token == "writecheck" {
                 await smokeWriteCheck(manager)
+            } else if token.hasPrefix("upload=") {
+                await smokeUpload(String(token.dropFirst("upload=".count)))
+            } else if token == "conflict" || token.hasPrefix("conflict=") {
+                let name = token.hasPrefix("conflict=")
+                    ? String(token.dropFirst("conflict=".count)) : nil
+                await smokeConflict(name)
+            } else if token == "drop" {
+                uploads.dropTargeted = true
+                NSLog("[files] 摆出拖入高亮（传到 %@）", files.currentPath)
+            } else if token == "cancelcheck" {
+                await smokeCancelCheck(manager)
             } else {
                 NSLog("[files] 认不出指令「%@」", token)
             }
@@ -1009,6 +1102,174 @@ final class AppState {
         } else {
             NSLog("[files] 写自检 5 拆沙箱 → ✗ 列表里找不到沙箱（自己去看一眼）")
         }
+    }
+
+    /// 「上传一趟走完」的冒烟：把一个本机文件（或文件夹）传到当前目录，每秒打一次进度。
+    ///
+    /// 走的是与界面同一条动作（`upload(urls:)` → 队列 → `FileStation.upload`）——
+    /// 真机上「点上传按钮选文件」这一步 AI 做不了（面板点不了），能验的是它之后那一整条。
+    /// 撞名时队列会停下来问用户，这里照实报出来。
+    private func smokeUpload(_ path: String) async {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) else {
+            NSLog("[files] 上传自检：本机没有 %@", path)
+            return
+        }
+        // 先清掉上次跑剩的测试件 —— 上一趟若在核对前被打断就会留下，这一趟一进来
+        // 就撞名停下来（第一次跑到这一步就是这么发现的：整层查重生效了）。
+        if let manager = sessionManager,
+           let layer = try? await FileStation.list(
+               manager, path: files.currentPath, sort: FileStation.defaultSort,
+               limit: FileStation.treeFetchLimit
+           ).entries {
+            let stale = layer.filter { $0.name.hasPrefix("DreamanualUploadSmoke") }
+            if !stale.isEmpty {
+                _ = try? await FileStation.delete(manager, paths: stale.map(\.path))
+                NSLog("[files] 上传自检：先清掉上次剩的 %@ 个测试件", String(stale.count))
+                await files.refresh(manager, username: username)
+            }
+        }
+        NSLog("[files] 上传自检：把「%@」传到 %@", url.lastPathComponent, files.currentPath)
+        upload(urls: [url])
+
+        // 摊平与查撞名都要时间，队列还没动起来时别急着判结束 ——
+        // 判据是「摊出来过 + 眼下没有项在等或在传」。
+        var started = false
+        for tick in 1...90 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if uploads.conflict != nil {
+                NSLog("[files] 上传自检：撞名，停下来问用户（目标已有「%@」）",
+                      uploads.conflict?.existing.name ?? "")
+                return
+            }
+            if !uploads.items.isEmpty { started = true }
+            let waiting = uploads.items.contains { $0.state == .waiting || $0.state == .uploading }
+            if let item = uploads.headline {
+                let total = item.expected > 0 ? item.expected : item.byteCount
+                let percent = total > 0
+                    ? String(format: "%.1f%%", Double(item.sent) / Double(total) * 100)
+                    : "—"
+                NSLog("[files] 上传自检 第 %@ 秒 · %@ · %@ · 已传 %@ / %@ · %@ · 速率 %@ B/s · 队列 %@ 项",
+                      String(tick), item.name, Self.uploadStateText(item.state), String(item.sent),
+                      String(total), percent, String(Int(item.rate)),
+                      String(uploads.queuedCount))
+            }
+            if started, !waiting { break }
+        }
+
+        // 收尾核对与清理。**核对必须看整层**（`List` 拉满 5000），不能看界面上那一页：
+        // `/music` 有 3600 多项，测试件按名字排在第 4 页，翻首页会报假的「没落地」。
+        // 列表刷新也要时间，刚传完就查同样是假阴性。
+        guard let manager = sessionManager else { return }
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let layer = (try? await FileStation.list(
+            manager, path: files.currentPath, sort: FileStation.defaultSort,
+            limit: FileStation.treeFetchLimit
+        ).entries) ?? []
+        let strays = layer.filter { $0.name.hasPrefix("DreamanualUploadSmoke") }
+        NSLog("[files] 上传自检 → %@（整层 %@ 项里 %@ 个测试件）",
+              strays.isEmpty ? "✗ 没看到落地" : "✓ 已落地",
+              String(layer.count), String(strays.count))
+
+        // 传的是文件夹就再往里看一层：层级对不对、**空目录建出来了没有**。
+        let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        if isFolder, let root = strays.first {
+            if let top = try? await FileStation.list(
+                manager, path: root.path, sort: FileStation.defaultSort, limit: 200
+            ).entries {
+                NSLog("[files] 上传自检 远端第一层 → %@", Self.treeLine(top))
+                for dir in top.filter(\.isDirectory) {
+                    if let kids = try? await FileStation.list(
+                        manager, path: dir.path, sort: FileStation.defaultSort, limit: 200
+                    ).entries {
+                        NSLog("[files] 上传自检 远端 %@ → %@", dir.name, Self.treeLine(kids))
+                    }
+                }
+            }
+        }
+        await files.refresh(manager, username: username)
+        guard !strays.isEmpty else { return }
+        do {
+            let task = try await FileStation.delete(manager, paths: strays.map(\.path))
+            NSLog("[files] 上传自检 收尾 → %@", task.failed ? "✗ 没删掉：\(task.failureText)" : "✓ 已清干净")
+            await files.refresh(manager, username: username)
+        } catch {
+            NSLog("[files] 上传自检 收尾 → ✗ \(error.localizedDescription)")
+        }
+    }
+
+    /// 「撞名弹窗」的冒烟：造一个与当前目录某项同名的临时文件丢进队列 ——
+    /// 队列自己查重名、自己停下来问（弹窗形态只能这么看）。
+    private func smokeConflict(_ name: String?) async {
+        let existing = files.entries.first { $0.isDirectory == false } ?? files.entries.first
+        guard let target = (name?.isEmpty == false ? name : existing?.name) else {
+            NSLog("[files] 冲突自检：列表是空的，造不出撞名")
+            return
+        }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(target)
+        try? Data("Dreamanual 撞名演示".utf8).write(to: temp)
+        NSLog("[files] 冲突自检：造「%@」传到 %@（那里已有同名项）", target, files.currentPath)
+        upload(urls: [temp])
+        try? await Task.sleep(nanoseconds: 4 * 1_000_000_000)
+        if let prompt = uploads.conflict {
+            NSLog("[files] 冲突自检 → ✓ 弹窗已摆出：目标已有「%@」· 保留两者会叫「%@」· 剩余 %@ 项",
+                  prompt.existing.name, prompt.keptName, String(prompt.remaining))
+        } else {
+            NSLog("[files] 冲突自检 → ✗ 没有停下来问（队列没识别出撞名？）")
+        }
+    }
+
+    private static func uploadStateText(_ state: UploadQueue.State) -> String {
+        switch state {
+        case .waiting: return "等待"
+        case .uploading: return "上传中"
+        case .done: return "已完成"
+        case .skipped: return "已跳过"
+        case .failed(let reason): return "失败（\(reason)）"
+        }
+    }
+
+    /// 冒烟日志用的一行树：`名字/` 表示目录。
+    private static func treeLine(_ entries: [FileEntry]) -> String {
+        entries.isEmpty
+            ? "（空）"
+            : entries.map { "\($0.name)\($0.isDirectory ? "/" : "")" }.joined(separator: " / ")
+    }
+
+    /// 「取消」的冒烟：传一个 3 MB 的测试件，1.5 秒后取消，核对队列状态并清理现场。
+    ///
+    /// 客户端断开后服务端**可能已经收到整份**（取消只是不再等应答），所以现场
+    /// 一律清一遍 —— 半截文件是可能存在的。
+    private func smokeCancelCheck(_ manager: SessionManager) async {
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DreamanualUploadSmoke_\(Int(Date().timeIntervalSince1970)).bin")
+        try? Data(count: 3 * 1024 * 1024).write(to: temp)
+        NSLog("[files] 取消自检：造 3 MB 测试件开始传")
+        upload(urls: [temp])
+        // 等真发出去了再取消 —— 摊平与查撞名也要一秒多，那之前取消等于没测到中断。
+        for _ in 1...20 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if (uploads.items.first?.sent ?? 0) > 0 { break }
+        }
+        let before = uploads.items.first
+        NSLog("[files] 取消自检：已传 %@ 字节（%@），现在取消",
+              String(before?.sent ?? 0), Self.uploadStateText(before?.state ?? .waiting))
+        uploads.cancel()
+        NSLog("[files] 取消自检 → 队列状态 %@",
+              uploads.items.map { Self.uploadStateText($0.state) }.joined(separator: ", "))
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let layer = (try? await FileStation.list(
+            manager, path: files.currentPath, sort: FileStation.defaultSort,
+            limit: FileStation.treeFetchLimit
+        ).entries) ?? []
+        let strays = layer.filter { $0.name.hasPrefix("DreamanualUploadSmoke") }
+        if !strays.isEmpty {
+            _ = try? await FileStation.delete(manager, paths: strays.map(\.path))
+            NSLog("[files] 取消自检 收尾 → 清掉 %@ 个测试件（服务端留了半截）", String(strays.count))
+        } else {
+            NSLog("[files] 取消自检 收尾 → 现场干净（服务端没留下半截文件）")
+        }
+        await files.refresh(manager, username: username)
     }
 
     /// 「在文件管理中显示」那一条接线的冒烟：搜一首歌，按它的真实目录跳过去。

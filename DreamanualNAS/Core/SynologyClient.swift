@@ -258,6 +258,125 @@ final class SynologyClient: @unchecked Sendable {
         )
     }
 
+    /// multipart 上传一个文件，走 `SYNO.FileStation.Upload`。
+    ///
+    /// 六条硬约束全是实测出来的（`docs/接口结论.md` 第七节第 1 条末，15 种写法对照里
+    /// 8 通 7 败），违背任一条都回 `401`、而且服务端**先等 10 秒再回**，排查时容易
+    /// 误判成网络慢：
+    ///
+    ///   1. 目标目录 `path` 必须放 **multipart body**，放 query 回 `401`；
+    ///   2. 每个 part 不能带 `Content-Length` 头（带 → `401`）；
+    ///   3. 顶层 `Content-Type` 不能带 `; charset=utf-8`（带 → `401`）；
+    ///   4. `X-SYNO-TOKEN` 必须带（不带 → `119`），放 query 的 `SynoToken` 也认；
+    ///   5. `_sid` 只放 query（当 body 字段给 → `119`）；
+    ///   6. **段序是硬约束：字段在前、`file` 段最后** —— 反过来服务端根本不回响应，
+    ///      客户端一直等到自己超时。
+    ///
+    /// 身先落到临时文件再交给 `upload(for:fromFile:)`：几十 MB 的音频拼成一个
+    /// `Data` 在内存里多一份，而且只有走 file 才有逐段进度回调。
+    ///
+    /// - Parameter progress: `(已发字节, 总字节)`。回调在 URLSession 的代理队列上，
+    ///   调用方自己往主线程跳。
+    @discardableResult
+    func upload(
+        path: String,
+        query: [String: String],
+        fields: [String: String],
+        credentials: SynologyCredentials,
+        fileName: String,
+        fileURL: URL,
+        progress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws -> Any {
+        let boundary = "----DreamanualUpload\(UUID().uuidString)"
+        let bodyURL = try Self.multipartBody(
+            boundary: boundary, fields: fields, fileName: fileName, fileURL: fileURL
+        )
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+        var queryFields = query
+        queryFields["_sid"] = credentials.sid
+        var comps = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        comps?.percentEncodedQuery = Self.formEncode(queryFields)
+        guard let url = comps?.url else {
+            throw QuickConnectError.badResponse("拼不出 URL：\(path)")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(credentials.token, forHTTPHeaderField: "X-SYNO-TOKEN")
+
+        let relay = UploadProgressRelay(progress: progress)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.upload(for: request, fromFile: bodyURL, delegate: relay)
+        } catch {
+            // 取消是用户主动的，照原样抛上去 —— 队列要把它与「连接断了」分开报。
+            if (error as? URLError)?.code == .cancelled { throw error }
+            throw QuickConnectError.network(error.localizedDescription)
+        }
+        return try decode(
+            data: data, response: response,
+            api: query["api"] ?? path, method: query["method"] ?? ""
+        )
+    }
+
+    /// 把字段与文件拼成 multipart 身，落到临时文件。
+    ///
+    /// 逐块写而不是先拼 `Data`：文件本体边读边写，内存里始终只有一块缓冲。
+    /// 每个 part 只有 `Content-Disposition`（**不加 `Content-Length`**，见上传那六条）。
+    private static func multipartBody(
+        boundary: String, fields: [String: String], fileName: String, fileURL: URL
+    ) throws -> URL {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nas-upload-\(UUID().uuidString).multipart")
+        FileManager.default.createFile(atPath: target.path, contents: nil)
+        let out = try FileHandle(forWritingTo: target)
+        defer { try? out.close() }
+
+        // 字段段：顺序按字典排序走，服务端只要求「字段在前」，字段之间不分先后。
+        for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
+            out.write(Data("--\(boundary)\r\n".utf8))
+            out.write(Data("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".utf8))
+            out.write(Data("\(value)\r\n".utf8))
+        }
+        out.write(Data("--\(boundary)\r\n".utf8))
+        // 名字里的引号与反斜杠要转义，否则段头被拼断。
+        let safeName = fileName
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        out.write(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\n".utf8))
+        out.write(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+
+        let input = try FileHandle(forReadingFrom: fileURL)
+        defer { try? input.close() }
+        while let chunk = try input.read(upToCount: 1 << 18), !chunk.isEmpty {
+            out.write(chunk)
+        }
+        out.write(Data("\r\n--\(boundary)--\r\n".utf8))
+        return target
+    }
+
+    /// 只管转发上传进度。`URLSession` 一次上传一个代理，用完即弃。
+    private final class UploadProgressRelay: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let progress: @Sendable (Int64, Int64) -> Void
+
+        init(progress: @escaping @Sendable (Int64, Int64) -> Void) {
+            self.progress = progress
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            didSendBodyData bytesSent: Int64,
+            totalBytesSent: Int64,
+            totalBytesExpectedToSend: Int64
+        ) {
+            progress(totalBytesSent, totalBytesExpectedToSend)
+        }
+    }
+
     /// 自己拼表单：`URLComponents` 默认那套会把口令里的 `+` 原样发出，
     /// 服务端按表单规则解成空格 —— 口令里带 `+` 就登不上，且报错看不出原因。
     /// 这里按 RFC 3986 只留 unreserved 字符，其余全部百分号转义。
@@ -282,6 +401,12 @@ final class SynologyClient: @unchecked Sendable {
         } catch {
             throw QuickConnectError.network(error.localizedDescription)
         }
+        return try decode(data: data, response: response, api: api, method: method)
+    }
+
+    /// 解开信封：非 2xx 当网络错；2xx 但解不出 JSON 当应答坏；`success=false` 抛业务码。
+    /// 上传那条自己拿到了 `(data, response)`，所以解信封这一段抽出来共用。
+    private func decode(data: Data, response: URLResponse, api: String, method: String) throws -> Any {
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw QuickConnectError.network("HTTP \(http.statusCode)")
         }

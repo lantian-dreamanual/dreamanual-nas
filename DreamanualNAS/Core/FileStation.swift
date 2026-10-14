@@ -71,7 +71,8 @@ struct FileEntry: Identifiable, Equatable {
     }
 
     /// 列表里的时间戳：`2026-10-13 21:04`。列宽 150 正好放得下，不写秒。
-    private static let stamp: DateFormatter = {
+    /// 列表与对照块共用这一套时间格式（`2026-10-08 21:33`）。
+    static let stamp: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -316,6 +317,38 @@ enum FileStation {
         return try await awaitTask(
             manager, api: "SYNO.FileStation.Delete", version: 2,
             taskid: taskid, timeout: taskTimeout
+        )
+    }
+
+    /// 上传一个文件到 `directory`（`Upload` v2 `upload`，multipart）。
+    ///
+    /// 两个字段的档位由这里定死，原因都在实测里：
+    ///   · `create_parents=true` —— 传「文件夹里的文件」时目的目录可能还不存在，
+    ///     `false` 会回 `408`；真建目录由服务端顺手做掉，省一次 `CreateFolder`；
+    ///   · `overwrite=true` —— `false` 撞名回「成功」但内容不变（静默跳过），
+    ///     要不要覆盖是**界面先问过用户**的决定，到这里就是照办。
+    ///
+    /// 🔴 **上传的撞名必须调用方先查**（与建文件夹同理、与改名相反）：`overwrite=false`
+    /// 那条路服务端连冲突都不报。`UploadQueue` 就是因为这条才在做客户端重名比对。
+    ///
+    /// - Parameter name: 落地的文件名。**不能带斜杠**（`sub/a.txt` → `418`）——
+    ///   文件夹上传靠目的目录带层级，不靠文件名带。
+    static func upload(
+        _ manager: SessionManager,
+        fileURL: URL,
+        name: String,
+        to directory: String,
+        progress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws {
+        _ = try await manager.upload(
+            kind: .file,
+            api: "SYNO.FileStation.Upload",
+            version: 2,
+            method: "upload",
+            fields: ["path": directory, "create_parents": "true", "overwrite": "true"],
+            fileName: name,
+            fileURL: fileURL,
+            progress: progress
         )
     }
 

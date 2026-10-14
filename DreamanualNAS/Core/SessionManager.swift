@@ -75,6 +75,38 @@ actor SessionManager {
         }
     }
 
+    /// 上传一个文件。与 `call` 同构（会话失效丢掉重登、重放这一条），但走 multipart。
+    ///
+    /// - Parameter fields: **放 multipart body 的字段**（上传的 `path` 在这里，不在 query）。
+    func upload(
+        kind: Kind,
+        api: String,
+        version: Int,
+        method: String,
+        fields: [String: String],
+        fileName: String,
+        fileURL: URL,
+        path: String? = nil,
+        progress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws -> Any {
+        let query = ["api": api, "version": String(version), "method": method]
+        let target = try await entryPath(for: api, overriding: path)
+        let creds = try await credentials(for: kind)
+        do {
+            return try await client.upload(
+                path: target, query: query, fields: fields, credentials: creds,
+                fileName: fileName, fileURL: fileURL, progress: progress
+            )
+        } catch let error as SynologyError where error.isSessionInvalid {
+            sessions[kind] = nil
+            let refreshed = try await credentials(for: kind)
+            return try await client.upload(
+                path: target, query: query, fields: fields, credentials: refreshed,
+                fileName: fileName, fileURL: fileURL, progress: progress
+            )
+        }
+    }
+
     /// 与 `call` 同构，但走 **GET**。歌词那两个接口实测是 GET 形态（接口结论
     /// §八的探测脚本就是 GET），照实测写就行 —— 会话失效同样丢掉重登、重放这一条。
     func get(

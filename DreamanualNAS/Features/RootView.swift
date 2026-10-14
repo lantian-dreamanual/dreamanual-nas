@@ -54,6 +54,16 @@ struct RootView: View {
                 FileDialogCard(dialog: dialog)
             }
         }
+        // 上传撞名的三选弹窗。与写操作弹窗同一挂法、同一层序 —— 两者不会同时出现
+        // （撞名是在开传之前问的，写操作弹窗是别的动作摆的）。
+        .dmModal(
+            isPresented: state.uploads.conflict != nil,
+            onDismiss: { state.cancelUploads() }
+        ) {
+            if let prompt = state.uploads.conflict {
+                FileConflictCard(prompt: prompt)
+            }
+        }
     }
 
     /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，

@@ -797,6 +797,11 @@ struct DmModalCard<Content: View, Foot: View>: View {
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
     @ViewBuilder let foot: () -> Foot
+    /// 脚部最左侧那一块（原型 `.foot-cb`）—— 冲突弹窗的「应用于全部 N 项」用它。
+    ///
+    /// 它是**作用域开关**，与右边那几个按钮不是一类东西，所以贴左边、隔着一段空白；
+    /// 传 `AnyView` 是为了不把泛型再摊一层（这一个槽位不值得改所有调用点）。
+    var lead: AnyView?
 
     @State private var bodyHeight: CGFloat = 0
 
@@ -861,9 +866,12 @@ struct DmModalCard<Content: View, Foot: View>: View {
         .onPreferenceChange(ModalBodyHeightKey.self) { bodyHeight = $0 }
     }
 
-    /// foot：上 `s14` / 横向 `s20` / 下 `s16`，动作右对齐、间距 `s8`。
+    /// foot：上 `s14` / 横向 `s20` / 下 `s16`，`lead` 贴左、动作右对齐、间距 `s8`。
     private var foot_: some View {
         HStack(spacing: DmSpace.s8) {
+            if let lead {
+                lead
+            }
             Spacer(minLength: 0)
             foot()
         }
@@ -1013,6 +1021,189 @@ struct DmPickRow: View {
     }
 }
 
+// ============ 上传 ============
+
+/// 进度条（原型 `.prog`）：轨道 `panel-3`、高 6、两头圆，已传部分实心 `accent`。
+///
+/// 圆角用 `Capsule` 而不是 `r-4`：6px 高的条要的是「两头全圆」的形态，
+/// 档位表里最接近的 4 反而会露出四只直角。
+struct DmProgressBar: View {
+    /// 0…1，越界自己夹住（服务端给的总字节偶尔是 0，除法那一步在调用点挡掉了）。
+    let value: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.dmPanel3)
+                Capsule()
+                    .fill(Color.dmAccent)
+                    .frame(width: geo.size.width * max(0, min(1, value)))
+            }
+        }
+        .frame(height: DmSpace.s6)
+    }
+}
+
+/// 上传行的两档语气。**独立成一个类型**而不是 `DmUploadRow.Tone` —— 后者会把行视图
+/// 按动作视图参数化，取语气的地方（视图里那个小函数）就得写明泛型参数。
+enum DmUploadTone {
+    case normal
+    case danger
+}
+
+/// 上传行（原型 `.up-row`）：图标 + 标题 + 明细（速率 / 已传 / 剩余）+ 进度条 + 右侧动作。
+///
+/// **常驻在列表上方，不藏进弹窗** —— 上行 0.31 MB/s，传 50 MB 要两分半，
+/// 进度和「取消」都得一直看得见。建目录那一步没有字节数，`progress` 给 nil 就只出文字。
+struct DmUploadRow<Action: View>: View {
+    let icon: String
+    let title: String
+    let detail: String
+    var progress: Double?
+    /// 失败那一档：标题转 `danger-ink-strong`（压 `panel-2` 够 3:1）。
+    var tone: DmUploadTone = .normal
+    @ViewBuilder let action: () -> Action
+
+    var body: some View {
+        HStack(spacing: DmSpace.s12) {
+            LucideIcon(icon, size: DmIcon.i16)
+                .foregroundColor(tone == .danger ? Color.dmDangerInkStrong : Color.dmInk2)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.system(size: DmText.t13, weight: .medium))
+                    .foregroundColor(tone == .danger ? Color.dmDangerInkStrong : Color.dmInk)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(detail)
+                    .font(.system(size: DmText.t11))
+                    .monospacedDigit()
+                    .foregroundColor(Color.dmInk3)
+                    .lineLimit(1)
+                    .padding(.top, DmSpace.s2)
+                if let progress {
+                    DmProgressBar(value: progress)
+                        .padding(.top, DmSpace.s8)
+                }
+            }
+            action()
+        }
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.vertical, DmSpace.s10)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r10).fill(Color.dmPanel2)
+        )
+    }
+}
+
+/// 冲突三选里的一行（原型 `.opt`）：单选圆点 + 标题 + 一句代价说明。
+///
+/// 选中态是 `accent-soft` 底 + `accent-line` 描边 —— 与「列表行选中」同一条轨道；
+/// 圆点里那颗实心点取 `accent-2`（压在 `accent-soft` 上要够亮）。
+struct DmOptionRow: View {
+    let title: String
+    let note: String
+    let isOn: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: DmSpace.s10) {
+                DmRadio(isOn: isOn)
+                VStack(alignment: .leading, spacing: DmSpace.s2) {
+                    Text(title)
+                        .font(.system(size: DmText.t13))
+                        .foregroundColor(Color.dmInk)
+                    Text(note)
+                        .font(.system(size: DmText.t11))
+                        .foregroundColor(Color.dmInk3)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, DmSpace.s12)
+            .padding(.vertical, DmSpace.s10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: DmRadius.r8)
+                    .fill(isOn ? Color.dmAccentSoft : Color.dmPanel2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DmRadius.r8)
+                    .strokeBorder(
+                        isOn ? Color.dmAccentLine : (isHovered ? Color.dmLine2 : Color.dmLine),
+                        lineWidth: DmLine.hairline
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+/// 单选圆点（原型 `.radio`）：常态 14 空心描边，选中描边转 `accent-2` 并嵌一颗实心点。
+struct DmRadio: View {
+    let isOn: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(isOn ? Color.dmAccent2 : Color.dmLine2, lineWidth: DmLine.base)
+            if isOn {
+                Circle().fill(Color.dmAccent2).frame(width: DmSpace.s6, height: DmSpace.s6)
+            }
+        }
+        .frame(width: 14, height: 14)
+        // 与 13 字的第一行视觉对齐：圆点中心压在文字中线上，不是顶对齐。
+        .padding(.top, DmSpace.s2)
+    }
+}
+
+/// 「来源 / 目标已有」对照（原型 `.cmp`）：两块并排，各是「小标题 + 若干行值」。
+struct DmCompare: View {
+    let left: DmCompareColumn
+    let right: DmCompareColumn
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DmSpace.s16) {
+            column(left)
+            column(right)
+        }
+        .padding(.horizontal, DmSpace.s12)
+        .padding(.vertical, DmSpace.s10)
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(Color.dmLine, lineWidth: DmLine.hairline)
+        )
+    }
+
+    private func column(_ column: DmCompareColumn) -> some View {
+        VStack(alignment: .leading, spacing: DmSpace.s4) {
+            Text(column.title)
+                .font(.system(size: DmText.t12, weight: .medium))
+                .foregroundColor(Color.dmInk2)
+            ForEach(column.lines, id: \.self) { line in
+                Text(line)
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 对照块的一列。`lines` 第一行通常是名字，后面是大小与时间。
+struct DmCompareColumn {
+    let title: String
+    let lines: [String]
+}
+
 // ============ 菜单 ============
 
 /// 下拉菜单卡片（原型 `.menu`）：`panel-2` + `line-2` 发丝 + `r-10` + `shadow-modal`，
@@ -1157,6 +1348,87 @@ struct RightClickCatcher: NSViewRepresentable {
             let inContent = content.convert(event.locationInWindow, from: nil)
             // AppKit 原点在左下、SwiftUI 在左上。
             onRightClick?(CGPoint(x: inContent.x, y: content.bounds.height - inContent.y))
+        }
+    }
+}
+
+/// 拖入捕获层：把从 Finder 拖过来的文件 / 文件夹接住（上传落点）。
+///
+/// `hitTest` 与 `RightClickCatcher` 同一套逻辑，但**只在拖动中返回自己**：
+///   · 普通鼠标事件一律穿透 —— 它盖在整张表上，不穿透的话行的点击、双击、
+///     悬停全被它吃掉；
+///   · AppKit 找投放目标时也是在 `hitTest` 里问的，所以不能无脑返回 nil。
+///     拖动期间的 `currentEvent` 是 `.leftMouseDragged`，只有这一档返回自己。
+///
+/// 应用内部的拖动不会被它抢走：那种拖动的后续事件发给**拿下 mouseDown 的那个视图**，
+/// 不再过 `hitTest`；而且它注册的粘贴板类型只有 `.fileURL`，内部拖动根本不是候选。
+struct FileDropCatcher: NSViewRepresentable {
+    @Binding var isTargeted: Bool
+    let onDrop: ([URL]) -> Void
+
+    func makeNSView(context: Context) -> DropView {
+        let view = DropView()
+        view.onDrop = onDrop
+        view.onTargetedChange = { isTargeted = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: DropView, context: Context) {
+        view.onDrop = onDrop
+        view.onTargetedChange = { isTargeted = $0 }
+    }
+
+    final class DropView: NSView {
+        var onDrop: (([URL]) -> Void)?
+        var onTargetedChange: ((Bool) -> Void)?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            registerForDraggedTypes([.fileURL])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("不从 nib 建") }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            NSApp.currentEvent?.type == .leftMouseDragged ? self : nil
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard canAccept(sender) else { return [] }
+            onTargetedChange?(true)
+            return .copy
+        }
+
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            canAccept(sender) ? .copy : []
+        }
+
+        override func draggingExited(_ sender: NSDraggingInfo?) {
+            onTargetedChange?(false)
+        }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            canAccept(sender)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            onTargetedChange?(false)
+            let urls = Self.fileURLs(from: sender.draggingPasteboard)
+            guard !urls.isEmpty else { return false }
+            onDrop?(urls)
+            return true
+        }
+
+        /// 只吃本机文件 —— 拖一段文字或一张网页里的图进来不算。
+        private func canAccept(_ sender: NSDraggingInfo) -> Bool {
+            !Self.fileURLs(from: sender.draggingPasteboard).isEmpty
+        }
+
+        private static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
+            (pasteboard.readObjects(
+                forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL]) ?? []
         }
     }
 }

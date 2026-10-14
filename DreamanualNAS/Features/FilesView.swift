@@ -4,17 +4,24 @@ import SwiftUI
 /// 文件管理。
 ///
 /// 形态照原型 `design/界面原型.html` 的文件管理屏：左侧目录树（共享夹是导航第一层、
-/// 逐级懒加载、子层过长只列前几项）+ 右侧（页头与面包屑 / 工具条 / 表 / 状态栏）。
+/// 逐级懒加载、子层过长只列前几项）+ 右侧（页头与面包屑 / 工具条 / 上传行 / 表 / 状态栏）。
 ///
 /// 已落地：浏览、排序、分页、缩略图、下载、从曲库「在文件管理中显示」跳过来，
-/// 以及**写操作第一批**（多选勾选列 / 新建文件夹 / 重命名 / 删除）。上传、
-/// 复制 / 移动到、搜索留给下一批 —— 它们各自要进度与选目标弹窗，不是同一档的事。
+/// 写操作第一批（多选勾选列 / 新建文件夹 / 重命名 / 删除），以及上传（拖入或选文件、
+/// 撞名三选、进度与取消）。复制 / 移动到与搜索留给下一批 —— 它们各自要选目标弹窗。
 struct FilesView: View {
     @Environment(AppState.self) private var state
 
     /// 状态挂在 `AppState` 上，不是本视图的 `@State` —— 与曲库同一理由：换模块、
     /// 从曲库跳过来，都不该把浏览位置丢掉。
     private var model: FileBrowser { state.files }
+    private var uploads: UploadQueue { state.uploads }
+
+    /// 拖入高亮的开关。状态落在 `uploads` 上而不是本视图 —— 冒烟通路要能把它摆出来，
+    /// 视图自己的 `@State` 外面够不着。
+    private var dropTarget: Binding<Bool> {
+        Binding(get: { uploads.dropTargeted }, set: { uploads.dropTargeted = $0 })
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -38,8 +45,10 @@ struct FilesView: View {
             toolbar
 
             if !writable {
-                DmBanner(icon: "triangle-alert", text: "当前目录不可写，新建、改名与删除已停用")
+                DmBanner(icon: "triangle-alert", text: "当前目录不可写，新建、上传、改名与删除已停用")
             }
+
+            uploadRows
 
             content
 
@@ -67,14 +76,15 @@ struct FilesView: View {
     /// （`perm.acl.write`）。
     private var writable: Bool { model.currentCanWrite }
 
-    /// 工具条：新建文件夹 / 下载 / 重命名 / 删除 —— 这一批落地的动作。
-    ///
-    /// 上传与复制 / 移动到在下一批（各自要进度条与选目标弹窗），原型那一排里先不放
-    /// 空壳按钮：能点但没接线的按钮比没有还难判。
+    /// 工具条：新建文件夹 / 上传 / 下载 / 重命名 / 删除 —— 已接线的动作（原型那一排
+    /// 与顺序一致）。复制 / 移动到在下一批（要选目标弹窗），先不放只能点没反应的按钮。
     private var toolbar: some View {
         HStack(spacing: DmSpace.s8) {
             action("新建文件夹", icon: "folder-plus", enabled: writable) {
                 state.openFileDialog(.newFolder)
+            }
+            action("上传", icon: "upload", enabled: writable) {
+                state.pickAndUpload()
             }
             action("下载", icon: "download",
                    enabled: model.singleSelection?.isDirectory == false) {
@@ -93,7 +103,7 @@ struct FilesView: View {
 
             Spacer(minLength: 0)
 
-            Text("上传与复制 / 移动到，下一批接")
+            Text("复制 / 移动到在下一批")
                 .font(.system(size: DmText.t11))
                 .foregroundColor(Color.dmInk3)
         }
@@ -112,6 +122,110 @@ struct FilesView: View {
         }
         .buttonStyle(SecondaryButtonStyle())
         .disabled(!enabled)
+    }
+
+    /// 列表上方那一行上传进度（原型 `.up-row`，常驻不藏弹窗）。
+    ///
+    /// 只画**当前这一条**：正在传的，或失败了停在那儿的。传完的与主动取消的
+    /// 在批次结束时收掉（`AppState.finishUploadBatch`）。
+    @ViewBuilder
+    private var uploadRows: some View {
+        if let item = uploads.headline {
+            DmUploadRow(
+                icon: uploadIcon(item),
+                title: uploadTitle(item),
+                detail: uploadDetail(item),
+                progress: uploadProgress(item),
+                tone: uploadTone(item)
+            ) {
+                uploadActions(item)
+            }
+            .padding(.horizontal, DmSpace.s24)
+            .padding(.bottom, DmSpace.s12)
+        }
+    }
+
+    private func uploadIcon(_ item: UploadQueue.Item) -> String {
+        if case .failed = item.state { return "circle-x" }
+        return item.isDirectory ? "folder-plus" : "upload"
+    }
+
+    private func uploadTone(_ item: UploadQueue.Item) -> DmUploadTone {
+        if case .failed = item.state { return .danger }
+        return .normal
+    }
+
+    private func uploadTitle(_ item: UploadQueue.Item) -> String {
+        switch item.state {
+        case .failed: return "上传失败 \(item.name)"
+        case .waiting: return "等待上传 \(item.name)"
+        default: return item.isDirectory ? "正在新建 \(item.name)" : "正在上传 \(item.name)"
+        }
+    }
+
+    /// 明细：速率 · 已传 / 总量 · 剩余，末尾挂一句队列里还剩几项。
+    ///
+    /// 分母用**这一条请求要发的字节数**（`expected`，含 multipart 段头）而不是文件
+    /// 本身的大小 —— 后者会算出 100.1% 这种数。速率与剩余时间在首个样本到达前不写。
+    private func uploadDetail(_ item: UploadQueue.Item) -> String {
+        var parts: [String] = []
+        if case .failed(let reason) = item.state {
+            parts.append(reason)
+            if item.sent > 0 {
+                parts.append("已传 \(FileEntry.byteText(item.sent)) 不会保留")
+            }
+        } else if !item.isDirectory {
+            if item.rate > 0 {
+                parts.append("\(FileEntry.byteText(Int64(item.rate)))/s")
+            }
+            parts.append("已传 \(FileEntry.byteText(item.sent)) / \(FileEntry.byteText(totalBytes(item)))")
+            if let left = remainingText(item) { parts.append(left) }
+        }
+        if uploads.queuedCount > 0 {
+            parts.append("队列还有 \(uploads.queuedCount) 项")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// 分母：进度回调报过就用它，还没报过先拿文件本身的大小撑一下显示。
+    private func totalBytes(_ item: UploadQueue.Item) -> Int64 {
+        item.expected > 0 ? item.expected : item.byteCount
+    }
+
+    private func remainingText(_ item: UploadQueue.Item) -> String? {
+        let total = totalBytes(item)
+        guard item.rate > 0, total > item.sent else { return nil }
+        let seconds = Double(total - item.sent) / item.rate
+        guard seconds >= 1 else { return nil }
+        if seconds < 60 { return "剩余约 \(Int(seconds.rounded())) 秒" }
+        return "剩余约 \(Int((seconds / 60).rounded())) 分"
+    }
+
+    private func uploadProgress(_ item: UploadQueue.Item) -> Double? {
+        if case .failed = item.state { return nil }
+        let total = totalBytes(item)
+        guard !item.isDirectory, total > 0 else { return nil }
+        return Double(item.sent) / Double(total)
+    }
+
+    /// 行右侧的动作：传着的时候是「取消」，失败之后是「重试」与「移除」。
+    @ViewBuilder
+    private func uploadActions(_ item: UploadQueue.Item) -> some View {
+        if case .failed = item.state {
+            HStack(spacing: DmSpace.s8) {
+                Button("重试") {
+                    guard let manager = state.sessionManager else { return }
+                    uploads.retry(manager: manager)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                IconButton(iconName: "x") {
+                    uploads.dropFailed()
+                }
+            }
+        } else {
+            Button("取消") { state.cancelUploads() }
+                .buttonStyle(SecondaryButtonStyle())
+        }
     }
 
     @ViewBuilder
@@ -140,6 +254,35 @@ struct FilesView: View {
                 },
                 onContext: { entry, point in state.openFileMenu(for: entry, at: point) }
             )
+            .overlay { dropHighlight }
+            .overlay {
+                FileDropCatcher(isTargeted: dropTarget) { urls in state.upload(urls: urls) }
+            }
+        }
+    }
+
+    /// 拖入时的那一圈提示：主色虚线描边 + `accent-soft` 底（与树上拖动目标的形态同款）。
+    /// 整块不允许命中 —— 它只报状态，点击照旧落到下面的行上。
+    @ViewBuilder
+    private var dropHighlight: some View {
+        if uploads.dropTargeted {
+            RoundedRectangle(cornerRadius: DmRadius.r10)
+                .fill(Color.dmAccentSoft)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DmRadius.r10)
+                        .strokeBorder(
+                            Color.dmAccent2,
+                            style: StrokeStyle(lineWidth: DmLine.base,
+                                               dash: [DmSpace.s6, DmSpace.s4])
+                        )
+                )
+                .overlay(
+                    Text("松手即传到「\(model.currentPath)」")
+                        .font(.system(size: DmText.t13, weight: .medium))
+                        .foregroundColor(Color.dmAccent2)
+                )
+                .padding(DmSpace.s8)
+                .allowsHitTesting(false)
         }
     }
 
@@ -830,5 +973,85 @@ struct FileDialogCard: View {
     /// 现在写「0 B」等于说这个目录是空的。
     static func pickNote(of entry: FileEntry) -> String {
         entry.isDirectory ? "文件夹" : entry.sizeText
+    }
+}
+
+/// 上传撞名的三选弹窗（原型「同名冲突」那张）。
+///
+/// 为什么必须先问：上传的 `overwrite=false` 撞名**回「成功」但内容不变**（静默跳过），
+/// 服务端连冲突都不报；`overwrite=true` 才是真覆盖。所以「传上去会怎样」只能由这里
+/// 问清楚，再拿用户的选择去组请求。
+///
+/// 对照块给出「来源 / 目标已有」两份的大小与时间 —— 用户要判断的正是这两份哪个更新。
+struct FileConflictCard: View {
+    @Environment(AppState.self) private var state
+    let prompt: UploadQueue.ConflictPrompt
+
+    @State private var choice: UploadQueue.ConflictChoice = .replace
+    @State private var applyToAll = false
+
+    var body: some View {
+        DmModalCard(
+            title: "已有同名项目",
+            onClose: { state.cancelUploads() },
+            content: {
+                DmCompare(
+                    left: DmCompareColumn(title: "来源", lines: [prompt.item.name, sourceDetail]),
+                    right: DmCompareColumn(title: "目标已有", lines: [prompt.existing.name, existingDetail])
+                )
+
+                VStack(spacing: DmSpace.s6) {
+                    option(.replace, title: "替换",
+                           note: "用来源覆盖目标，目标那一份不可恢复")
+                    option(.keepBoth, title: "保留两者",
+                           note: "这一份传上去叫「\(prompt.keptName)」，两份都保留")
+                    option(.skip, title: "跳过",
+                           note: "这一项不传，其余继续")
+                }
+            },
+            foot: {
+                Button("取消") { state.cancelUploads() }
+                    .buttonStyle(SecondaryButtonStyle())
+                Button("应用") {
+                    state.resolveUploadConflict(choice, applyToAll: applyToAll)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            },
+            // 「应用于全部」只在这一批还有别的冲突时出现（原型：它是作用域开关，
+            // 不是第四种处理，单选场景不给 —— 少一个要读的控件）。
+            lead: prompt.remaining > 1 ? AnyView(applyAllBox) : nil
+        )
+    }
+
+    private var applyAllBox: some View {
+        HStack(spacing: DmSpace.s8) {
+            DmCheckbox(isOn: applyToAll)
+            Text("应用于全部 \(prompt.remaining) 项")
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmInk2)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { applyToAll.toggle() }
+    }
+
+    private func option(_ value: UploadQueue.ConflictChoice, title: String, note: String) -> some View {
+        DmOptionRow(title: title, note: note, isOn: choice == value) {
+            choice = value
+        }
+    }
+
+    /// 本机那一份的大小与修改时间。
+    private var sourceDetail: String {
+        let size = FileEntry.byteText(prompt.item.byteCount)
+        guard let date = (try? prompt.item.localURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate else { return size }
+        return "\(size) · \(FileEntry.stamp.string(from: date))"
+    }
+
+    /// 服务端那一份的同两项（从 `List` 的 `additional` 来；取不到就少写一段）。
+    private var existingDetail: String {
+        let size = prompt.existing.size.map { FileEntry.byteText($0) } ?? "—"
+        guard let modified = prompt.existing.modified else { return size }
+        return "\(size) · \(FileEntry.stamp.string(from: modified))"
     }
 }
