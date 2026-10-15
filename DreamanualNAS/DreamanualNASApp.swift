@@ -119,6 +119,10 @@ struct DreamanualNASApp: App {
                     if ProcessInfo.processInfo.environment["DM_SHELL"] == "1" {
                         await appDelegate.runShellSmoke()
                     }
+                    // DM_WIDGET=feed|state：小组件共享快照的写入 / 回读冒烟。
+                    if let command = ProcessInfo.processInfo.environment["DM_WIDGET"] {
+                        await state.smokeWidget(command)
+                    }
                 }
         }
         // 标题栏隐藏：侧栏品牌区自己占顶部，与设计原型的窗口结构一致。

@@ -408,7 +408,7 @@ enum SystemStatusAPI {
 
     /// 吞吐：字节/秒 → `3.10 MB/s`。
     static func rateText(_ bytesPerSec: Int64) -> String {
-        FileEntry.byteText(bytesPerSec) + "/s"
+        dmByteText(bytesPerSec) + "/s"
     }
 
     /// 开机时刻的显示：`10-14 11:27`。同一页里只出现一次，不带年份。
@@ -470,8 +470,8 @@ enum SystemStatusAPI {
         guard let load else {
             return SystemStat(icon: "memory-stick", label: "内存", value: "—", note: "没读到")
         }
-        let cached = FileEntry.byteText(load.memoryCachedBytes)
-        let available = FileEntry.byteText(load.memoryAvailableBytes)
+        let cached = dmByteText(load.memoryCachedBytes)
+        let available = dmByteText(load.memoryAvailableBytes)
         return SystemStat(
             icon: "memory-stick", label: "内存",
             value: "\(load.memoryPercent)", unit: "%",

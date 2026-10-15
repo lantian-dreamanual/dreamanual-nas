@@ -5,7 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dreamanual NAS 助手 · 桌面小组件原型</title>
 <!--
-  Dreamanual NAS 助手 · 桌面小组件原型（2026-10-15 · 第 1 稿）
+  Dreamanual NAS 助手 · 桌面小组件原型（2026-10-15 · 第 3 稿）
+
+  第 2 稿（2026-10-15 用户反馈）：小组件组内贴紧、组间松开 ——
+    20 号大值的行高钉 1.25（1.5 的半行距会把「标题 → 值」撑开 5px），
+    容量块与 CPU / 温度行之间加发丝分隔 + 自动留白（组间必须松过组内）；
+    小字说明去掉与进度条重复的「已用 77.2%」，只留「可用」。
+
+  第 3 稿（2026-10-15 用户反馈）：**小组件**再去掉「可用 3.58 TB」——
+    空间有限，容量行（12.12 / 15.71 TB）+ 进度条已经够读；
+    **中组件空间够，这行保留**。
+
+  第 4 稿（2026-10-15 用户反馈）：中组件 CPU 列去掉「负载 1.10」——
+    平均负载扫一眼读不懂（用户原话「1.10 又是什么意思」），解释成本高于
+    信息价值；CPU 利用率（用户+系统）已够判健康。离线态重排：图标 +
+    文案整组**垂直居中**（第 1 稿贴底的旧规则没删净导致偏下），并补
+    置灰服务器图标。
+
+  第 5 稿（2026-10-15 用户反馈）：CPU 列再去掉「用户 + 系统」口径小字
+    —— 没有第二种理解，扫一眼不需要口径说明。离线组再下移：顶行
+    「离线」占视觉重量，几何居中看着偏上 → padding-top 顶开，
+    从状态行下方起算居中。
+
+  第 6 稿（2026-10-15 用户反馈）：中组件「可用」改走 kv 行（与温度列
+    同一组件，字号 11 一致）；离线卡删掉「QuickConnect 与直连都试过」
+    （口语化，留「上次在线」即可）；小组件底行间距放宽（分隔线上方
+    12px、两格间 16px、标签到值 2px）。
+
+  第 7 稿（试验，2026-10-15）：小组件底行去掉分隔线 —— 空间充裕后
+    组间靠留白就能分组，线反而显得多余；上方留白微调到 14px。
+
+  第 8 稿（2026-10-15 用户反馈）：标题字号统一 —— 底行「CPU / 温度」
+    从 10 号提到 11 号，与「存储空间」一致。中组件竖分隔线也去掉，
+    列间距 12 → 16px，分区全靠留白。
+
+  第 9 稿（2026-10-15 用户反馈）：中组件三列改**列宽收缩 + 剩余空间
+    均分**（space-between）—— fr 定宽时窄列（CPU）尾部空一截，
+    视觉空隙一大一小、读起来像两块；改后三块空隙实测相等
+    （51.3 / 51.3px）。
+
+  第 10 稿（2026-10-15 用户反馈）：离线图标换 Lucide server-off ——
+    置灰 server 只表达「服务器在、暗着」，server-off 自带「不可达」。
+    ⚠️ 落码时 SF Symbols 没有 server-off，LucideIcon 兜底表要单配
+    （候选：server.rack + 自绘斜杠，或资产图）。
 
   用途：定桌面小组件（WidgetKit）四张形态：小组件（Small）/ 中组件（Medium）
         各分「在线 / 离线」两态。只做 NAS 状态，不做播放控制（控制中心已覆盖）。
@@ -90,7 +132,7 @@ b{font-weight:600}
 .wg *{min-width:0}
 
 /* 顶行：在线标志 + 更新时间 */
-.wg .top{display:flex;align-items:center;gap:var(--sp-6)}
+.wg .top{display:flex;align-items:center;gap:var(--sp-6);line-height:1.3}
 .dot{width:7px;height:7px;border-radius:50%;flex:none}
 .dot.ok{background:var(--ok-ink-strong);box-shadow:0 0 6px rgba(0,212,146,.55)}
 .dot.off{background:var(--ink-3)}
@@ -101,36 +143,38 @@ b{font-weight:600}
 .st.bad{color:var(--danger-ink-strong)}
 .upt{margin-left:auto;font-size:var(--fs-10);color:var(--ink-3);font-variant-numeric:tabular-nums}
 
-/* 容量块 */
+/* 容量块 —— 组内纪律：标题贴值（≤3px），值不带大半行距（20 号字行高钉 1.25） */
 .lab{font-size:var(--fs-11);color:var(--ink-3)}
-.val{font-size:var(--fs-20);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.val{font-size:var(--fs-20);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.25}
 .val small{font-size:var(--fs-11);font-weight:400;color:var(--ink-3);margin-left:2px;letter-spacing:0}
-.prog{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;margin-top:6px}
+.prog{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;margin-top:5px}
 .prog i{display:block;height:100%;border-radius:3px;background:var(--accent-fill)}
-.hint{font-size:var(--fs-10);color:var(--ink-3);margin-top:4px;font-variant-numeric:tabular-nums}
+.hint{font-size:var(--fs-10);color:var(--ink-3);margin-top:3px;line-height:1.3;font-variant-numeric:tabular-nums}
 
-/* 底行（Small）：CPU 与温度并排 */
-.duo{margin-top:auto;display:flex;gap:var(--sp-8)}
+/* 底行（Small）：CPU 与温度并排。与容量块之间用发丝分隔 +
+   自动留白 —— 组间必须松过组内，分组关系才立得住。
+   「可用」小字删掉后空间有余，间距放宽到正常档 */
+.duo{margin-top:auto;padding-top:14px;display:flex;gap:var(--sp-16)}
 .duo .cell{flex:1;min-width:0}
-.duo .k{font-size:var(--fs-10);color:var(--ink-3)}
-.duo .v{font-size:var(--fs-13);font-weight:600;font-variant-numeric:tabular-nums;margin-top:1px}
+.duo .k{font-size:var(--fs-11);color:var(--ink-3);line-height:1.3}
+.duo .v{font-size:var(--fs-13);font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px;line-height:1.3}
 
-/* Medium 三列 */
-.cols{flex:1;display:grid;grid-template-columns:1.5fr 1fr 1.1fr;gap:var(--sp-12);margin-top:var(--sp-10);min-height:0}
+/* Medium 三列 —— 无竖线；列宽收缩包住内容、剩余空间均分到列间，
+   保证三块的视觉间距相等（fr 定宽会让窄列尾部空出一截，看着像两块） */
+.cols{flex:1;display:flex;justify-content:space-between;margin-top:var(--sp-10);min-height:0}
 .col{min-width:0}
-.col + .col{border-left:var(--lw-hairline) solid var(--line-2);padding-left:var(--sp-12)}
 .col .val{margin-top:2px}
-.kv{display:flex;justify-content:space-between;gap:var(--sp-4);font-size:var(--fs-11);margin-top:3px}
+.kv{display:flex;justify-content:space-between;gap:var(--sp-8);font-size:var(--fs-11);margin-top:3px;white-space:nowrap}
 .kv .k{color:var(--ink-3)}
 .kv .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
 
-/* 离线态：居中 */
-.wg.offline{align-items:center;justify-content:center;gap:var(--sp-4)}
-.wg.offline .top{position:absolute}
-.wg.offline{position:relative;justify-content:flex-end;padding-bottom:26px}
+/* 离线态：整组（图标 + 文案）居中 —— 顶行「离线」占着视觉重量，
+   几何居中看着偏上，所以内容区从状态行下方起算（padding-top 顶开 22px） */
+.wg.offline{position:relative;align-items:center;justify-content:center;gap:var(--sp-6);text-align:center;padding-top:34px}
+.wg.offline .top{position:absolute;top:12px;left:12px;right:12px}
+.wg.offline .officon{width:30px;height:30px;color:var(--ink-3)}
 .wg.offline .big{font-size:var(--fs-13);font-weight:600;color:var(--ink-2)}
-.wg.offline .last{font-size:var(--fs-11);color:var(--ink-3)}
-.wg.offline .top{top:12px;left:12px;right:12px}
+.wg.offline .last{font-size:var(--fs-11);color:var(--ink-3);max-width:280px}
 
 /* ============ 备注 ============ */
 .notes{
@@ -162,7 +206,6 @@ b{font-weight:600}
       <div class="lab" style="margin-top:8px">存储空间</div>
       <div class="val">12.12<small>/ 15.71 TB</small></div>
       <div class="prog"><i style="width:77.2%"></i></div>
-      <div class="hint">已用 77.2% · 可用 3.58 TB</div>
       <div class="duo">
         <div class="cell"><div class="k">CPU</div><div class="v">26%</div></div>
         <div class="cell"><div class="k">温度</div><div class="v">56°C</div></div>
@@ -182,13 +225,11 @@ b{font-weight:600}
           <div class="lab">存储空间</div>
           <div class="val">12.12<small>/ 15.71 TB</small></div>
           <div class="prog"><i style="width:77.2%"></i></div>
-          <div class="hint">已用 77.2% · 可用 3.58 TB</div>
+          <div class="kv"><span class="k">可用</span><span class="v">3.58 TB</span></div>
         </div>
         <div class="col">
           <div class="lab">CPU</div>
           <div class="val">26%</div>
-          <div class="hint">利用率（用户+系统）</div>
-          <div class="kv"><span class="k">负载 1 分钟</span><span class="v">1.10</span></div>
         </div>
         <div class="col">
           <div class="lab">温度</div>
@@ -207,6 +248,7 @@ b{font-weight:600}
       <div class="top">
         <span class="dot off"></span><span class="st off">离线</span>
       </div>
+      <svg class="officon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5"/><path d="M10 10 2.5 2.5C2 2 2 2.5 2 5v3a2 2 0 0 0 2 2h6z"/><path d="M22 17v-1a2 2 0 0 0-2-2h-1"/><path d="M4 14a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16.5l1-.5.5.5-8-8H4z"/><path d="M6 18h.01"/><path d="m2 2 20 20"/></svg>
       <div class="big">连不上</div>
       <div class="last">上次在线 10-14 23:05</div>
     </div>
@@ -218,8 +260,9 @@ b{font-weight:600}
       <div class="top">
         <span class="dot off"></span><span class="st off">离线</span>
       </div>
+      <svg class="officon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5"/><path d="M10 10 2.5 2.5C2 2 2 2.5 2 5v3a2 2 0 0 0 2 2h6z"/><path d="M22 17v-1a2 2 0 0 0-2-2h-1"/><path d="M4 14a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16.5l1-.5.5.5-8-8H4z"/><path d="M6 18h.01"/><path d="m2 2 20 20"/></svg>
       <div class="big">连不上 NAS</div>
-      <div class="last">上次在线 10-14 23:05 · QuickConnect 与直连地址都试过</div>
+      <div class="last">上次在线 10-14 23:05</div>
     </div>
     <div class="cap">中组件 · 离线（中性灰）</div>
   </div>
@@ -227,11 +270,12 @@ b{font-weight:600}
 </div>
 
 <div class="notes">
+  <div class="n"><b>间距纪律（第 2 稿立，第 7/8 稿演进）</b>：标题与它自己的值贴紧（≤3px，大值行高钉 1.25 消掉半行距），块与块之间空开 —— 组内紧、组间松。第 7/8 稿起分隔线全部退场（横线竖线都不要），分区全靠留白。</div>
   <div class="n"><b>在线标志排第一</b>：绿点 + 「在线」在左上角固定位置，离线转灰点 + 「离线」—— 扫一眼先知道 NAS 死活，再看数。</div>
   <div class="n"><b>容量是主值</b>：20 号字带进度条（唯一用进度条的字段），CPU 与温度压到 13 号辅助位 —— 容量是「该清了吗」的决策信息，其余是健康信号。</div>
-  <div class="n"><b>离线 ≠ 故障</b>：关机是正常操作，离线态走中性灰。只有服务端报上次关机不正常（<span style="font-variant-numeric:tabular-nums">is_system_crashed</span>）才转红点红字，那一态不在本稿，落码时挂 health 标志。</div>
+  <div class="n"><b>离线 ≠ 故障</b>：关机是正常操作，离线态走中性灰。只有服务端报上次关机不正常（<span style="font-variant-numeric:tabular-nums">is_system_crashed</span>）才转红点红字，那一态不在本稿，落码时挂 health 标志。图标用 Lucide <span style="font-variant-numeric:tabular-nums">server-off</span>（第 10 稿换上，自带「不可达」含义），整组在状态行下方居中（顶行占视觉重量，几何居中会看着偏上）。</div>
   <div class="n"><b>数据时效</b>：右上角永远带抓取时间 —— 小组件按系统调度刷新（约 15 分钟一档），「这个数是多久前的」必须自己说清。</div>
-  <div class="n"><b>中组件的 CPU 列</b>：利用率为主值、1 分钟负载进辅助行 —— 两个数的口径不同（百分比 vs 运行队列长度），混在一格会误读。</div>
+  <div class="n"><b>平均负载不上小组件（第 4 稿改）</b>：1 分钟负载扫一眼读不懂（是运行队列长度，与 CPU 百分比不同口径），解释成本高于信息价值 —— CPU 利用率（用户 + 系统）已够判健康；负载留在主 app 状态页。</div>
 </div>
 
 </body>

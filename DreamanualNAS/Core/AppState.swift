@@ -2390,6 +2390,15 @@ final class AppState {
             lastConnectedAt = Date()
             phase = .connected
 
+            // 小组件的共享快照：状态页拉到新数就顺手落盘；另外连上后
+            // 每 15 分钟推一拍（与小组件的刷新节奏对齐 —— app 活着的
+            // 时候，小组件基本用不着自己连）。
+            status.onFreshSnapshot = { [weak self] snapshot in
+                guard let self else { return }
+                Task { await self.publishWidgetSnapshot(snapshot) }
+            }
+            startWidgetPush()
+
             // 连上即存：口令落本机文件（0600），下次启动自动重连。写也走后台，
             // 不占主线程。
             let key = endpointKey
@@ -2418,7 +2427,71 @@ final class AppState {
         endpointLabel = ""
         linkMode = nil
         status.clear()
+        widgetPushTask?.cancel()
+        widgetPushTask = nil
         phase = .idle
+    }
+
+    // MARK: - 小组件推送
+
+    private var widgetPushTask: Task<Void, Never>?
+
+    private func startWidgetPush() {
+        widgetPushTask?.cancel()
+        widgetPushTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pushWidgetSnapshot()
+                try? await Task.sleep(nanoseconds: 900_000_000_000)
+            }
+        }
+    }
+
+    private func pushWidgetSnapshot() async {
+        guard let manager = sessionManager else { return }
+        let snapshot = await SystemStatusAPI.fetch(manager)
+        guard !snapshot.isEmpty else { return }
+        await publishWidgetSnapshot(snapshot)
+    }
+
+    private func publishWidgetSnapshot(_ snapshot: SystemSnapshot) async {
+        await WidgetBridge.publish(snapshot, endpointKey: endpointKey,
+                                   qcID: trimmedQCID, directAddress: directAddress,
+                                   username: trimmedUsername)
+    }
+
+    /// 冒烟：`feed` 现拉一份快照落盘并报内容；`state` 只回读落盘文件。
+    func smokeWidget(_ command: String) async {
+        switch command {
+        case "feed":
+            guard let manager = sessionManager else {
+                NSLog("[widget] 没有会话 —— 先连上再 feed")
+                return
+            }
+            let snapshot = await SystemStatusAPI.fetch(manager)
+            NSLog("[widget] 现拉快照：device=%@ load=%@ storage=%@ health=%@ 失败=%@",
+                  snapshot.device != nil ? "✓" : "✗",
+                  snapshot.load != nil ? "✓" : "✗",
+                  snapshot.storage != nil ? "✓" : "✗",
+                  snapshot.health != nil ? "✓" : "✗",
+                  snapshot.failures.isEmpty ? "无" : snapshot.failures.joined(separator: "；"))
+            await publishWidgetSnapshot(snapshot)
+            reportStoredWidgetState()
+        case "state":
+            reportStoredWidgetState()
+        default:
+            NSLog("[widget] 不认识的指令「%@」（feed / state）", command)
+        }
+    }
+
+    private func reportStoredWidgetState() {
+        guard let data = WidgetBridge.read() else {
+            NSLog("[widget] 落盘文件不存在或解不开：%@", WidgetBridge.fileURL.path)
+            return
+        }
+        NSLog("[widget] 快照 %@：温度 %d°C · CPU %d%% · 卷 %.2f/%.2f TB · 盘 %d 块 · crashed=%@ · 端点=%@",
+              data.takenAt.description, data.temperature, data.cpuUsage,
+              Double(data.volumeUsed) / 1_099_511_627_776, Double(data.volumeTotal) / 1_099_511_627_776,
+              data.disks.count, data.crashed ? "是" : "否", data.endpointKey)
     }
 
     /// 凭据条目的键：QuickConnect ID 与直连地址是两个不同的「端点身份」，
@@ -2436,33 +2509,5 @@ final class AppState {
 
     private var trimmedUsername: String {
         username.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
-/// 直连地址解析：接受 `主机`、`主机:端口`、`https://主机:端口`。
-struct DirectAddress {
-    let host: String
-    let port: Int
-
-    static func parse(_ text: String) -> DirectAddress? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        var rest = trimmed
-        for scheme in ["https://", "http://"] where rest.hasPrefix(scheme) {
-            rest = String(rest.dropFirst(scheme.count))
-        }
-        rest = rest.split(separator: "/").first.map(String.init) ?? rest
-
-        let parts = rest.split(separator: ":")
-        switch parts.count {
-        case 1:
-            return DirectAddress(host: String(parts[0]), port: 5001)
-        case 2:
-            guard let port = Int(parts[1]) else { return nil }
-            return DirectAddress(host: String(parts[0]), port: port)
-        default:
-            return nil
-        }
     }
 }

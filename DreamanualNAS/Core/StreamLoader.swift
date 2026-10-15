@@ -41,6 +41,10 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
     /// 自定义 scheme 必须是系统不认识的，AVFoundation 才会把装载请求交给 delegate。
     static let scheme = "dmnas"
 
+    /// 三件套提升成了顶层 `StreamEndpoint`（小组件 target 不编本文件，但
+    /// SessionManager 的引用照旧）—— 这里留个旧名字。
+    typealias Endpoint = StreamEndpoint
+
     /// 冒烟日志开关（与 PlaybackEngine 同一个环境变量）。
     private static let smoke = ProcessInfo.processInfo.environment["DM_SMOKE"] == "1"
 
@@ -49,12 +53,6 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
         NSLog("[stream] %@", text)
     }
 
-    struct Endpoint: @unchecked Sendable {
-        /// `https://<主机>:<端口>/webapi/`
-        let baseURL: URL
-        let credentials: SynologyCredentials
-        let allowSelfSigned: Bool
-    }
 
     /// codec → UTI。填错得 -11828 / -11829（接口结论 §二「AVPlayer 的三个坎」）。
     static func contentType(for song: AudioSong) -> String {

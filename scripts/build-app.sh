@@ -40,6 +40,29 @@ xcrun swiftc -disable-sandbox -O -parse-as-library -target arm64-apple-macos14.0
   -o "$BUILD_DIR/DreamanualNAS"
 echo "编译成功"
 
+echo "========== 1b/3 小组件 extension =========="
+# 小组件是独立 target：精选共享源（连接层 / 凭据 / 状态解码 / 共享快照 /
+# 主题）+ widget 本体，@main 在 widget bundle 里，主 app 的入口不进来。
+# 非沙箱直读主 app 的 Application Support（App Group 在 ad-hoc 下没验过，
+# 能少一个变量就少一个变量，见 Core/WidgetBridge.swift 头注）。
+WIDGET_SOURCES=(
+  DreamanualWidget/WidgetContent.swift
+  DreamanualWidget/NASStatusWidget.swift
+  DreamanualNAS/Core/SynologyClient.swift
+  DreamanualNAS/Core/QuickConnect.swift
+  DreamanualNAS/Core/SessionManager.swift
+  DreamanualNAS/Core/StreamEndpoint.swift
+  DreamanualNAS/Core/CredentialStore.swift
+  DreamanualNAS/Core/KeychainStore.swift
+  DreamanualNAS/Core/SystemStatus.swift
+  DreamanualNAS/Core/WidgetBridge.swift
+  DreamanualNAS/DesignSystem/DreamanualTheme.nas.swift
+)
+xcrun swiftc -disable-sandbox -O -parse-as-library -target arm64-apple-macos14.0 \
+  "${WIDGET_SOURCES[@]}" \
+  -o "$BUILD_DIR/NASStatusWidget"
+echo "widget 编译成功"
+
 echo "========== 2/3 组装 app =========="
 rm -rf "$APP_NAME"
 mkdir -p "$APP_NAME/Contents/MacOS" "$APP_NAME/Contents/Resources"
@@ -50,9 +73,17 @@ if [ -f "$BUILD_DIR/Assets.car" ]; then
 fi
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
 cp DreamanualNAS/Resources/brand.svg "$APP_NAME/Contents/Resources/brand.svg"
+
+# 小组件 extension 塞进 PlugIns（先于签名；app 的 --deep 会再签一层）。
+WIDGET_PLUG="$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
+mkdir -p "$WIDGET_PLUG/Contents/MacOS"
+cp DreamanualWidget/Info.plist "$WIDGET_PLUG/Contents/Info.plist"
+cp "$BUILD_DIR/NASStatusWidget" "$WIDGET_PLUG/Contents/MacOS/NASStatusWidget"
+echo "widget 已嵌入：Contents/PlugIns/NAS Status Widget.appex"
 echo "app 组装完成：$APP_NAME"
 
 echo "========== 3/3 签名 =========="
+codesign --force --sign - "$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
 codesign --force --deep --sign - "$APP_NAME"
 echo "签名完成"
 

@@ -21,6 +21,8 @@ final class SystemStatusModel {
     private(set) var phase: Phase = .idle
     /// 四块各自可能缺（中继链路上几条接口的成功率本来就参差）。
     private(set) var snapshot: SystemSnapshot?
+    /// 拉到完整快照后叫一声 —— AppState 拿它喂小组件的共享容器。
+    var onFreshSnapshot: ((SystemSnapshot) -> Void)?
 
     /// 取一次。`force` 为假且已有快照时不动 —— 换模块回来不该白发一轮请求。
     func load(on manager: SessionManager?, force: Bool = false) async {
@@ -35,6 +37,7 @@ final class SystemStatusModel {
         }
         snapshot = result
         phase = .ready
+        onFreshSnapshot?(result)
     }
 
     /// 没取回来的那几块，拼成一句给提示条。

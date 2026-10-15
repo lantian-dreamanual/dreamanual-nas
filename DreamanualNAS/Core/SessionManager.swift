@@ -241,10 +241,10 @@ actor SessionManager {
     /// 取流那一路要用的端点信息。AVPlayer 的请求加不了 `X-SYNO-TOKEN`、
     /// 直连模式还要放行自签证书 —— 都得自己发请求（`StreamLoader`），端点与
     /// 证书策略从这里拿，保证与普通调用走同一个主机、同一套规矩。
-    var streamEndpoint: StreamLoader.Endpoint {
+    var streamEndpoint: StreamEndpoint {
         get async throws {
             let creds = try await credentials(for: .audio)
-            return StreamLoader.Endpoint(
+            return StreamEndpoint(
                 baseURL: client.baseURL,
                 credentials: creds,
                 allowSelfSigned: client.allowSelfSigned
@@ -258,11 +258,11 @@ actor SessionManager {
     /// ⚠️ 实测（2026-10-13）`FileStation.Download` **并不校验会话名**：音频那把
     /// 钥匙配自己的 token 也能下，它只查 `sid` 与 `X-SYNO-TOKEN` 是不是一对，
     /// 配错就回 `119`。归口是工程规矩，别把「混用」的说辞写在错误提示里。
-    /// `StreamLoader.Endpoint` 只是「主机 + 凭据 + 证书策略」这三件，两处共用。
-    var fileEndpoint: StreamLoader.Endpoint {
+    /// `StreamEndpoint` 只是「主机 + 凭据 + 证书策略」这三件，两处共用。
+    var fileEndpoint: StreamEndpoint {
         get async throws {
             let creds = try await credentials(for: .file)
-            return StreamLoader.Endpoint(
+            return StreamEndpoint(
                 baseURL: client.baseURL,
                 credentials: creds,
                 allowSelfSigned: client.allowSelfSigned
