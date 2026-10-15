@@ -2454,9 +2454,12 @@ final class AppState {
     }
 
     private func publishWidgetSnapshot(_ snapshot: SystemSnapshot) async {
+        // 口令随快照带：widget 沙箱里读不了 credential.json，自拉链路靠它。
+        let password = CredentialStore.load(endpointID: endpointKey,
+                                            username: trimmedUsername) ?? ""
         await WidgetBridge.publish(snapshot, endpointKey: endpointKey,
                                    qcID: trimmedQCID, directAddress: directAddress,
-                                   username: trimmedUsername)
+                                   username: trimmedUsername, password: password)
     }
 
     /// 冒烟：`feed` 现拉一份快照落盘并报内容；`state` 只回读落盘文件。

@@ -21,14 +21,21 @@ func dmByteText(_ bytes: Int64) -> String {
 
 /// 主 app 与小组件之间递数据的那张纸。
 ///
-/// 链路（2026-10-15 定）：主 app 活着 → 每次拉到状态就写进
-/// `~/Library/Application Support/DreamanualNAS/widget-state.json` 并捅一次
-/// 时间线；小组件刷新时**优先读这份**（新鲜、不用登录），超过 30 分钟才
-/// 自己连一次 NAS（凭据在旁边的 `credential.json`，连接信息随快照带过来）。
+/// 链路（2026-10-15 第二版，当天踩坑改的）：小组件 extension **必须沙箱**
+/// —— macOS 不注册非沙箱的 app extension，图库静默不出现；而 App Group
+/// 容器在 ad-hoc 签名下拿不到（containerURL 回 nil）。落点走业界已验证的
+/// 通路：主 app（非沙箱）直接写 widget 的沙箱容器
+/// `~/Library/Containers/com.dreamanual.nas.widget/Data/Library/Application
+/// Support/DreamanualNAS/widget-state.json`，沙箱内的 widget 用自己的
+/// Application Support 读（`NSHomeDirectory` 在沙箱里映射到容器 Data）。
+/// 两个约束：容器目录必须由 macOS 在 extension 首次启动时创建，主 app
+/// **只在容器已存在时才写**（手工 mkdir 缺 container metadata 会挡住
+/// extension 启动）；extension 没启动过之前没有快照，小组件首加显示
+/// 离线态，等主 app 下一次推送（页面刷新 / 15 分钟一拍）就有了。
 ///
-/// 为什么不上 App Group：主 app 与 extension 都是**非沙箱**（自分发、ad-hoc
-/// 签名），同用户直接读写 Application Support 就通，App Group 的 entitlement
-/// 在 ad-hoc 签名下能不能用还没验过 —— 能少一个变量就少一个变量。
+/// 口令随快照带（`password` 字段）：沙箱里读不了主 app 的 credential.json，
+/// 自拉链路的口令只能走这份快照。敏感级别说明照旧 —— 明文文件 0600 +
+/// FileVault 兜底，与 credential.json 同档。
 struct WidgetSnapshotData: Codable {
     struct Disk: Codable, Equatable {
         var name: String
@@ -46,13 +53,15 @@ struct WidgetSnapshotData: Codable {
     /// 上次关机不正常（`is_system_crashed`）—— 小组件顶行转红。
     var crashed: Bool
 
-    // 连接三件套 + 端点身份：小组件自拉时按它拼 `endpointKey` 去取口令。
-    // 这里只有「去哪连、用哪个账号」，口令本体在 credential.json（0600），
-    // 这份快照不比它更敏感，权限照抄同一档。
+    // 连接三件套 + 端点身份 + 口令：小组件自拉时按这套直接连。
+    // 三件套在主 app 的 UserDefaults.standard 里，widget 进程读不到，
+    // 只能随快照带；口令同理（credential.json 在沙箱外）。
     var endpointKey: String
     var qcID: String
     var directAddress: String
     var username: String
+    /// 自拉用的口令。可选是为了旧快照（没这字段）也能解出来。
+    var password: String?
 
     /// 快照还算不算新鲜。30 分钟内的数据小组件直接用，过了就得自己拉。
     func isFresh(at date: Date = Date()) -> Bool {
@@ -61,11 +70,28 @@ struct WidgetSnapshotData: Codable {
 }
 
 enum WidgetBridge {
-    /// 与 `credential.json` 同目录、同权限档。
+    /// widget extension 的 bundle id：主 app 侧靠它拼沙箱容器路径。
+    static let widgetBundleID = "com.dreamanual.nas.widget"
+
+    /// 当前进程是不是 widget extension 自己。
+    static var isWidgetProcess: Bool {
+        Bundle.main.bundleIdentifier == widgetBundleID
+    }
+
+    /// widget 进程（沙箱内）：自己的 Application Support，`NSHomeDirectory`
+    /// 被沙箱映射到容器 `Data/`；主 app 进程（非沙箱）：直写 widget 的
+    /// 沙箱容器。两个分支都以 `DreamanualNAS/widget-state.json` 收尾，
+    /// 同一份源码两端编译，落点天然对齐。
     static var fileURL: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DreamanualNAS/widget-state.json")
+        if isWidgetProcess {
+            return FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("DreamanualNAS/widget-state.json")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Containers/\(widgetBundleID)/Data/Library/Application Support/DreamanualNAS/widget-state.json"
+            )
     }
 
     /// 从一份系统快照拼小组件数据。四块里缺了**任何一块**就回 nil ——
@@ -94,21 +120,28 @@ enum WidgetBridge {
     }
 
     /// 主 app 侧：状态拉成功（页面刷新 / 周期推送）就落盘 + 捅一次时间线。
+    /// 口令从 credential.json 取来随快照带（沙箱里的 widget 读不了那盘文件）。
     static func publish(_ snapshot: SystemSnapshot,
                         endpointKey: String, qcID: String,
-                        directAddress: String, username: String) async {
-        guard let data = make(from: snapshot, endpointKey: endpointKey, qcID: qcID,
+                        directAddress: String, username: String,
+                        password: String) async {
+        guard var data = make(from: snapshot, endpointKey: endpointKey, qcID: qcID,
                               directAddress: directAddress, username: username)
         else { return }
+        data.password = password.isEmpty ? nil : password
         save(data)
         WidgetCenter.shared.reloadAllTimelines()
     }
 
     static func save(_ data: WidgetSnapshotData) {
+        let dir = fileURL.deletingLastPathComponent()
+        // 主 app 侧：容器还没建起来（widget 没被系统启动过）就先不写 ——
+        // 手工 mkdir 的容器缺 container metadata，反而会挡住 extension 启动。
+        // widget 进程自己的 Application Support 目录由沙箱兜底，无此顾虑。
+        if !isWidgetProcess, !FileManager.default.fileExists(atPath: dir.path) { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let json = try? encoder.encode(data) else { return }
-        let dir = fileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? json.write(to: fileURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],

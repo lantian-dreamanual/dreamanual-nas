@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 🔴 小组件 extension 必须沙箱：macOS 不注册非沙箱的 app extension，
+	     图库里静默不出现（2026-10-15 实测踩中——appex 都在、签名有效，
+	     图库就是搜不到，加上 app-sandbox 才登记）。 -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- 自拉链路要出网（直连 NAS / QuickConnect 解析，都当客户端连出去）。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

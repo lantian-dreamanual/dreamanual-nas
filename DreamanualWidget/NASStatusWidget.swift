@@ -3,8 +3,8 @@ import SwiftUI
 
 // ============ NAS 状态小组件（WidgetKit 管线） ============
 //
-// 数据链路：优先读主 app 落的共享快照（WidgetBridge），30 分钟内直接用；
-// 过期先自己连一次 NAS（端点与账号随快照带过来，口令去 credential.json 取）；
+// 数据链路：优先读主 app 落的共享快照（WidgetBridge，直写 widget 沙箱容器），
+// 30 分钟内直接用；过期先自己连一次 NAS（端点、账号与口令都随快照带）；
 // 都不行就转离线态，「上次在线」取旧快照的 takenAt。
 // 刷新节奏：请求 15 分钟一档；主 app 每次落盘都会捅一次时间线。
 
@@ -60,10 +60,11 @@ struct Provider: TimelineProvider {
             return entry(from: cached, date: date, family: family)
         }
         if let cached, let snapshot = await WidgetFetcher.fetch(cached),
-           let fresh = WidgetBridge.make(from: snapshot, endpointKey: cached.endpointKey,
+           var fresh = WidgetBridge.make(from: snapshot, endpointKey: cached.endpointKey,
                                          qcID: cached.qcID,
                                          directAddress: cached.directAddress,
                                          username: cached.username) {
+            fresh.password = cached.password
             WidgetBridge.save(fresh)
             return entry(from: fresh, date: date, family: family)
         }
@@ -76,10 +77,12 @@ struct Provider: TimelineProvider {
     }
 }
 
-/// 小组件自己连一次 NAS。端点与账号从共享快照拿，口令去 credential.json 取
-/// （键与主 app 同一套：endpointKey + username）。
+/// 小组件自己连一次 NAS。端点与账号、口令都随快照带 —— 沙箱里读不了
+/// 主 app 的 credential.json，口令在主 app 落盘时一并写进快照（0600 同档）。
 enum WidgetFetcher {
     static func fetch(_ connection: WidgetSnapshotData) async -> SystemSnapshot? {
+        guard let password = connection.password, !password.isEmpty else { return nil }
+        guard let password = connection.password, !password.isEmpty else { return nil }
         let client: SynologyClient
         if let direct = DirectAddress.parse(connection.directAddress) {
             // 直连（局域网 / Tailscale）：自签证书放行，与主 app 同一规矩。
@@ -92,8 +95,6 @@ enum WidgetFetcher {
         } else {
             return nil
         }
-        guard let password = CredentialStore.load(endpointID: connection.endpointKey,
-                                                  username: connection.username) else { return nil }
         let manager = SessionManager(client: client, account: connection.username,
                                      password: password)
         let snapshot = await SystemStatusAPI.fetch(manager)

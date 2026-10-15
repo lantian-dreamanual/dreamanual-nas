@@ -41,10 +41,12 @@ xcrun swiftc -disable-sandbox -O -parse-as-library -target arm64-apple-macos14.0
 echo "编译成功"
 
 echo "========== 1b/3 小组件 extension =========="
-# 小组件是独立 target：精选共享源（连接层 / 凭据 / 状态解码 / 共享快照 /
-# 主题）+ widget 本体，@main 在 widget bundle 里，主 app 的入口不进来。
-# 非沙箱直读主 app 的 Application Support（App Group 在 ad-hoc 下没验过，
-# 能少一个变量就少一个变量，见 Core/WidgetBridge.swift 头注）。
+# 小组件是独立 target：精选共享源（连接层 / 状态解码 / 共享快照 / 主题）
+# + widget 本体，@main 在 widget bundle 里，主 app 的入口不进来。
+# extension 必须沙箱（macOS 不注册非沙箱的 app extension，图库不出现），
+# 所以凭据层（CredentialStore / KeychainStore）不进 widget —— 沙箱里
+# 读不了主 app 的 credential.json，口令随快照带（见 Core/WidgetBridge.swift
+# 头注）；主 app 直写 widget 的沙箱容器。
 WIDGET_SOURCES=(
   DreamanualWidget/WidgetContent.swift
   DreamanualWidget/NASStatusWidget.swift
@@ -52,8 +54,6 @@ WIDGET_SOURCES=(
   DreamanualNAS/Core/QuickConnect.swift
   DreamanualNAS/Core/SessionManager.swift
   DreamanualNAS/Core/StreamEndpoint.swift
-  DreamanualNAS/Core/CredentialStore.swift
-  DreamanualNAS/Core/KeychainStore.swift
   DreamanualNAS/Core/SystemStatus.swift
   DreamanualNAS/Core/WidgetBridge.swift
   DreamanualNAS/DesignSystem/DreamanualTheme.nas.swift
@@ -74,7 +74,7 @@ fi
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
 cp DreamanualNAS/Resources/brand.svg "$APP_NAME/Contents/Resources/brand.svg"
 
-# 小组件 extension 塞进 PlugIns（先于签名；app 的 --deep 会再签一层）。
+# 小组件 extension 塞进 PlugIns（先于签名；主 app 单层签，见下方签名段）。
 WIDGET_PLUG="$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
 mkdir -p "$WIDGET_PLUG/Contents/MacOS"
 cp DreamanualWidget/Info.plist "$WIDGET_PLUG/Contents/Info.plist"
@@ -83,8 +83,12 @@ echo "widget 已嵌入：Contents/PlugIns/NAS Status Widget.appex"
 echo "app 组装完成：$APP_NAME"
 
 echo "========== 3/3 签名 =========="
-codesign --force --sign - "$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
-codesign --force --deep --sign - "$APP_NAME"
+# 顺序有讲究：先带 entitlements 签 appex，再单层签主 app（嵌套 code 的
+# CDHash 会 seal 进外层签名）。不能用 --deep —— 它重签嵌套 bundle 时不带
+# entitlements，会把 appex 的沙箱签名抹掉，图库立刻搜不到小组件。
+codesign --force --sign - --entitlements DreamanualWidget/Widget.entitlements \
+  "$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
+codesign --force --sign - "$APP_NAME"
 echo "签名完成"
 
 if [ "$INSTALL" -eq 1 ]; then
