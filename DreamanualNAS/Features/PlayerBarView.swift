@@ -7,7 +7,8 @@ import SwiftUI
 /// 兼作与内容区的分隔线；悬停 / 拖动**向上**展开成 6px + 10px 大拇指 + 时间气泡，
 /// 展开向上溢出条外、不挤占内容。播放行**四周一圈 16**（与横向同档），进度线挂
 /// overlay、不占布局 —— 线位算在布局里的话，顶上会比底下多出 3px。其余照原型
-/// `.player`：三栏（300 / 弹性 / 200）、播放钮 36 圆、音量条 80×4（填充 `ink-2`）。
+/// `.player`：三栏（300 / 弹性 / 200）、播放钮 36 圆、音量条视觉 80×4（填充
+/// `ink-2`）＋ `ink` 矩形滑块，命中区整行 28。
 /// 数据源是 `PlaybackEngine` —— 没有引擎（未连接）或队列为空时是**空态**：
 /// 线保持 3px 灰、控件禁用、左侧写「未在播放」。左侧的封面与歌名还是一颗
 /// 进出**沉浸模式**的按钮（有歌才点得动）。
@@ -278,17 +279,27 @@ struct PlayerBarView: View {
 
     // MARK: 音量
 
+    /// 音量条：视觉 80×4，**命中区抬到整行 28**（4pt 的条基本点不中，2026-10-15
+    /// 用户点名）。滑块是一小段 `ink` 亮色矩形（3×10）骑在填充端 —— 比填充的
+    /// `ink-2` 亮一档，又不带圆形拇指，视觉重量压在进度线拇指（10px 骑沿）之下。
     private var volume: some View {
         HStack(spacing: DmSpace.s8) {
             LucideIcon("volume-2", size: DmIcon.i16)
                 .foregroundColor(Color.dmInk3)
             GeometryReader { geo in
+                let fillWidth = geo.size.width * (engine?.volume ?? 0.7)
                 ZStack(alignment: .leading) {
                     Rectangle()
                         .fill(Color.dmPanel3)
+                        .frame(height: 4)
                     Rectangle()
                         .fill(Color.dmInk2)
-                        .frame(width: geo.size.width * (engine?.volume ?? 0.7))
+                        .frame(width: fillWidth, height: 4)
+                    Rectangle()
+                        .fill(Color.dmInk)
+                        .frame(width: DmLine.bold, height: DmIcon.i10)
+                        .offset(x: max(0, min(fillWidth - DmLine.bold / 2,
+                                              geo.size.width - DmLine.bold / 2)))
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -298,8 +309,9 @@ struct PlayerBarView: View {
                         }
                 )
             }
-            .frame(width: 80, height: 4)
+            .frame(width: 80, height: DmControl.h28)
         }
         .frame(width: 200, alignment: .trailing)
+        .contentShape(Rectangle())
     }
 }

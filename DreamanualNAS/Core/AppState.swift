@@ -2243,10 +2243,12 @@ final class AppState {
     ///
     /// AI 环境点不了 UI、拖不动窗口、按不了保存面板 —— 这三件事只能让程序自己走。
     /// 认得的指令：`window=<宽>x<高>` 摆主窗内容尺寸（最小窗宽那一屏要真机看）；
-    /// `songmenu` 打开曲库第一首的右键菜单；`download` 把曲库第一首下到临时目录
-    /// （走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）。
-    /// （`rclick=` 合成真右键的记号试过就拆了：事件进得了 NSApp、进不了
-    /// 视图层 —— 合成右键连 AppKit 子视图的 hitTest 都不过，见工程坑。）
+    /// `songmenu` 或 `songmenu=<x>:<y>` 打开曲库第一首的右键菜单（后者按窗口坐标
+    /// 开在任意点）；`scroll=<n>` 往下滚 n 格（真 scrollWheel 走 `window.sendEvent`）；
+    /// `rclick=<x>:<y>` 在窗口坐标发一次**真右键**（`window.sendEvent`，走
+    /// `RightClickCatcher` 同一条 hitTest 链 —— 之前用 CGEvent 投递进不了视图层，
+    /// sendEvent 是从窗口自己派发，捕获层收得到）；`download` 把曲库第一首下到
+    /// 临时目录（走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）。
     func smokeUI(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
             NSLog("[ui] 未连接，跳过")
@@ -2259,6 +2261,12 @@ final class AppState {
                 await smokeWindow(String(token.dropFirst("window=".count)))
             } else if token == "songmenu" {
                 await smokeSongMenu(manager)
+            } else if token.hasPrefix("songmenu=") {
+                await smokeSongMenuAt(String(token.dropFirst("songmenu=".count)), manager)
+            } else if token.hasPrefix("scroll=") {
+                await smokeScroll(String(token.dropFirst("scroll=".count)))
+            } else if token.hasPrefix("rclick=") {
+                await smokeRightClick(String(token.dropFirst("rclick=".count)))
             } else if token == "download" {
                 await smokeDownload(manager)
             } else if token == "tagload" {
@@ -2289,6 +2297,76 @@ final class AppState {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
         NSLog("[window] 没等到窗口")
+    }
+
+    /// 冒烟：按窗口坐标把第一首的右键菜单开在任意点（与 `songmenu` 同一入口，
+    /// 点可指定 —— 量漂移用）。
+    private func smokeSongMenuAt(_ spec: String, _ manager: SessionManager) async {
+        let parts = spec.split(separator: ":").compactMap { Double($0) }
+        guard parts.count == 2, let x = parts.first, let y = parts.last else {
+            NSLog("[ui] songmenu 认不出「%@」（要 x:y）", spec)
+            return
+        }
+        await library.loadIfNeeded(manager)
+        guard let song = library.songs.first else {
+            NSLog("[ui] 曲库空，开不了菜单")
+            return
+        }
+        openSongMenu(song, at: CGPoint(x: x, y: y), queue: library.songs)
+        NSLog("[ui] 菜单请求点 (%.0f, %.0f)", x, y)
+    }
+
+    /// 冒烟：往下滚 n 格（真 scrollWheel 经 `window.sendEvent`，列表自己接）。
+    private func smokeScroll(_ spec: String) async {
+        guard let n = Int(spec), n > 0, let window = hostingWindow() else {
+            NSLog("[ui] scroll 认不出「%@」（要正整数且窗口已起）", spec)
+            return
+        }
+        await MainActor.run {
+            for _ in 0..<n {
+                let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                 wheelCount: 1, wheel1: -3, wheel2: 0, wheel3: 0)
+                if let ev = cg.flatMap({ NSEvent(cgEvent: $0) }) {
+                    window.sendEvent(ev)
+                }
+            }
+        }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        NSLog("[ui] 已滚 %d 格", n)
+    }
+
+    /// 冒烟：窗口坐标发一次真右键（`window.sendEvent`，走捕获层同一条 hitTest）。
+    /// 菜单开完留在屏上 —— 之后用窗口截图量「请求点 → 捕获层报点 → 渲染点」。
+    private func smokeRightClick(_ spec: String) async {
+        let parts = spec.split(separator: ":").compactMap { Double($0) }
+        guard parts.count == 2, let x = parts.first, let y = parts.last,
+              let window = hostingWindow() else {
+            NSLog("[ui] rclick 认不出「%@」（要 x:y 且窗口已起）", spec)
+            return
+        }
+        // 不激活连 hitTest 都进不去 —— 事件先经 app 判 key window。
+        await activateForSyntheticInput(window)
+        await MainActor.run {
+            // 窗口坐标（左上原点）→ window 基坐标（左下原点）。hiddenTitleBar 的
+            // contentView 铺满整个 frame，直接用 frame 翻 y。
+            let loc = NSPoint(x: window.frame.minX + x,
+                              y: window.frame.maxY - y)
+            NSLog("[ui] 右键请求窗口坐标 (%.0f, %.0f) → window 基坐标 (%.0f, %.0f) frame=%@",
+                  x, y, loc.x, loc.y, NSStringFromRect(window.frame))
+            for type in [NSEvent.EventType.rightMouseDown, .rightMouseUp] {
+                if let ev = NSEvent.mouseEvent(with: type, location: loc,
+                                               modifierFlags: [],
+                                               timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: window.windowNumber,
+                                               context: nil, eventNumber: 0,
+                                               clickCount: 1, pressure: 1) {
+                    // 直投窗口（app 不在前台时 NSApp.sendEvent 会丢事件）；
+                    // 捕获层 hitTest 认 `window.currentEvent`，这条路能进去。
+                    window.sendEvent(ev)
+                }
+            }
+        }
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
     }
 
     /// 冒烟：读曲库第一首的标签（`TagEditor.load`，**只读**，验证标签接口通路）。
