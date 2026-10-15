@@ -301,6 +301,11 @@ struct PlayerBarView: View {
                         .offset(x: max(0, min(fillWidth - DmLine.bold / 2,
                                               geo.size.width - DmLine.bold / 2)))
                 }
+                // GeometryReader 默认把子视图钉左上角：80×4 的轨道被顶到 28pt
+                // 命中区的顶部（中心差约 12pt），用户看到的「音量区错位」就是它
+                //（2026-10-15 截图像素对账：图标中心比轨道中心低 9.25pt）。撑满
+                // 后按 .leading 落位＝水平靠左、垂直居中。
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
