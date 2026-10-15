@@ -217,6 +217,8 @@ final class AppState {
     }
 
     func openSongMenu(_ song: AudioSong, at point: CGPoint, queue: [AudioSong]) {
+        // TODO(诊断): 右键漂移排查，定位完拆。歌名进日志 —— 菜单是谁的一眼可对。
+        rcDebugLog("菜单打开「\(song.artist) - \(song.title)」· 请求点 (\(Int(point.x)),\(Int(point.y)))")
         songMenu = SongMenuRequest(song: song, point: point, queue: queue)
     }
 

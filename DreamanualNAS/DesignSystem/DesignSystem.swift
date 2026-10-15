@@ -1437,10 +1437,17 @@ struct RightClickCatcher: NSViewRepresentable {
         override func rightMouseDown(with event: NSEvent) {
             guard let content = window?.contentView else { return }
             let inContent = content.convert(event.locationInWindow, from: nil)
-            // AppKit 原点在左下、SwiftUI 在左上。
-            let point = CGPoint(x: inContent.x, y: content.bounds.height - inContent.y)
+            // AppKit 原生坐标左下原点、SwiftUI 左上原点 —— 但宿主视图
+            // （NSHostingView）本身是 flipped 视图，`convert` 出来**已经是**
+            // 左上原点。再手工翻一次就镜像了：点窗口下半段，菜单飞到上半段
+            // 对称位置（2026-10-15 晚用户实锤：点 Mechanical Spring 一带，
+            // 菜单出现在第 3-4 行韩文歌旁；日志里「报点==locInWindow」就是
+            // 双重翻转的指纹）。按 flippedness 走，宿主不 flipped 时才手翻。
+            let point = content.isFlipped
+                ? inContent
+                : CGPoint(x: inContent.x, y: content.bounds.height - inContent.y)
             // TODO(诊断): 右键漂移排查，定位完拆。
-            rcDebugLog("捕获层报点 (\(Int(point.x)),\(Int(point.y))) · locInWindow=(\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))) · content=\(NSStringFromRect(content.bounds)) · 窗口frame=\(NSStringFromRect(window?.frame ?? .zero))")
+            rcDebugLog("捕获层报点 (\(Int(point.x)),\(Int(point.y))) · locInWindow=(\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))) · content=\(NSStringFromRect(content.bounds)) flipped=\(content.isFlipped) · 窗口frame=\(NSStringFromRect(window?.frame ?? .zero))")
             onRightClick?(point)
         }
     }
