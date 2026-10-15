@@ -5,6 +5,10 @@ import AppKit
 /// 带上窗口标题栏、菜单、原生控件；只给根视图加 `.preferredColorScheme(.dark)`
 /// 管不到这些。
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 外壳（状态栏 + 关窗转后台）。`appState` 由根视图那边的 `.task` 挂上来，
+    /// 状态栏菜单展开时才取值，启动头几百毫秒没挂不碍事。
+    private let shell = AppShellController()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         DreamanualAppearance.apply()
         // 🔴 Dock 图标显式钉一次：Finder / 启动台能从 CFBundleIconFile 解析出
@@ -15,6 +19,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let image = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = image
         }
+        shell.install()
+    }
+
+    /// 关窗转后台：最后一个窗口关掉（理论上到不了，藏窗拦截在前）进程也不退，
+    /// 播放与会话照跑 —— 这是兜底，不是主路径。
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    /// Dock 点图标唤起：有窗（藏着）就取出来置前；窗口真没了就交回 SwiftUI
+    /// 重建 WindowGroup（返回 true 让 SwiftUI 的恢复机制接着跑）。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        shell.showMainWindow()
+        return true
+    }
+
+    /// Dock 右键菜单：不开 app 界面也能唤起主窗。
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let open = NSMenuItem(title: "打开主窗", action: #selector(AppShellController.showClicked), keyEquivalent: "")
+        open.target = shell
+        menu.addItem(open)
+        return menu
+    }
+
+    /// 根视图挂上 AppState（状态栏菜单取曲名与播放控制用）。
+    func attachAppState(_ state: AppState) {
+        shell.appState = state
+    }
+
+    /// `DM_SHELL=1`：外壳行为冒烟（藏窗 / 合成 ⌘W / 唤起），见 AppShellController。
+    func runShellSmoke() async {
+        await shell.smoke()
     }
 }
 
@@ -33,6 +70,8 @@ struct DreamanualNASApp: App {
                 // 最小的那一段里，表头最右那格（竖三点）被裁掉半个（2026-10-13 用户抓到）。
                 .frame(minWidth: 1170, minHeight: 620)
                 .task {
+                    // 状态栏菜单要用的状态挂上来（重建窗口时 .task 重跑，重复挂无害）。
+                    appDelegate.attachAppState(state)
                     // 启动即重解析端点再自动登录（端点会变，不缓存到磁盘）。
                     await state.restoreAndAutoConnect()
                     // 键盘控制键（空格 / ←→）挂了才认，装一次就够。
@@ -75,6 +114,10 @@ struct DreamanualNASApp: App {
                     // 与那两条同一理由：AI 点不了 UI，页头那个刷新钮也点不了。
                     if let command = ProcessInfo.processInfo.environment["DM_STATUS"] {
                         await state.smokeStatus(command)
+                    }
+                    // DM_SHELL=1：外壳行为冒烟（藏窗 / 合成 ⌘W / 唤起）。
+                    if ProcessInfo.processInfo.environment["DM_SHELL"] == "1" {
+                        await appDelegate.runShellSmoke()
                     }
                 }
         }

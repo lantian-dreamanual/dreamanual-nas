@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dreamanual NAS 助手 · 桌面小组件原型</title>
+<!--
+  Dreamanual NAS 助手 · 桌面小组件原型（2026-10-15 · 第 1 稿）
+
+  用途：定桌面小组件（WidgetKit）四张形态：小组件（Small）/ 中组件（Medium）
+        各分「在线 / 离线」两态。只做 NAS 状态，不做播放控制（控制中心已覆盖）。
+
+  字段与排序（2026-10-15 用户定）：是否在线 > 容量 > CPU > 温度。
+    内存不上小组件 —— 用户排序里没有它；盘温并进温度列，不单开。
+
+  尺寸：macOS 系统小组件按显示缩放浮动，demo 按 Small ≈ 160×160、
+        Medium ≈ 348×160 画；系统自带圆角裁切与容器边距，demo 里用
+        22px 圆角 + 12px 内边距近似，落码以 containerBackground API 为准。
+
+  令牌：逐字抄自 界面原型.html 的 :root（design/tokens.json 0.9.0，sky 族）。
+  数据：全部真机实测值（2026-10-15 上午）——容量 12.12/15.71 TB · 77.2%、
+        CPU 26%（user 24 + system 2）、机器 56°C、两盘 38/39°C。
+
+  离线态的立场：离线用**中性灰**（关机是正常操作，离线 ≠ 故障）；
+    只有服务端报 `is_system_crashed`（上次关机不正常）才转 danger 红。
+    「连不上」配「上次在线 MM-dd HH:mm」，时间来自最后一次成功快照。
+-->
+<style>
+/* ============ 令牌（照 design/dist/css 逐字抄，强调色族 sky） ============ */
+:root{
+  color-scheme:dark;
+  --bg:#0a0a0a; --panel:#171717; --panel-2:#262626; --panel-3:#404040;
+  --line:#262626; --line-2:#404040;
+  --ink:#f5f5f5; --ink-2:#d4d4d4; --ink-3:#a1a1a1;
+  --accent:#00a6f4; --accent-2:#00bcff; --accent-soft:#052f4a; --accent-line:#00598a;
+  --accent-fill:#00a6f4; --on-accent:#0a0a0a;
+  --danger:#fb2c36; --danger-soft:#460809; --danger-line:#9f0712;
+  --danger-ink:#ffa2a2; --danger-ink-strong:#ff6467;
+  --ok:#00bc7d; --ok-soft:#002c22; --ok-line:#006045;
+  --ok-ink:#5ee9b5; --ok-ink-strong:#00d492;
+  --r-4:4px; --r-6:6px; --r-8:8px; --r-12:12px; --r-16:16px;
+  --sp-2:2px; --sp-4:4px; --sp-6:6px; --sp-8:8px; --sp-10:10px; --sp-12:12px; --sp-16:16px;
+  --fs-10:10px; --fs-11:11px; --fs-12:12px; --fs-13:13px; --fs-20:20px;
+  --lw-hairline:.5px; --lw-base:1px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;
+  color:var(--ink);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  padding:var(--sp-16);display:flex;flex-direction:column;align-items:center;gap:var(--sp-16);
+}
+b{font-weight:600}
+
+/* ============ 说明条 ============ */
+.pvbar{
+  width:900px;display:flex;align-items:center;gap:var(--sp-16);
+  background:var(--panel);border:var(--lw-hairline) solid var(--line-2);
+  border-radius:var(--r-12);padding:var(--sp-10) var(--sp-14);
+}
+.pvbar b{font-size:14px}
+.pvbar span{font-size:var(--fs-11);color:var(--ink-3)}
+
+/* ============ 桌面板（示意 widget 摆在桌面上的观感） ============ */
+.desk{
+  width:900px;padding:var(--sp-16);
+  background:
+    radial-gradient(1200px 500px at 20% -10%, #1d3550 0%, transparent 60%),
+    radial-gradient(900px 420px at 90% 110%, #3b2440 0%, transparent 55%),
+    #0d0d0f;
+  border:var(--lw-hairline) solid var(--line-2);
+  border-radius:var(--r-16);
+  display:flex;flex-wrap:wrap;gap:var(--sp-16);
+  align-items:flex-start;
+}
+.slot{display:flex;flex-direction:column;gap:var(--sp-8);align-items:flex-start}
+.slot .cap{font-size:var(--fs-11);color:var(--ink-3);padding-left:var(--sp-4)}
+
+/* ============ 小组件容器（系统会裁圆角，demo 用 22px 近似） ============ */
+.wg{
+  background:var(--panel);
+  border-radius:22px;
+  box-shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px rgba(0,0,0,.35);
+  padding:12px;
+  display:flex;flex-direction:column;
+  color:var(--ink);
+}
+.wg.small{width:160px;height:160px}
+.wg.medium{width:348px;height:160px}
+.wg *{min-width:0}
+
+/* 顶行：在线标志 + 更新时间 */
+.wg .top{display:flex;align-items:center;gap:var(--sp-6)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.ok{background:var(--ok-ink-strong);box-shadow:0 0 6px rgba(0,212,146,.55)}
+.dot.off{background:var(--ink-3)}
+.dot.bad{background:var(--danger-ink-strong);box-shadow:0 0 6px rgba(255,100,103,.55)}
+.st{font-size:var(--fs-11);font-weight:500}
+.st.ok{color:var(--ok-ink-strong)}
+.st.off{color:var(--ink-3)}
+.st.bad{color:var(--danger-ink-strong)}
+.upt{margin-left:auto;font-size:var(--fs-10);color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+/* 容量块 */
+.lab{font-size:var(--fs-11);color:var(--ink-3)}
+.val{font-size:var(--fs-20);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.val small{font-size:var(--fs-11);font-weight:400;color:var(--ink-3);margin-left:2px;letter-spacing:0}
+.prog{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;margin-top:6px}
+.prog i{display:block;height:100%;border-radius:3px;background:var(--accent-fill)}
+.hint{font-size:var(--fs-10);color:var(--ink-3);margin-top:4px;font-variant-numeric:tabular-nums}
+
+/* 底行（Small）：CPU 与温度并排 */
+.duo{margin-top:auto;display:flex;gap:var(--sp-8)}
+.duo .cell{flex:1;min-width:0}
+.duo .k{font-size:var(--fs-10);color:var(--ink-3)}
+.duo .v{font-size:var(--fs-13);font-weight:600;font-variant-numeric:tabular-nums;margin-top:1px}
+
+/* Medium 三列 */
+.cols{flex:1;display:grid;grid-template-columns:1.5fr 1fr 1.1fr;gap:var(--sp-12);margin-top:var(--sp-10);min-height:0}
+.col{min-width:0}
+.col + .col{border-left:var(--lw-hairline) solid var(--line-2);padding-left:var(--sp-12)}
+.col .val{margin-top:2px}
+.kv{display:flex;justify-content:space-between;gap:var(--sp-4);font-size:var(--fs-11);margin-top:3px}
+.kv .k{color:var(--ink-3)}
+.kv .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+
+/* 离线态：居中 */
+.wg.offline{align-items:center;justify-content:center;gap:var(--sp-4)}
+.wg.offline .top{position:absolute}
+.wg.offline{position:relative;justify-content:flex-end;padding-bottom:26px}
+.wg.offline .big{font-size:var(--fs-13);font-weight:600;color:var(--ink-2)}
+.wg.offline .last{font-size:var(--fs-11);color:var(--ink-3)}
+.wg.offline .top{top:12px;left:12px;right:12px}
+
+/* ============ 备注 ============ */
+.notes{
+  width:900px;background:var(--panel);border:var(--lw-hairline) solid var(--line-2);
+  border-radius:var(--r-12);padding:var(--sp-14) var(--sp-16);
+  display:flex;flex-direction:column;gap:var(--sp-6);
+}
+.notes .n{font-size:var(--fs-12);color:var(--ink-2);display:flex;gap:var(--sp-8)}
+.notes .n::before{content:"·";color:var(--ink-3);flex:none}
+.notes b{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<div class="pvbar">
+  <b>桌面小组件 · 形态稿</b>
+  <span>字段排序：是否在线 &gt; 容量 &gt; CPU &gt; 温度（2026-10-15 定）· 数据全是真机实测值 · 只读，不做播放控制</span>
+</div>
+
+<!-- ============ 在线两档 ============ -->
+<div class="desk">
+
+  <div class="slot">
+    <div class="wg small">
+      <div class="top">
+        <span class="dot ok"></span><span class="st ok">在线</span>
+        <span class="upt">09:45</span>
+      </div>
+      <div class="lab" style="margin-top:8px">存储空间</div>
+      <div class="val">12.12<small>/ 15.71 TB</small></div>
+      <div class="prog"><i style="width:77.2%"></i></div>
+      <div class="hint">已用 77.2% · 可用 3.58 TB</div>
+      <div class="duo">
+        <div class="cell"><div class="k">CPU</div><div class="v">26%</div></div>
+        <div class="cell"><div class="k">温度</div><div class="v">56°C</div></div>
+      </div>
+    </div>
+    <div class="cap">小组件 · 在线（≈160×160）</div>
+  </div>
+
+  <div class="slot">
+    <div class="wg medium">
+      <div class="top">
+        <span class="dot ok"></span><span class="st ok">在线</span>
+        <span class="upt">09:45 更新</span>
+      </div>
+      <div class="cols">
+        <div class="col">
+          <div class="lab">存储空间</div>
+          <div class="val">12.12<small>/ 15.71 TB</small></div>
+          <div class="prog"><i style="width:77.2%"></i></div>
+          <div class="hint">已用 77.2% · 可用 3.58 TB</div>
+        </div>
+        <div class="col">
+          <div class="lab">CPU</div>
+          <div class="val">26%</div>
+          <div class="hint">利用率（用户+系统）</div>
+          <div class="kv"><span class="k">负载 1 分钟</span><span class="v">1.10</span></div>
+        </div>
+        <div class="col">
+          <div class="lab">温度</div>
+          <div class="val">56°C</div>
+          <div class="kv"><span class="k">硬盘 1</span><span class="v">38°C</span></div>
+          <div class="kv"><span class="k">硬盘 2</span><span class="v">39°C</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">中组件 · 在线（≈348×160）</div>
+  </div>
+
+  <!-- ============ 离线两档 ============ -->
+  <div class="slot">
+    <div class="wg small offline">
+      <div class="top">
+        <span class="dot off"></span><span class="st off">离线</span>
+      </div>
+      <div class="big">连不上</div>
+      <div class="last">上次在线 10-14 23:05</div>
+    </div>
+    <div class="cap">小组件 · 离线（中性灰）</div>
+  </div>
+
+  <div class="slot">
+    <div class="wg medium offline">
+      <div class="top">
+        <span class="dot off"></span><span class="st off">离线</span>
+      </div>
+      <div class="big">连不上 NAS</div>
+      <div class="last">上次在线 10-14 23:05 · QuickConnect 与直连地址都试过</div>
+    </div>
+    <div class="cap">中组件 · 离线（中性灰）</div>
+  </div>
+
+</div>
+
+<div class="notes">
+  <div class="n"><b>在线标志排第一</b>：绿点 + 「在线」在左上角固定位置，离线转灰点 + 「离线」—— 扫一眼先知道 NAS 死活，再看数。</div>
+  <div class="n"><b>容量是主值</b>：20 号字带进度条（唯一用进度条的字段），CPU 与温度压到 13 号辅助位 —— 容量是「该清了吗」的决策信息，其余是健康信号。</div>
+  <div class="n"><b>离线 ≠ 故障</b>：关机是正常操作，离线态走中性灰。只有服务端报上次关机不正常（<span style="font-variant-numeric:tabular-nums">is_system_crashed</span>）才转红点红字，那一态不在本稿，落码时挂 health 标志。</div>
+  <div class="n"><b>数据时效</b>：右上角永远带抓取时间 —— 小组件按系统调度刷新（约 15 分钟一档），「这个数是多久前的」必须自己说清。</div>
+  <div class="n"><b>中组件的 CPU 列</b>：利用率为主值、1 分钟负载进辅助行 —— 两个数的口径不同（百分比 vs 运行队列长度），混在一格会误读。</div>
+</div>
+
+</body>
+</html>
