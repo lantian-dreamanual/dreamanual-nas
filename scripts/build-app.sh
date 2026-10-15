@@ -2,17 +2,18 @@
 # ============================================================
 # Dreamanual NAS 助手 构建脚本（骨架阶段：编译 → 组装 → 签名）
 # 用法:
-#   ./scripts/build-app.sh              # 出 dist/Dreamanual NAS 助手.app
+#   ./scripts/build-app.sh              # 出 /tmp/nas-build/Dreamanual NAS 助手.app
 #   ./scripts/build-app.sh --install    # 额外装进 /Applications
 #
+# 🔴 .app 不落开发目录（会被注册成第二个应用）：组装产物一律在 /tmp/nas-build/，
+# dist/ 只收发版物料（DMG，发版批再接）。
 # 与产品线其它 app 同一套链路：actool（有资产目录才跑）→ swiftc → 组 .app → codesign。
-# DMG 打包等发版批再接（投资监控 / 视频下载用的是 appdmg 方案）。
 # ============================================================
 
 set -e
 cd "$(dirname "$0")/.."
 
-APP_NAME="dist/Dreamanual NAS 助手.app"
+APP_NAME="/tmp/nas-build/Dreamanual NAS 助手.app"
 BUILD_DIR="/tmp/nas-build"
 INSTALL=0
 for arg in "$@"; do

@@ -29,6 +29,43 @@ struct AudioSong: Identifiable, Equatable {
     /// 不重拉整页（写评分那条路要回读校验，拿回来的值与这里对齐）。
     var rating: Int
 
+    /// 标签编辑保存后的行内替换。字段全是 `let`，造一份新的换上去
+    /// （音频信息那几项不归标签管，原样带走）。
+    func withTags(_ t: SongTagInfo) -> AudioSong {
+        AudioSong(
+            id: id, path: path, title: t.title, artist: t.artist, album: t.album,
+            albumArtist: t.albumArtist, genre: t.genre, year: t.year,
+            track: t.track, disc: t.disc, duration: duration, bitrate: bitrate,
+            frequency: frequency, codec: codec, container: container,
+            filesize: filesize, rating: rating
+        )
+    }
+
+    private init(
+        id: String, path: String, title: String, artist: String, album: String,
+        albumArtist: String, genre: String, year: Int?, track: Int?, disc: Int?,
+        duration: Int, bitrate: Int, frequency: Int, codec: String,
+        container: String, filesize: Int64, rating: Int
+    ) {
+        self.id = id
+        self.path = path
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.albumArtist = albumArtist
+        self.genre = genre
+        self.year = year
+        self.track = track
+        self.disc = disc
+        self.duration = duration
+        self.bitrate = bitrate
+        self.frequency = frequency
+        self.codec = codec
+        self.container = container
+        self.filesize = filesize
+        self.rating = rating
+    }
+
     init?(_ raw: [String: Any]) {
         let id = jsonString(raw["id"])
         let title = jsonString(raw["title"])
@@ -710,7 +747,8 @@ enum AudioLibrary {
 // MARK: - JSON 取值
 
 /// 接口偶尔把数字给成字符串（`duration` 见过 `"252"`），两种都收。
-private func jsonInt(_ value: Any?) -> Int? {
+/// （模块内公用：标签编辑的 `TagEditor` 也用同一套。）
+func jsonInt(_ value: Any?) -> Int? {
     switch value {
     case let number as Int: return number
     case let number as Double: return Int(number)
@@ -719,7 +757,7 @@ private func jsonInt(_ value: Any?) -> Int? {
     }
 }
 
-private func jsonString(_ value: Any?) -> String {
+func jsonString(_ value: Any?) -> String {
     switch value {
     case let text as String: return text
     case let number as NSNumber: return number.stringValue

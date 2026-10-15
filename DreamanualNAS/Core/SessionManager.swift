@@ -107,6 +107,25 @@ actor SessionManager {
         }
     }
 
+    /// 标签编辑内部接口（Audio Station 网页端的私有 CGI，不在 webapi 体系里，
+    /// 见 `TagEditor`）。鉴权三件套：表单 `_sid` 与请求头 `X-SYNO-TOKEN` 由
+    /// `client.post` 带上，Cookie `id=<sid>` 这里补 —— 这枚 CGI 只认 Cookie
+    /// 会话，缺它回 `noprivilege`（2026-10-15 重探，V3 组合通过）。
+    /// 会话失效丢掉重登、重放这一条，与 `call` 同一条规矩。
+    func postTagEditor(_ fields: [String: String]) async throws -> Any {
+        let target = "/webman/3rdparty/AudioStation/tagEditorUI/tag_editor.cgi"
+        let creds = try await credentials(for: .audio)
+        do {
+            return try await client.post(path: target, params: fields, credentials: creds,
+                                         cookie: "id=\(creds.sid)")
+        } catch let error as SynologyError where error.isSessionInvalid {
+            sessions[.audio] = nil
+            let refreshed = try await credentials(for: .audio)
+            return try await client.post(path: target, params: fields, credentials: refreshed,
+                                         cookie: "id=\(refreshed.sid)")
+        }
+    }
+
     /// 与 `call` 同构，但走 **GET**。歌词那两个接口实测是 GET 形态（接口结论
     /// §八的探测脚本就是 GET），照实测写就行 —— 会话失效同样丢掉重登、重放这一条。
     func get(

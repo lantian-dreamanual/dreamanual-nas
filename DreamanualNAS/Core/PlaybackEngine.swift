@@ -131,6 +131,13 @@ final class PlaybackEngine {
         queue[index].rating = rating
     }
 
+    /// 标签编辑保存后同步队列里那一份 —— 播放条与队列显示的是这里的拷贝，
+    /// 不同步的话改完标题，正在播的那条还挂着旧名。
+    func applyTags(_ info: SongTagInfo, to songID: String) {
+        guard let index = queue.firstIndex(where: { $0.id == songID }) else { return }
+        queue[index] = queue[index].withTags(info)
+    }
+
     /// 随机播放：重排播放顺序，当前这首歌钉在第一位 —— 点开随即听到的还是
     /// 正在放的这首，后面的顺序打乱。再点一次回到原序。
     func toggleShuffle() {

@@ -80,6 +80,13 @@ struct RootView: View {
                 FileConflictCard(prompt: prompt)
             }
         }
+        // 编辑歌曲信息（歌曲右键菜单）。同样盖在最上层 —— 它是从菜单层里开的。
+        .dmModal(
+            isPresented: state.tagEditor != nil,
+            onDismiss: { state.closeTagEditor() }
+        ) {
+            TagEditorCard()
+        }
     }
 
     /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，
@@ -122,12 +129,20 @@ struct RootView: View {
                         DmMenuRow(title: "在文件管理中显示", icon: "folder-open") {
                             Task { await state.revealInFiles(request.song) }
                         }
+                        DmMenuRow(title: "编辑歌曲信息", icon: "pencil") {
+                            state.closeSongMenu()
+                            state.openTagEditor(request.song)
+                        }
                     }
                     .offset(x: SongMenu.anchor(request.point, in: geo.size).x,
                             y: SongMenu.anchor(request.point, in: geo.size).y)
                 }
             }
         }
+        // geo 原点必须钉在窗口顶：右键捕获层报的是窗口坐标（contentView 原点），
+        // 这层若被安全区垫下去，菜单整体就往下坠一个标题栏的高度（2026-10-15
+        // 用户报「右键菜单漂移到很远」，实测坠 32pt）。
+        .ignoresSafeArea()
     }
 
     /// 文件列表的右键菜单层：与歌曲菜单同构（一层透明遮罩接「点别处关闭」，菜单卡按
@@ -198,6 +213,8 @@ struct RootView: View {
                 }
             }
         }
+        // 与歌曲菜单同一条规矩：geo 原点钉窗口顶（见 songMenuLayer 的注）。
+        .ignoresSafeArea()
     }
 }
 
@@ -206,8 +223,8 @@ struct RootView: View {
 enum SongMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
-    /// 项数（播放 / 下一首播放 / 评分 / 下载 / 在文件管理中显示）。
-    static let itemCount = 5
+    /// 项数（播放 / 下一首播放 / 评分 / 下载 / 在文件管理中显示 / 编辑歌曲信息）。
+    static let itemCount = 6
     private static let inset: CGFloat = 8
 
     /// 指针位置 → 菜单左上角，越界时收回窗口内（同访达 / 原型那层绝对定位的意思）。

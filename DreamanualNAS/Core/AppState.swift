@@ -236,6 +236,59 @@ final class AppState {
         showToast("「\(song.title)」已排到下一首", .ok)
     }
 
+    // MARK: - 编辑歌曲信息
+
+    /// 标签编辑弹窗的状态。`info` 与 `loadError` 二者先后到 —— 读回了才能编辑。
+    private(set) var tagEditor: TagEditorState?
+
+    struct TagEditorState: Identifiable {
+        let id = UUID()
+        let song: AudioSong
+        /// NAS 读回来的现值（表单初值）。还在读时是 nil。
+        var info: SongTagInfo?
+        /// 读 / 写失败的原因（读写共用一槽：都占卡片中部那条提示位）。
+        var errorMessage: String?
+        /// 写入进行中（确认钮转圈、防重复提交）。
+        var isSaving = false
+    }
+
+    /// 菜单「编辑歌曲信息」：开弹窗并去 NAS 读现值（标签编辑接口，见 `TagEditor`）。
+    func openTagEditor(_ song: AudioSong) {
+        guard let manager = sessionManager else { return }
+        tagEditor = TagEditorState(song: song)
+        Task {
+            do {
+                let info = try await TagEditor.load(manager, path: song.path)
+                if tagEditor?.song.id == song.id { tagEditor?.info = info }
+            } catch {
+                if tagEditor?.song.id == song.id {
+                    tagEditor?.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func closeTagEditor() {
+        tagEditor = nil
+    }
+
+    /// 弹窗「保存」：真写 ID3 到 NAS 文件（索引 0 秒跟上）。落地后改曲库行与
+    /// 队列里那两份拷贝 —— 不整页重拉（与评分同一条道理）。
+    func saveTagEditor(_ info: SongTagInfo) async {
+        guard let manager = sessionManager, let editor = tagEditor, !editor.isSaving else { return }
+        tagEditor?.isSaving = true
+        do {
+            try await TagEditor.apply(manager, path: editor.song.path, tags: info)
+            library.applyTags(info, to: editor.song.id)
+            playback?.applyTags(info, to: editor.song.id)
+            tagEditor = nil
+            showToast("「\(info.title)」标签已写入", .ok)
+        } catch {
+            tagEditor?.isSaving = false
+            tagEditor?.errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - 下载
 
     /// 右键「下载」：先让用户挑存哪儿，再把曲库里那个**原始文件**拉下来。
@@ -2192,6 +2245,8 @@ final class AppState {
     /// 认得的指令：`window=<宽>x<高>` 摆主窗内容尺寸（最小窗宽那一屏要真机看）；
     /// `songmenu` 打开曲库第一首的右键菜单；`download` 把曲库第一首下到临时目录
     /// （走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）。
+    /// （`rclick=` 合成真右键的记号试过就拆了：事件进得了 NSApp、进不了
+    /// 视图层 —— 合成右键连 AppKit 子视图的 hitTest 都不过，见工程坑。）
     func smokeUI(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
             NSLog("[ui] 未连接，跳过")
@@ -2206,6 +2261,8 @@ final class AppState {
                 await smokeSongMenu(manager)
             } else if token == "download" {
                 await smokeDownload(manager)
+            } else if token == "tagload" {
+                await smokeTagLoad(manager)
             } else {
                 NSLog("[ui] 认不出指令「%@」", token)
             }
@@ -2234,8 +2291,24 @@ final class AppState {
         NSLog("[window] 没等到窗口")
     }
 
-    private func smokeSongMenu(_ manager: SessionManager) async {
+    /// 冒烟：读曲库第一首的标签（`TagEditor.load`，**只读**，验证标签接口通路）。
+    private func smokeTagLoad(_ manager: SessionManager) async {
         await library.loadIfNeeded(manager)
+        guard let song = library.songs.first else {
+            NSLog("[tag] 曲库是空的，无从读起")
+            return
+        }
+        do {
+            let info = try await TagEditor.load(manager, path: song.path)
+            NSLog("[tag] 读回「%@」：艺术家=%@ 专辑=%@ 年份=%@ 音轨=%@",
+                  song.title, info.artist, info.album,
+                  info.year.map(String.init) ?? "—", info.track.map(String.init) ?? "—")
+        } catch {
+            NSLog("[tag] 读失败：%@", error.localizedDescription)
+        }
+    }
+
+    private func smokeSongMenu(_ manager: SessionManager) async {        await library.loadIfNeeded(manager)
         guard let song = library.songs.first else {
             NSLog("[ui] 曲库是空的，菜单开不出来")
             return

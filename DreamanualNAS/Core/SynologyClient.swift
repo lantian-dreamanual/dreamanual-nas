@@ -195,17 +195,39 @@ final class SynologyClient: @unchecked Sendable {
     }
 
     /// 表单 POST（登录、以及绝大多数 `entry.cgi` 调用）。
+    ///
+    /// - Parameter cookie: 额外的 Cookie 头。`/webman/3rdparty/` 下的内部 CGI
+    ///   不认表单 `_sid`、只认**会话 Cookie**（`id=<sid>`）—— 标签编辑接口
+    ///   实测三件套齐才过（表单 `_sid` + `X-SYNO-TOKEN` 头 + 这枚 Cookie）。
     @discardableResult
-    func post(path: String, params: [String: String], credentials: SynologyCredentials?) async throws -> Any {
+    func post(path: String, params: [String: String], credentials: SynologyCredentials?,
+              cookie: String? = nil) async throws -> Any {
         var fields = params
         if let credentials { fields["_sid"] = credentials.sid }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        // `path` 以 `/` 开头 = webapi 体系外的绝对路径（如 /webman/3rdparty/...）。
+        // `appendingPathComponent` 会把它接在 baseURL 的 `/webapi/` 后面
+        // （…/webapi/webman/...），服务端直接回 403 —— 绝对路径要整体替换。
+        var url = baseURL.appendingPathComponent(path)
+        if path.hasPrefix("/") {
+            var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+            comps.path = path
+            url = comps.url ?? url
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        // 显式 Cookie 与自动附带不能共存：file / audio 两个会话轮流登录，共享的
+        // CookieStorage 里永远留着**最后一次登录**的 `id`，自动附上去就是两个
+        // `id` 打架 —— 标签编辑接口直接回 HTTP 403（2026-10-15 harness 二分定位）。
+        // 会话凭据一律走显式参数（表单 `_sid` + 头 + 手工 Cookie），系统 Cookie 不参与。
+        request.httpShouldHandleCookies = false
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.formEncode(fields).data(using: .utf8)
         if let credentials {
             request.setValue(credentials.token, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+        if let cookie {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
         return try await send(request, api: params["api"] ?? path, method: params["method"] ?? "")
     }
@@ -423,6 +445,9 @@ final class SynologyClient: @unchecked Sendable {
                 errors: (error["errors"] as? [[String: Any]]) ?? []
             )
         }
-        return envelope["data"] ?? [:]
+        // webapi 信封取 `data`；webapi 体系外的内部 CGI（tag_editor 等）应答
+        // 顶层就是业务字段（`files` / `success`，没有 `data` 键）—— 整包返回，
+        // 吞成空字典会把读到的标签全部弄丢（2026-10-15 harness 二分定位）。
+        return envelope["data"] ?? envelope
     }
 }

@@ -368,6 +368,14 @@ final class LibraryModel {
         }
     }
 
+    /// 标签编辑保存后的行内替换（与评分同一条道理，不整页重拉）。
+    /// NAS 索引当场就跟上（实测 0 秒），下次排序 / 搜索拿到的是新值。
+    func applyTags(_ info: SongTagInfo, to songID: String) {
+        if let index = songs.firstIndex(where: { $0.id == songID }) {
+            songs[index] = songs[index].withTags(info)
+        }
+    }
+
     // MARK: 表视图偏好（排序与列显隐，持久化）
 
     private let defaults = UserDefaults.standard
