@@ -1072,6 +1072,26 @@ final class AppState {
                     continue
                 }
                 library.setVisible(field, false)
+            } else if token.hasPrefix("dim=") {
+                // 切维度走 `select`（模型层，与点分段控件同一条路）。三个实体维度
+                // 是逐页拉的（每页 1000），这里把真实耗时报出来 —— 「切个维度等多久」
+                // 是这一步要点验的数。
+                let name = String(token.dropFirst("dim=".count))
+                guard let dim = LibraryModel.Dimension(rawValue: name) else {
+                    NSLog("[library] 认不出维度「%@」", name)
+                    continue
+                }
+                let t0 = Date()
+                await library.select(dim, on: manager)
+                NSLog("[library] 切到「%@」用了 %.1f 秒", dim.title, Date().timeIntervalSince(t0))
+            } else if token.hasPrefix("pick=") {
+                // 点一行实体代入筛选（与点 EntityRow 同一条路）。
+                let name = String(token.dropFirst("pick=".count))
+                let t0 = Date()
+                await library.apply(name, on: manager)
+                NSLog("[library] 点「%@」代入筛选用了 %.1f 秒 → 页头「%@ · %@」",
+                      name, Date().timeIntervalSince(t0),
+                      library.headTitle, library.headSubtitle)
             } else if token.hasPrefix("click=") {
                 NSLog("[library] 收到 click 指令「%@」", token)
                 let name = String(token.dropFirst("click=".count))
@@ -1129,6 +1149,26 @@ final class AppState {
               String(library.total))
         let head = library.songs.prefix(8).map { "\($0.title)[\($0.year.map(String.init) ?? "-")]" }
         NSLog("[library] 前八条 %@", head.joined(separator: " / "))
+        // 实体维度那一屏报实体数与前几条（与 3800 / 5756 / 97 对数用）。
+        NSLog("[library] 维度「%@」→ 艺术家 %@ / 专辑 %@ / 流派 %@",
+              library.dimension.rawValue,
+              String(library.artists.count),
+              String(library.albums.count),
+              String(library.genres.count))
+        switch library.dimension {
+        case .artist:
+            NSLog("[library] 艺术家前八 %@",
+                  library.artists.prefix(8).map(\.name).joined(separator: " / "))
+        case .album:
+            NSLog("[library] 专辑前八 %@",
+                  library.albums.prefix(8).map { "\($0.name) — \($0.artist)" }
+                      .joined(separator: " / "))
+        case .genre:
+            NSLog("[library] 流派前八 %@",
+                  library.genres.prefix(8).joined(separator: " / "))
+        case .all:
+            break
+        }
     }
 
     /// `DM_FILES=<指令>` 时由入口调用：把文件管理页摆到指定状态，供真机截图核对。
