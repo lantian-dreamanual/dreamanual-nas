@@ -2248,7 +2248,8 @@ final class AppState {
     /// `rclick=<x>:<y>` 在窗口坐标发一次**真右键**（`window.sendEvent`，走
     /// `RightClickCatcher` 同一条 hitTest 链 —— 之前用 CGEvent 投递进不了视图层，
     /// sendEvent 是从窗口自己派发，捕获层收得到）；`download` 把曲库第一首下到
-    /// 临时目录（走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）。
+    /// 临时目录（走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）；
+    /// `savepanel` 真开一次系统存盘面板（核对文案本地化，不自动关）。
     func smokeUI(_ command: String) async {
         guard isConnected, let manager = sessionManager else {
             NSLog("[ui] 未连接，跳过")
@@ -2269,6 +2270,8 @@ final class AppState {
                 await smokeRightClick(String(token.dropFirst("rclick=".count)))
             } else if token == "download" {
                 await smokeDownload(manager)
+            } else if token == "savepanel" {
+                smokeSavePanel()
             } else if token == "tagload" {
                 await smokeTagLoad(manager)
             } else {
@@ -2395,6 +2398,18 @@ final class AppState {
         openSongMenu(song, at: CGPoint(x: 380, y: 240), queue: library.songs)
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         NSLog("[ui] 右键菜单已开「%@」（四项：播放 / 下一首播放 / 评分 / 下载）", song.title)
+    }
+
+    /// 冒烟用：真开一次系统存盘面板（核对面板文案本地化，2026-10-15 用户点名
+    /// 下载弹窗出英文）。`begin` 非模态开出来，**不开自动关** —— 冒烟流程截完图
+    /// 直接 pkill 收场；留给将来要程序化关时再补。
+    private func smokeSavePanel() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "冒烟-面板文案.mp3"
+        panel.canCreateDirectories = true
+        panel.begin { _ in }
+        NSLog("[ui] 存盘面板已开出（本地化核对用）· 面板将取本地化 %@",
+              Bundle.main.preferredLocalizations.description)
     }
 
     private func smokeDownload(_ manager: SessionManager) async {

@@ -74,6 +74,10 @@ if [ -f "$BUILD_DIR/Assets.car" ]; then
 fi
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
 cp DreamanualNAS/Resources/brand.svg "$APP_NAME/Contents/Resources/brand.svg"
+# 空 .lproj 目录 = 向 AppKit 申报可用本地化，系统存盘/打开面板才出中文
+#（配合 Info.plist 的 CFBundleDevelopmentRegion/CFBundleLocalizations）。
+mkdir -p "$APP_NAME/Contents/Resources/zh-Hans.lproj" \
+         "$APP_NAME/Contents/Resources/en.lproj"
 
 # 小组件 extension 塞进 PlugIns（先于签名；主 app 单层签，见下方签名段）。
 WIDGET_PLUG="$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"

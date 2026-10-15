@@ -12,6 +12,16 @@
 	<string>com.dreamanual.nas</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- 系统存盘/打开面板的文字跟 app 声明的本地化走：不声明 zh-Hans，
+	     面板回退英文（2026-10-15 用户截图点名）。空的 zh-Hans.lproj 目录由
+	     build-app.sh 落进 Resources，两处缺一不可。 -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>Dreamanual NAS 助手</string>
 	<key>CFBundlePackageType</key>
