@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SwiftUI
 
 /// 应用外壳：状态栏图标 + 状态面板 + 关窗转后台。
 ///
@@ -45,9 +46,10 @@ final class AppShellController: NSObject {
     }
 
     /// 根视图把 AppState 挂上来后换一次面板内容（面板在 install 时就建好，
-    /// 那会儿 AppState 还没出生）。
+    /// 那会儿 AppState 还没出生），顺带启动连接态的图标观察。
     func attachPanel(_ state: AppState) {
         appState = state
+        MainActor.assumeIsolated { observeConnectionState() }
         guard let hosting = panel?.contentView as? NSHostingView<PanelContent> else { return }
         hosting.rootView = makePanelContent(state: state)
     }
@@ -60,19 +62,48 @@ final class AppShellController: NSObject {
         )
     }
 
-    /// 状态栏图标。`externaldrive` 这枚符号 macOS 11 起就有，走模板渲染
-    /// 跟随菜单栏深浅。左键 / 右键在 action 里按 `NSApp.currentEvent` 分流。
+    /// 状态栏图标。随连接态在 Lucide `server` / `server-off` 两枚之间切
+    /// （2026-10-16 用户定）：挂上 AppState 前一律离线态。左键 / 右键在
+    /// action 里按 `NSApp.currentEvent` 分流。
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            let icon = NSImage(systemSymbolName: "externaldrive", accessibilityDescription: "Dreamanual NAS 助手")
-            icon?.isTemplate = true
-            button.image = icon
+            button.image = MainActor.assumeIsolated { statusIcon(online: false) }
             button.target = self
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
+    }
+
+    /// Lucide 图标栅格化成模板图。走 `LucideIcon` 这层统一入口（现在画的是
+    /// SF 兜底，图标资产补齐后状态栏自动跟上真 Lucide 形态）；`isTemplate`
+    /// 让 AppKit 拿 alpha 当遮罩，颜色跟随菜单栏深浅。
+    @MainActor private func statusIcon(online: Bool) -> NSImage? {
+        let renderer = ImageRenderer(content: LucideIcon(online ? "server" : "server-off", size: DmIcon.i16))
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let image = renderer.nsImage else { return nil }
+        image.isTemplate = true
+        return image
+    }
+
+    /// 连接态变了换图标。AppState 是 @Observable，外壳不是视图吃不到自动
+    /// 刷新，用观察追踪链手动续：`phase` 一变回主线程重注册并重画。
+    /// 挂上 AppState 才有得追，调用点在 `attachPanel`。
+    @MainActor private func observeConnectionState() {
+        guard let state = appState else { return }
+        updateStatusIcon()
+        withObservationTracking {
+            _ = state.phase
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.observeConnectionState() }
+            }
+        }
+    }
+
+    @MainActor private func updateStatusIcon() {
+        statusItem?.button?.image = statusIcon(online: appState?.isConnected == true)
     }
 
     @objc private func handleClick() {

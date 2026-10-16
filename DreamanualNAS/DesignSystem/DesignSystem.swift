@@ -164,6 +164,9 @@ struct LucideIcon: View {
         "music": "music.note",
         "sparkles": "sparkles",
         "server": "externaldrive.connected.to.line.below",
+        // 状态栏离线态（2026-10-16）。`server-off` 的斜杠 SF 没有同构画法，
+        // 取语义同族的外接盘 + × 徽章（名字逐个问过 NSImage，存在）。
+        "server-off": "externaldrive.badge.xmark",
         "power": "power",
         "search": "magnifyingglass",
         "star": "star",
