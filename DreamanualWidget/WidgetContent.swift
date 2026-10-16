@@ -90,8 +90,9 @@ extension NASWidgetDisplay {
 
 struct NASStatusContent: View {
     /// `small` / `medium` 是桌面小组件两档；`panel` 是状态栏面板 —— 同一份
-    /// 在线数据，布局差异两处：列内 kv 不做两端对齐（不抢块间空隙、列宽
-    /// 稳定），离线那组贴顶不居中。
+    /// 数据，三处差异：在线列内 kv 不做两端对齐（不抢块间空隙、列宽稳定）；
+    /// 离线不摆状态行、内容组居中；内边距为 0（外层面板自己有一圈 12，
+    /// 再叠一层就是 24，按钮才贴 12 —— 2026-10-17 用户抓图）。
     enum Family { case small, medium, panel }
 
     let display: NASWidgetDisplay
@@ -108,7 +109,7 @@ struct NASStatusContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(DmSpace.s12)
+        .padding(family == .panel ? 0 : DmSpace.s12)
     }
 
     // MARK: 在线 · 小组件
@@ -171,21 +172,25 @@ struct NASStatusContent: View {
     // MARK: 离线（两档同一套，标题与上次在线文案由映射层给）
 
     private var offline: some View {
-        let topAligned = family == .panel
-        return VStack(alignment: .leading, spacing: 0) {
-            topRow
-            if topAligned {
-                offlineBadge.frame(maxWidth: .infinity).padding(.top, DmSpace.s10)
-            } else {
+        if family == .panel {
+            // 面板档：不摆「● 离线」状态行 —— 读取中/离线时它没有信息量，
+            // 还把居中的内容组顶得偏上（2026-10-17 用户抓图）。内容组在
+            // 可用区里垂直水平居中。
+            return AnyView(
+                offlineBadge
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+        }
+        return AnyView(
+            VStack(alignment: .leading, spacing: 0) {
+                topRow
                 Spacer(minLength: 0)
                 offlineBadge.frame(maxWidth: .infinity)
                 Spacer(minLength: 0)
             }
-        }
-        // 顶行占视觉重量：内容区从状态行下方起算居中（demo 第 5 稿，+22px）。
-        // 面板档不加这段 —— 状态行下方直接接内容（与在线态同一条节奏：
-        // topRow → s10 → 内容块）。
-        .padding(.top, topAligned ? 0 : 34)
+            // 顶行占视觉重量：内容区从状态行下方起算居中（demo 第 5 稿，+22px）。
+            .padding(.top, 34)
+        )
     }
 
     /// 离线内容组。两档共用，只是外面套的排布不同。
