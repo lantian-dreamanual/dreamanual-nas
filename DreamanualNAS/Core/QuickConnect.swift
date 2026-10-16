@@ -2,13 +2,23 @@ import Foundation
 
 /// QuickConnect 端点解析：拿 QC ID 换一个可用的中继端点。
 ///
-/// 端点会变（中继 IP、端口、`relay_dn` 都是每次问出来的），所以**每次启动
-/// 重新解析一遍**，不写死、不缓存到磁盘。见 docs/接口结论.md 第五节。
+/// 端点会变（中继域名、端口中继都是每次问出来的），所以**每次启动重新解析
+/// 一遍**，不写死、不缓存到磁盘。
+///
+/// 🔴 **2026-10-16 服务端改版**：`get_server_info` 的 `service` 里不再有
+/// `relay_dn` / `relay_port`，只剩 `port` / `ext_port` / `pingpong`，另加一个
+/// `smartdns` 块（`<QC-ID>.direct.quickconnect.cn` 智能域名，主域名在公网
+/// DNS 上是 NXDOMAIN，只有它自己的权威 NS + 客户端所在网段才解析得出）。
+/// 中继端点要**单独发 `request_tunnel`** 才给 —— 实测它的 `service` 里
+/// `relay_dn` / `relay_port` / `relay_ip` / `https_ip` 齐全，且对不存在的
+/// QC ID 同样回 `errno 4 / Alias not found`，所以这一趟是唯一必需的一趟。
 struct QCEndpoint: Equatable {
-    /// 中继主机名（`relay_dn`）。域名写法不用关证书校验 —— 中继挂的是
-    /// Let's Encrypt 真证书，`SAN=*.<QC-ID>.direct.quickconnect.cn`。
+    /// 中继主机。优先 `relay_dn` 域名：它 CNAME 到 `cnrds4.re.cs.quickconnect.cn`，
+    /// 证书按那个名字签，默认校验就能过。拿不到域名才退回 `relay_ip`。
     let host: String
     let port: Int
+    /// 只有 IP、没有域名时为真 —— 域名对不上证书名字，连接要放行自签。
+    let needsCertBypass: Bool
     /// 中继区域（境内是 `cn4` / `cn`），只用于界面显示。
     let region: String?
     /// 局域网地址，局域网下可直接用它走直连。
@@ -45,6 +55,7 @@ struct QuickConnectResolver {
     /// 🔴 请求体是**数组**、且 `id` 是服务名 `mainapp_https`、QC ID 放 `serverID`
     /// —— 2026-10-12 实测：这版回 `errno 4 / Alias not found`（正确语义），
     /// 而「对象 + `svc` + `id` 放 QC ID」那版回 `errno 9` 且 `errinfo` 为空。
+    /// `command` 取 `request_tunnel`：relay 端点只在这条命令的应答里给。
     func resolve(id: String) async throws -> QCEndpoint {
         var request = URLRequest(url: Self.servURL)
         request.httpMethod = "POST"
@@ -52,7 +63,7 @@ struct QuickConnectResolver {
         request.timeoutInterval = 30
         let body: [[String: Any]] = [[
             "version": 1,
-            "command": "get_server_info",
+            "command": "request_tunnel",
             "stop_when_error": false,
             "stop_when_success": false,
             "id": "mainapp_https",
@@ -89,10 +100,20 @@ struct QuickConnectResolver {
         let env = (first["env"] as? [String: Any]) ?? [:]
         let server = (first["server"] as? [String: Any]) ?? [:]
 
-        guard let host = service["relay_dn"] as? String, !host.isEmpty,
-              let port = intValue(service["relay_port"])
-        else {
-            throw QuickConnectError.badResponse("没有 relay_dn / relay_port：\(first.keys.sorted())")
+        // 端口两种顺序都收：`relay_port` 是这台 NAS 专属的中继端口，`https_port`
+        // （实测 443）不是这条业务 —— 打上去证书名字对不上，别拿它兜底。
+        guard let port = intValue(service["relay_port"]) else {
+            throw QuickConnectError.badResponse(
+                "QuickConnect 没给出中继端口（`service` 里缺 `relay_port`）：\(service.keys.sorted())"
+            )
+        }
+        let relayDN = (service["relay_dn"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let relayIP = (service["relay_ip"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let domain = (relayDN?.isEmpty == false) ? relayDN : nil
+        guard let host = domain ?? (relayIP?.isEmpty == false ? relayIP : nil) else {
+            throw QuickConnectError.badResponse(
+                "QuickConnect 没给出中继地址（`service` 里缺 `relay_dn` / `relay_ip`）：\(service.keys.sorted())"
+            )
         }
 
         var lanIPs: [String] = []
@@ -102,6 +123,7 @@ struct QuickConnectResolver {
         return QCEndpoint(
             host: host,
             port: port,
+            needsCertBypass: domain == nil,
             region: env["relay_region"] as? String,
             lanIPs: lanIPs,
             externalIP: (server["external"] as? [String: Any])?["ip"] as? String

@@ -2528,8 +2528,10 @@ final class AppState {
             } else {
                 guard !qc.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID，或填一个直连地址") }
                 let endpoint = try await resolver.resolve(id: qc)
-                // 中继挂的是真证书，走默认校验。
-                client = SynologyClient(host: endpoint.host, port: endpoint.port, allowSelfSigned: false)
+                // 中继域名挂的是真证书（按 CNAME 目标签），走默认校验；只有
+                // 服务端退回给 IP 那一种情况要放行自签。
+                client = SynologyClient(host: endpoint.host, port: endpoint.port,
+                                        allowSelfSigned: endpoint.needsCertBypass)
                 let region = endpoint.region.map { " · \($0)" } ?? ""
                 endpointLabel = "QuickConnect\(region) · \(endpoint.host):\(endpoint.port)"
                 linkMode = .relay
