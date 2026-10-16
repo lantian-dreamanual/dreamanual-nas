@@ -1,48 +1,237 @@
 import AppKit
+import SwiftUI
 
-/// 应用外壳：状态栏图标 + 关窗转后台（2026-10-15 用户定版，照网易云那套行为）。
+/// 应用外壳：状态栏图标 + 状态面板 + 关窗转后台。
 ///
-/// 三条行为：
+/// 四条行为：
 /// 1. **关窗不退出** —— 红点与 ⌘W 都走「藏窗」：`orderOut` 而不是真关。
 ///    SwiftUI 真收掉窗口会把视图树拆掉重建，页内状态（滚动、展开的菜单、
 ///    冒烟插桩）全丢；藏窗则一切原样保留，播放引擎与会话本来就不归窗口管。
 /// 2. **Dock 唤起** —— 点 Dock 图标把藏着的窗口取出来置前。
-/// 3. **状态栏图标** —— 菜单栏常驻，放曲名与播放控制；关窗后听歌控制就有
-///    媒体键、控制中心、状态栏菜单、Dock 唤起四条路，全不依赖窗口开着。
+/// 3. **状态栏图标 → 面板** —— 左键点图标弹面板：NAS 状态（复用小组件的
+///    中组件视图）+ 播放控制（有队列才出现）+ 打开主窗 / 退出。2026-10-17
+///    替代桌面小组件与旧的状态栏菜单。打开即刷一次系统状态，开着期间 30s
+///    一拍；点面板外任意处收起。
+/// 4. **右键只留退出** —— 图标右键一个菜单项（设计稿 v2 拍板）。
 ///
-/// 退出只留两处：⌘Q 与状态栏菜单的「退出」。菜单内容每次展开时重建
-/// （`menuNeedsUpdate`），曲名与播放态永远现取，不用做观察刷新。
-final class AppShellController: NSObject, NSMenuDelegate {
-    /// 播放控制与曲名取自这里。根视图挂上来之前（启动头几百毫秒）是 nil，
-    /// 菜单晚点展开没事 —— 内容是展开时才重建的。
+/// 面板骨架照投资监控 `MenuBarController`：可聚焦的非激活 NSPanel、面板
+/// 透明 + 内容圆角裁剪、延迟 0.3s 装点外点击监视器（防弹出的那一击瞬关）。
+final class AppShellController: NSObject {
+    /// 播放控制与状态快照取自这里。根视图挂上来之前（启动头几百毫秒）是 nil，
+    /// 面板显示离线态，晚点挂不碍事。
     weak var appState: AppState?
 
     private var statusItem: NSStatusItem?
+    private var panel: FocusablePanel?
+    private var refreshTimer: Timer?
+    private var globalEventMonitor: Any?
+    private var localEventMonitor: Any?
     private var cmdWMonitor: Any?
+
+    /// 面板尺寸两档（设计稿 v2）：无队列 214（状态区 + 操作行），有队列
+    /// 多一段播放区 276。开面板时定档；开着期间队列变化保持当前档，下次
+    /// 打开按新档走。
+    private static let panelWidth: CGFloat = 400
+    private static let panelHeightCompact: CGFloat = 214
+    private static let panelHeightTall: CGFloat = 276
 
     // MARK: 安装
 
     func install() {
         installStatusItem()
+        setupPanel()
         hookCloseButtons()
         swallowCmdW()
     }
 
+    /// 根视图把 AppState 挂上来后换一次面板内容（面板在 install 时就建好，
+    /// 那会儿 AppState 还没出生）。
+    func attachPanel(_ state: AppState) {
+        appState = state
+        guard let hosting = panel?.contentView as? NSHostingView<PanelContent> else { return }
+        hosting.rootView = makePanelContent(state: state)
+    }
+
+    private func makePanelContent(state: AppState?) -> PanelContent {
+        PanelContent(
+            state: state,
+            onOpenMain: { [weak self] in self?.showMainWindow() },
+            onQuit: { NSApp.terminate(nil) }
+        )
+    }
+
     /// 状态栏图标。`externaldrive` 这枚符号 macOS 11 起就有，走模板渲染
-    /// 跟随菜单栏深浅。
+    /// 跟随菜单栏深浅。左键 / 右键在 action 里按 `NSApp.currentEvent` 分流。
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             let icon = NSImage(systemSymbolName: "externaldrive", accessibilityDescription: "Dreamanual NAS 助手")
             icon?.isTemplate = true
             button.image = icon
+            button.target = self
+            button.action = #selector(handleClick)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        let menu = NSMenu()
-        menu.delegate = self
-        // 逐项手工定可用性（表头项是纯说明文字，不能让系统按 action 自动判）。
-        menu.autoenablesItems = false
-        item.menu = menu
         statusItem = item
+    }
+
+    @objc private func handleClick() {
+        guard let event = NSApp.currentEvent else {
+            MainActor.assumeIsolated { togglePanel() }
+            return
+        }
+        if event.type == .rightMouseUp {
+            closePanel()
+            statusItem?.popUpMenu(buildContextMenu())
+        } else {
+            MainActor.assumeIsolated { togglePanel() }
+        }
+    }
+
+    /// 右键菜单只留退出（设计稿 v2）。
+    private func buildContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        let quit = NSMenuItem(title: "退出 Dreamanual NAS 助手",
+                              action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = nil
+        menu.addItem(quit)
+        return menu
+    }
+
+    // MARK: 状态栏面板
+
+    private func setupPanel() {
+        let hosting = NSHostingView(rootView: makePanelContent(state: nil))
+        hosting.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.panelHeightCompact)
+        // 圆角裁剪：面板本身透明，内容视图裁出圆角（投资监控同款，r16）。
+        hosting.wantsLayer = true
+        hosting.layer?.cornerRadius = DmRadius.r16
+        hosting.layer?.masksToBounds = true
+
+        let p = FocusablePanel(
+            contentRect: hosting.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isFloatingPanel = true
+        p.level = .popUpMenu
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.isReleasedWhenClosed = false
+        p.hidesOnDeactivate = false
+        p.becomesKeyOnlyIfNeeded = true
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.contentView = hosting
+        panel = p
+    }
+
+    @MainActor private func togglePanel() {
+        if panel?.isVisible == true {
+            closePanel()
+        } else {
+            showPanel()
+        }
+    }
+
+    /// 按钮 action 与冒烟都发生在主线程；隔离标注让 AppState 的访问过编译。
+    @MainActor private func showPanel() {
+        guard let panel, let button = statusItem?.button else { return }
+        // 高度定档：队列非空多一段播放区。
+        let height = appState?.playback?.hasQueue == true
+            ? Self.panelHeightTall : Self.panelHeightCompact
+        if let hosting = panel.contentView as? NSHostingView<PanelContent> {
+            hosting.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: height)
+        }
+        panel.setContentSize(NSSize(width: Self.panelWidth, height: height))
+
+        // 打开即刷：连着才发，一次全量。与状态页的刷新按钮同一入口。
+        if let state = appState, state.isConnected {
+            Task { await state.status.load(on: state.sessionManager, force: true) }
+        }
+
+        // 定位到状态栏按钮下方居中，屏幕边界内钳制。
+        let size = NSSize(width: Self.panelWidth, height: height)
+        let btnFrame = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) ?? button.bounds
+        var x = btnFrame.midX - size.width / 2
+        let y = btnFrame.minY - size.height - 4
+        if let screen = button.window?.screen ?? NSScreen.main {
+            let vf = screen.visibleFrame
+            x = min(max(x, vf.minX + 4), vf.maxX - size.width - 4)
+        }
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        panel.makeKeyAndOrderFront(nil)
+        startRefreshTimer()
+        // 延迟启动监视器，避免触发弹出的那次点击被 monitor 捕获导致面板瞬关。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard self?.panel?.isVisible == true else { return }
+            self?.startMonitoring()
+        }
+    }
+
+    func closePanel() {
+        guard let panel, panel.isVisible else { return }
+        panel.orderOut(nil)
+        stopMonitoring()
+        stopRefreshTimer()
+    }
+
+    /// 面板开着期间 30s 一拍刷新（连着才发），收起即停。
+    private func startRefreshTimer() {
+        stopRefreshTimer()
+        let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.panel?.isVisible == true,
+                      let state = self.appState, state.isConnected else { return }
+                Task { await state.status.load(on: state.sessionManager, force: true) }
+            }
+        }
+        t.tolerance = 2
+        RunLoop.main.add(t, forMode: .common)
+        refreshTimer = t
+    }
+
+    private func stopRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    // MARK: 点外关闭
+
+    private func startMonitoring() {
+        stopMonitoring()
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.handleOutsideClick() }
+        }
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            self?.handleOutsideClick()
+            return event
+        }
+    }
+
+    private func stopMonitoring() {
+        if let m = globalEventMonitor { NSEvent.removeMonitor(m); globalEventMonitor = nil }
+        if let m = localEventMonitor { NSEvent.removeMonitor(m); localEventMonitor = nil }
+    }
+
+    /// 点击面板外部时关闭；点击状态栏按钮区域交给 toggle 逻辑处理，不在此关闭。
+    private func handleOutsideClick() {
+        guard let panel, panel.isVisible else { return }
+        let mouseLoc = NSEvent.mouseLocation
+        if let button = statusItem?.button, let win = button.window {
+            let btnFrame = win.convertToScreen(button.convert(button.bounds, to: nil))
+                .insetBy(dx: -4, dy: -4)
+            if btnFrame.contains(mouseLoc) { return }
+        }
+        if panel.frame.contains(mouseLoc) { return }
+        // 点击落在本 app 的其他窗口（弹层、主窗）时不关闭。
+        if NSApp.windows.contains(where: { $0.isVisible && $0.frame.contains(mouseLoc) }) { return }
+        closePanel()
     }
 
     // MARK: 关窗转后台
@@ -105,62 +294,15 @@ final class AppShellController: NSObject, NSMenuDelegate {
         hideMainWindow()
     }
 
-    // MARK: 状态栏菜单（展开时整单重建）
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let engine = MainActor.assumeIsolated { appState?.playback }
-
-        let head: NSMenuItem
-        if let song = MainActor.assumeIsolated({ engine?.currentSong }) {
-            head = NSMenuItem(title: "正在播放：\(song.title) · \(song.artist)",
-                              action: nil, keyEquivalent: "")
-        } else {
-            head = NSMenuItem(title: "未在播放", action: nil, keyEquivalent: "")
-        }
-        head.isEnabled = false
-        menu.addItem(head)
-        menu.addItem(.separator())
-
-        let isPlaying = MainActor.assumeIsolated { engine?.isPlaying ?? false }
-        menu.addItem(item(isPlaying ? "暂停" : "播放", action: #selector(playPauseClicked), key: " "))
-        menu.addItem(item("上一首", action: #selector(previousClicked), key: ""))
-        menu.addItem(item("下一首", action: #selector(nextClicked), key: ""))
-        menu.addItem(.separator())
-        menu.addItem(item("打开主窗", action: #selector(showClicked), key: ""))
-        menu.addItem(.separator())
-        let quit = item("退出 Dreamanual NAS 助手", action: #selector(NSApplication.terminate(_:)), key: "q")
-        quit.target = nil
-        menu.addItem(quit)
-    }
-
-    private func item(_ title: String, action: Selector, key: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.target = action == #selector(NSApplication.terminate(_:)) ? nil : self
-        return item
-    }
-
-    @objc private func playPauseClicked(_ sender: Any?) {
-        MainActor.assumeIsolated { appState?.playback?.togglePlayPause() }
-    }
-
-    @objc private func previousClicked(_ sender: Any?) {
-        MainActor.assumeIsolated { appState?.playback?.previous() }
-    }
-
-    @objc private func nextClicked(_ sender: Any?) {
-        MainActor.assumeIsolated { appState?.playback?.next() }
-    }
-
     @objc func showClicked(_ sender: Any?) {
         showMainWindow()
     }
 
     // MARK: 冒烟验证
 
-    /// `DM_SHELL=1`：把外壳三条行为各走一遍并打日志 —— 藏窗前后窗口可见性、
-    /// 合成 ⌘W（走真通路：本地监视器在 `NSApp.sendEvent` 里被调）、再唤起。
-    /// 播放引擎与会话不受窗口影响这一点，由「藏窗期间 keep-alive 照跑」侧证。
+    /// `DM_SHELL=1`：把外壳各条行为走一遍并打日志 —— 藏窗前后窗口可见性、
+    /// 合成 ⌘W（走真通路：本地监视器在 `NSApp.sendEvent` 里被调）、再唤起，
+    /// 最后面板程序化开合一次（AI 点不了 UI，开合走代码路径）。
     @MainActor func smoke() async {
         func visibility(_ tag: String) {
             for window in NSApp.windows where window is NSPanel == false {
@@ -192,6 +334,22 @@ final class AppShellController: NSObject, NSMenuDelegate {
         showMainWindow()
         try? await Task.sleep(nanoseconds: 600_000_000)
         visibility("唤起后")
+        // 面板：程序化开合，核可见性与收起。停 2.5s —— 给打开即刷的快照
+        // 走完链路（中继一趟要秒级），抓图才能拍到在线态。
+        showPanel()
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        NSLog("[shell] 面板开 → visible=%@（应为是）", panel?.isVisible == true ? "是" : "否")
+        closePanel()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        NSLog("[shell] 面板收 → visible=%@（应为否）", panel?.isVisible == true ? "是" : "否")
         NSLog("[shell] 冒烟完")
     }
+}
+
+/// 可聚焦的 NSPanel（照投资监控同款）：nonactivatingPanel 默认 canBecomeKey
+/// 为 false，覆写后点进面板才能收键盘事件；保持非激活特性，弹面板不抢主
+/// app 的焦点。
+final class FocusablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }

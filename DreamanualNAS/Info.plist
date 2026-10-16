@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- 构建元数据键与 Xcode 产物对齐（appex 对齐后主 app 同步补齐） -->
+	<key>BuildMachineOSBuild</key>
+	<string>25G83</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
 	<string>Dreamanual NAS 助手</string>
 	<key>CFBundleExecutable</key>
@@ -12,11 +17,6 @@
 	<string>com.dreamanual.nas</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<!-- 系统存盘/打开面板的文字跟 app 声明的本地化走：不声明 zh-Hans，
-	     面板回退英文（2026-10-15 用户截图点名）。空的 zh-Hans.lproj 目录由
-	     build-app.sh 落进 Resources，两处缺一不可。 -->
-	<key>CFBundleDevelopmentRegion</key>
-	<string>zh-Hans</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>zh-Hans</string>
@@ -28,13 +28,30 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
+	<key>DTCompiler</key>
+	<string>com.apple.compilers.llvm.clang.1_0</string>
+	<key>DTPlatformBuild</key>
+	<string>26A425</string>
+	<key>DTPlatformName</key>
+	<string>macosx</string>
+	<key>DTPlatformVersion</key>
+	<string>26.5</string>
+	<key>DTSDKBuild</key>
+	<string>26A425</string>
+	<key>DTSDKName</key>
+	<string>macosx26.5</string>
+	<key>DTXcode</key>
+	<string>2710</string>
+	<key>DTXcodeBuild</key>
+	<string>27A9275</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
-	<!-- 直连模式（局域网 / Tailscale）打的是 NAS 自己的自签证书，必须放行；
-	     QuickConnect 中继挂的是 Let's Encrypt 真证书，走默认校验。
-	     见 docs/接口结论.md 第五节「连它的规矩」。 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

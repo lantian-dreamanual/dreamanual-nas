@@ -2,12 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- 以下构建元数据键与 Xcode 产物对齐（探针对照实验定位）：
+	     pkd 选举第三方扩展时按这批键识别平台与构建来源，
+	     缺 CFBundleSupportedPlatforms / DTPlatformName 时扩展不进图库摄取。 -->
+	<key>BuildMachineOSBuild</key>
+	<string>25G83</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
 	<string>NAS 状态</string>
 	<key>CFBundleExecutable</key>
 	<string>NASStatusWidget</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.dreamanual.nas.widget</string>
+	<string>com.dreamanual.nas.statuswidget</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -17,8 +24,28 @@
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>2</string>
+	<key>DTCompiler</key>
+	<string>com.apple.compilers.llvm.clang.1_0</string>
+	<key>DTPlatformBuild</key>
+	<string>26A425</string>
+	<key>DTPlatformName</key>
+	<string>macosx</string>
+	<key>DTPlatformVersion</key>
+	<string>26.5</string>
+	<key>DTSDKBuild</key>
+	<string>26A425</string>
+	<key>DTSDKName</key>
+	<string>macosx26.5</string>
+	<key>DTXcode</key>
+	<string>2710</string>
+	<key>DTXcodeBuild</key>
+	<string>27A9275</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<!-- 与主 app 同一规矩：直连打 NAS 自签证书要放行，中继走默认校验。

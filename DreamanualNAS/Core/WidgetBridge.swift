@@ -25,7 +25,7 @@ func dmByteText(_ bytes: Int64) -> String {
 /// —— macOS 不注册非沙箱的 app extension，图库静默不出现；而 App Group
 /// 容器在 ad-hoc 签名下拿不到（containerURL 回 nil）。落点走业界已验证的
 /// 通路：主 app（非沙箱）直接写 widget 的沙箱容器
-/// `~/Library/Containers/com.dreamanual.nas.widget/Data/Library/Application
+/// `~/Library/Containers/com.dreamanual.nas.statuswidget/Data/Library/Application
 /// Support/DreamanualNAS/widget-state.json`，沙箱内的 widget 用自己的
 /// Application Support 读（`NSHomeDirectory` 在沙箱里映射到容器 Data）。
 /// 两个约束：容器目录必须由 macOS 在 extension 首次启动时创建，主 app
@@ -71,7 +71,7 @@ struct WidgetSnapshotData: Codable {
 
 enum WidgetBridge {
     /// widget extension 的 bundle id：主 app 侧靠它拼沙箱容器路径。
-    static let widgetBundleID = "com.dreamanual.nas.widget"
+    static let widgetBundleID = "com.dreamanual.nas.statuswidget"
 
     /// 当前进程是不是 widget extension 自己。
     static var isWidgetProcess: Bool {

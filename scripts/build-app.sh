@@ -36,8 +36,11 @@ else
   echo "  暂无 Assets.xcassets（图标资产后补），跳过 actool"
 fi
 
+# 状态栏面板复用小组件的中组件视图（NASStatusContent），这份共享源主 app
+# 也要编进来（它只依赖 SwiftUI + 主题令牌，无 WidgetKit 依赖）。
 xcrun swiftc -disable-sandbox -O -parse-as-library -target arm64-apple-macos14.0 \
   $(find DreamanualNAS -name "*.swift") \
+  DreamanualWidget/WidgetContent.swift \
   -o "$BUILD_DIR/DreamanualNAS"
 echo "编译成功"
 
@@ -62,13 +65,23 @@ WIDGET_SOURCES=(
 xcrun swiftc -disable-sandbox -O -parse-as-library -target arm64-apple-macos14.0 \
   "${WIDGET_SOURCES[@]}" \
   -o "$BUILD_DIR/NASStatusWidget"
-echo "widget 编译成功"
+# 🔴 SDK 版本压回 26.5（vtool 改写 LC_BUILD_VERSION）：Xcode 27 的 SDK 比本机系统
+# 26.6.2 还新，ExtensionKit 在「Extension Type」判定后拒答——表现为 chronod 发
+# getAllDescriptors 后 17ms 连接失效、扩展进程 voluntary 退出、图库搜不到（2026-10-16
+# 实测定位）。-swiftc 的 -sdk 旗子只改搜索路径不改这个版本号，只能事后 vtool。
+# CLT 自带的 26.5 swiftc 不支持 macos14 部署目标，故仍用 Xcode 工具链编译。
+vtool -arch arm64 -set-build-version macos 14.0 26.5 -replace \
+  -output "$BUILD_DIR/NASStatusWidget.sdkfix" "$BUILD_DIR/NASStatusWidget" &&
+  mv "$BUILD_DIR/NASStatusWidget.sdkfix" "$BUILD_DIR/NASStatusWidget"
+echo "widget 编译成功（SDK 版本已压到 26.5）"
 
 echo "========== 2/3 组装 app =========="
 rm -rf "$APP_NAME"
 mkdir -p "$APP_NAME/Contents/MacOS" "$APP_NAME/Contents/Resources"
 cp "$BUILD_DIR/DreamanualNAS" "$APP_NAME/Contents/MacOS/DreamanualNAS"
 cp DreamanualNAS/Info.plist "$APP_NAME/Contents/Info.plist"
+# PkgInfo：Xcode 产物自带（APPL????），LaunchServices 识别用
+printf 'APPL????' > "$APP_NAME/Contents/PkgInfo"
 if [ -f "$BUILD_DIR/Assets.car" ]; then
   cp "$BUILD_DIR/Assets.car" "$APP_NAME/Contents/Resources/Assets.car"
 fi
@@ -84,6 +97,9 @@ WIDGET_PLUG="$APP_NAME/Contents/PlugIns/NAS Status Widget.appex"
 mkdir -p "$WIDGET_PLUG/Contents/MacOS"
 cp DreamanualWidget/Info.plist "$WIDGET_PLUG/Contents/Info.plist"
 cp "$BUILD_DIR/NASStatusWidget" "$WIDGET_PLUG/Contents/MacOS/NASStatusWidget"
+# Resources/Info.plist 副本：Xcode 产物 appex 里有这一份（sealed resources 计数一致）
+mkdir -p "$WIDGET_PLUG/Contents/Resources"
+cp DreamanualWidget/Info.plist "$WIDGET_PLUG/Contents/Resources/Info.plist"
 echo "widget 已嵌入：Contents/PlugIns/NAS Status Widget.appex"
 echo "app 组装完成：$APP_NAME"
 

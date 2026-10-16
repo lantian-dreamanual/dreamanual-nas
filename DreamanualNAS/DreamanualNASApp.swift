@@ -44,9 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    /// 根视图挂上 AppState（状态栏菜单取曲名与播放控制用）。
+    /// 根视图挂上 AppState（状态栏面板取状态快照与播放控制用）。
     func attachAppState(_ state: AppState) {
-        shell.appState = state
+        shell.attachPanel(state)
     }
 
     /// `DM_SHELL=1`：外壳行为冒烟（藏窗 / 合成 ⌘W / 唤起），见 AppShellController。
