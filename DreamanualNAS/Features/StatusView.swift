@@ -75,8 +75,10 @@ final class SystemStatusModel {
 /// 形态照原型 `design/界面原型.html` 的系统状态屏：页头（副行写固件与开机时长、
 /// 右端链路徽章 + 刷新）→ 四张状态卡 → 存储与硬盘。
 ///
-/// **只读半**：温度 / CPU / 内存 / 运行时长 / 容量 / 硬盘。关机与重启、开关机计划
-/// 是下一批（原型下半屏那两张卡），真关机还没执行过，得挑时间单独验。
+/// **读写半**：温度 / CPU / 内存 / 运行时长 / 容量 / 硬盘（只读），加上开关机计划的
+/// 读取与逐条启用停用（写）。原型下半屏还有两张卡没落：电源（立刻关机 / 重启）与
+/// 计划卡上的「添加」—— 关机真执行过就拔掉了这台机器，而它不在本机广播域里、
+/// 软件唤醒做不到，得挑时间单独验（`docs/接口结论.md` 第二节）。
 ///
 /// 与原型的三处偏离，都是接口决定的，不是设计取舍：
 ///   ① 原型每块盘一条进度条 —— 服务端**不给单盘已用量**（SHR 之下盘也不是各自
@@ -118,7 +120,14 @@ struct StatusView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // 主内容区取 `panel`（第一节落位口径）。
         .background(Color.dmPanel)
-        .task { await model.load(on: state.sessionManager) }
+        // 计划表与系统状态那四条各走各的接口、各有各的失败，并着拉。
+        // 页头的刷新钮只管上面那份快照 —— 计划表是「设置」不是「读数」，写回是
+        // 卡片自己那两颗按钮的事，顺手把它也刷一遍会把改到一半的开关冲掉。
+        .task {
+            async let statusLoad: Void = model.load(on: state.sessionManager)
+            async let scheduleLoad: Void = state.powerSchedule.load(on: state.sessionManager)
+            _ = await (statusLoad, scheduleLoad)
+        }
     }
 
     /// 副行：固件 + 开机时长（原型「DSM 7.4.1 · 开机 27 天 4 小时」那一行）。
@@ -160,6 +169,9 @@ struct StatusView: View {
                     DiskCard(disks: snapshot.storage?.disks ?? [],
                              load: snapshot.load)
                 }
+
+                // 计划表独立于上面这四块（另一条接口、另一份失败），整行一张卡。
+                PowerScheduleCard()
             }
             .padding(.horizontal, DmSpace.s24)
             .padding(.bottom, DmSpace.s20)

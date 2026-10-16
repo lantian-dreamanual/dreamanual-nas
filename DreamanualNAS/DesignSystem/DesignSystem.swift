@@ -240,6 +240,10 @@ struct LucideIcon: View {
         "memory-stick": "memorychip",
         "clock": "clock",
         "hard-drive": "internaldrive",
+        // 开关机计划那一批（2026-10-17）。`calendar.badge.clock` 问过
+        // `NSImage(systemSymbolName:)` 确实存在（`calendar.day.timeline.left` 也在，
+        // 但它画的是时间轴，取的是另一件事的意象）。
+        "calendar-clock": "calendar.badge.clock",
     ]
 }
 

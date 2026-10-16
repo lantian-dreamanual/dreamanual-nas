@@ -106,6 +106,9 @@ final class AppState {
     /// 系统状态页的快照（机器信息 / 负载 / 容量 / 健康标志四块，各自可选）。
     /// 归属同上：换模块回来不该重新转一次圈。
     let status = SystemStatusModel()
+    /// 开关机计划（服务端那一份 + 界面上在编的那一份）。归属同上 —— 换模块再回来，
+    /// 改到一半的开关还在，别让人重拨一遍。
+    let powerSchedule = PowerScheduleModel()
     /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
     /// 侧栏没有队列这一项。
     private(set) var showsQueue = false
@@ -1406,7 +1409,13 @@ final class AppState {
     ///     怎么切的、负载除没除 100、卷名跟 `space.volume[]` 对上没有）就靠它对；
     ///   · `drop=<块>` 抹掉一块看「部分失败」（`device` / `load` / `storage` / `health`）
     ///     —— 真机上造不出干净的部分失败（要把某条接口单独打断）；
-    ///   · `clear` 清掉快照，回到载入初态。
+    ///   · `clear` 清掉快照，回到载入初态；
+    ///   · `sched` 把开关机计划重读一遍并打点（走界面同一条 `load(force:)`）；
+    ///   · `togglerow=<n>` 拨第 n 行的开关 —— **只动草稿、不写 NAS**，看「未保存」徽章；
+    ///   · `schedsave` 把草稿写回 NAS 并**回读**；
+    ///   · `scheddiscard` 放弃修改（草稿丢回服务端那一份）；
+    ///   · `schedroundtrip` 整条写回链路：拨 → 存 → 回读核对 → 拨回 → 存 → 回读核对
+    ///     （收尾回原样，见 `smokeScheduleRoundtrip`）。
     ///
     /// 顺序即字面顺序：`clear` 之后再 `drop=` 是抹不掉的（手上没快照），要抹就先抹。
     func smokeStatus(_ command: String) async {
@@ -1442,9 +1451,72 @@ final class AppState {
                 status.clear()
                 NSLog("[status] 清掉快照 → 回到载入初态")
                 try? await Task.sleep(nanoseconds: 500_000_000)
+            } else if token == "sched" {
+                await powerSchedule.load(on: manager, force: true)
+                dumpSchedule()
+            } else if token.hasPrefix("togglerow=") {
+                let index = Int(token.dropFirst("togglerow=".count)) ?? 0
+                powerSchedule.toggle(index)
+                NSLog("[sched] 拨第 %d 行的开关（只动草稿，还没写 NAS）", index)
+                dumpSchedule()
+            } else if token == "schedsave" {
+                let outcome = await powerSchedule.save(on: manager)
+                NSLog("[sched] 保存结果 %@", String(describing: outcome))
+                dumpSchedule()
+            } else if token == "scheddiscard" {
+                powerSchedule.discard()
+                NSLog("[sched] 放弃修改（草稿丢回服务端那一份）")
+                dumpSchedule()
+            } else if token == "schedroundtrip" {
+                await smokeScheduleRoundtrip(manager)
             } else {
                 NSLog("[status] 认不出指令「%@」", token)
             }
+        }
+    }
+
+    /// 冒烟用：开关机计划的**整条写回链路**。
+    ///
+    /// 屏幕上点不了 UI（没有辅助功能权限，点击被静默丢弃），所以「开关真能改到 NAS 上」
+    /// 这件事只能在视图之外证一遍。每一步都走界面那两下 —— `toggle` 拨草稿、
+    /// `save` 写回并回读 —— 挑最后一行的开关拨两次、存两次，**收尾回原样**：
+    /// 第一次保存后核对服务端那一份确实变了，第二次保存后核对与原样逐字一致。
+    ///
+    /// 🔴 判据是**服务端回读的那一份**，不是 `save` 的返回值：这个接口对非法的
+    /// `weekdays` 是静默剥掉（照回 `success`）。
+    private func smokeScheduleRoundtrip(_ manager: SessionManager) async {
+        guard let before = powerSchedule.server, !before.tasks.isEmpty else {
+            NSLog("[sched] 手上没有服务端那一份（先 sched 读一次），跳过往返")
+            return
+        }
+        let index = before.tasks.count - 1
+        var expected = before.tasks
+        expected[index].enabled.toggle()
+        NSLog("[sched] 往返起点 #%d %@ %@ 开关%@ → 目标 %@",
+              index, before.tasks[index].kind.label, before.tasks[index].timeText,
+              before.tasks[index].enabled ? "开" : "关",
+              expected[index].enabled ? "开" : "关")
+
+        powerSchedule.toggle(index)
+        _ = await powerSchedule.save(on: manager)
+        let first = powerSchedule.server?.tasks ?? []
+        NSLog("[sched] 往返 1/2 服务端回读 %@ · 与目标一致 %@",
+              first.map { "\($0.timeText)/\($0.enabled ? "开" : "关")" }.joined(separator: " "),
+              first == expected ? "是" : "否 ✗")
+
+        powerSchedule.toggle(index)
+        _ = await powerSchedule.save(on: manager)
+        let second = powerSchedule.server?.tasks ?? []
+        NSLog("[sched] 往返 2/2 服务端回读 %@ · 与原样逐字一致 %@",
+              second.map { "\($0.timeText)/\($0.enabled ? "开" : "关")" }.joined(separator: " "),
+              second == before.tasks ? "是" : "否 ✗")
+        dumpSchedule()
+    }
+
+    /// 冒烟用：把计划表的两份状态各打一行（走界面同一条 `dumpLines`）。
+    private func dumpSchedule() {
+        for line in powerSchedule.dumpLines {
+            NSLog("[sched] %@", line)
         }
     }
 
@@ -2599,6 +2671,8 @@ final class AppState {
         status.clear()
         widgetPushTask?.cancel()
         widgetPushTask = nil
+        // 改到一半的草稿也一起丢 —— 换了机器，旧计划不作数。
+        powerSchedule.clear()
         phase = .idle
     }
 
