@@ -70,7 +70,7 @@ struct Provider: TimelineProvider {
         }
         // 离线态：标题与「上次在线」按档给（demo 第 10 稿：小卡「连不上」、
         // 中卡「连不上 NAS」，两档都只留「上次在线 MM-dd HH:mm」）。
-        let title = family == .medium ? "连不上 NAS" : "连不上"
+        let title = family != .small ? "连不上 NAS" : "连不上"
         return SnapshotEntry(date: date,
                              display: .offline(title: title, lastOnline: cached?.takenAt),
                              family: family)

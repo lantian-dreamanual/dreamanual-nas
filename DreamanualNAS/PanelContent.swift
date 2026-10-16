@@ -4,9 +4,9 @@ import SwiftUI
 //
 // 2026-10-17 定版（设计稿 v2）：桌面小组件的图库提取通道系统侧失效，状态展示
 // 改走状态栏图标点开的面板。三段：
-//   · 状态区 —— 直接复用小组件的中组件视图 `NASStatusContent`（在线 / 离线
-//     两态原样搬来），只改一处：离线那组**贴顶**（`offlineTopAligned`）——
-//     小组件里它是居中排的，面板不是固定中组件格，居中会离状态行老远；
+//   · 状态区 —— 直接复用小组件的中组件视图 `NASStatusContent`，档位传
+//     `.panel`：离线那组贴顶（小组件里居中）；在线三列的列内 kv 不做
+//     两端对齐，块间空隙留给列间 Spacer（间距大而均匀、列宽稳定）；
 //   · 播放区 —— 队列非空才渲染（用户拍板：没加歌就不该出现播放控制器）；
 //   · 操作行 —— 打开主窗（实心主按钮）+ 退出。
 //
@@ -22,7 +22,7 @@ struct PanelContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NASStatusContent(display: display, family: .medium, offlineTopAligned: true)
+            NASStatusContent(display: display, family: .panel)
                 .frame(height: 148)
             if let engine = state?.playback, engine.hasQueue {
                 playbackBlock(engine).padding(.top, DmSpace.s10)
@@ -46,7 +46,7 @@ struct PanelContent: View {
                endpointKey: state.qcID, qcID: state.qcID,
                directAddress: state.directAddress, username: state.username
            ) {
-            return .make(from: data, date: Date(), family: .medium)
+            return .make(from: data, date: Date(), family: .panel)
         }
         if state.status.phase.isBusy { return .offline(title: "正在读取", lastOnline: nil) }
         let title = state.isConnected ? "尚未读取" : "未连接"

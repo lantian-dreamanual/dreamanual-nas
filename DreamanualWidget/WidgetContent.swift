@@ -51,7 +51,7 @@ extension NASWidgetDisplay {
         // 顶行转红的唯一判据：服务端报上次关机不正常（is_system_crashed）。
         let tone: NASWidgetDisplay.Tone = data.crashed ? .bad : .ok
         let status = data.crashed ? "异常" : "在线"
-        let upt = uptStamp.string(from: data.takenAt) + (family == .medium ? " 更新" : "")
+        let upt = uptStamp.string(from: data.takenAt) + (family != .small ? " 更新" : "")
         return NASWidgetDisplay(
             tone: tone,
             statusText: status,
@@ -89,17 +89,13 @@ extension NASWidgetDisplay {
 }
 
 struct NASStatusContent: View {
-    enum Family { case small, medium }
+    /// `small` / `medium` 是桌面小组件两档；`panel` 是状态栏面板 —— 同一份
+    /// 在线数据，布局差异两处：列内 kv 不做两端对齐（不抢块间空隙、列宽
+    /// 稳定），离线那组贴顶不居中。
+    enum Family { case small, medium, panel }
 
     let display: NASWidgetDisplay
     let family: Family
-    /// 离线那组（`server-off` + 文案）的纵向落位。
-    ///
-    /// 小组件里是**居中**（demo 第 5 稿：顶行占视觉重量，组中心比可用区中心
-    /// 低 3.9px）；状态栏面板里改**贴顶** —— 面板高度不是固定中组件格，
-    /// 居中会让那组离状态行老远（2026-10-17 用户抓图）。在线态两处本来就
-    /// 都是从顶行往下堆，不受这个开关影响。
-    var offlineTopAligned = false
 
     var body: some View {
         Group {
@@ -108,7 +104,7 @@ struct NASStatusContent: View {
             } else if family == .small {
                 smallOnline
             } else {
-                mediumOnline
+                mediumOnline(kvTrailing: family != .panel)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -130,7 +126,12 @@ struct NASStatusContent: View {
 
     // MARK: 在线 · 中组件（三块 space-between，列宽收缩包内容）
 
-    private var mediumOnline: some View {
+    /// `kvTrailing`：列内 kv 行要不要两端对齐（`Spacer` 撑满列宽）。
+    /// 小组件里要 —— 温度列得贴着卡片右缘；面板里**不要** —— Spacer 会把
+    /// 所在列变成弹性列，抢走块间空隙：温度列被撑宽、「硬盘 1」与温度分开
+    /// 老远像两个内容，列宽还随数值位数跳（2026-10-17 用户抓图）。面板档
+    /// 块间空隙全给列间的 `Spacer`，三块间距大而均匀、列宽收缩稳定。
+    private func mediumOnline(kvTrailing: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             topRow
             HStack(alignment: .top, spacing: 0) {
@@ -139,10 +140,10 @@ struct NASStatusContent: View {
                     storageValue.padding(.top, DmSpace.s2)
                     progressBar.padding(.top, DmSpace.s4)
                     if let free = display.freeText {
-                        kvRow(k: "可用", v: free).padding(.top, DmSpace.s2)
+                        kvRow(k: "可用", v: free, trailing: kvTrailing).padding(.top, DmSpace.s2)
                     }
                 }
-                Spacer(minLength: 16)
+                Spacer(minLength: DmSpace.s16)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("CPU").font(.wLab).foregroundColor(.dmInk3)
                     Text(display.cpuText)
@@ -150,7 +151,7 @@ struct NASStatusContent: View {
                         .foregroundColor(.dmInk)
                         .padding(.top, DmSpace.s2)
                 }
-                Spacer(minLength: 16)
+                Spacer(minLength: DmSpace.s16)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("温度").font(.wLab).foregroundColor(.dmInk3)
                     Text(display.temperatureText)
@@ -158,7 +159,8 @@ struct NASStatusContent: View {
                         .foregroundColor(.dmInk)
                         .padding(.top, DmSpace.s2)
                     ForEach(display.disks, id: \.name) { disk in
-                        kvRow(k: disk.name, v: disk.temperatureText).padding(.top, DmSpace.s2)
+                        kvRow(k: disk.name, v: disk.temperatureText, trailing: kvTrailing)
+                            .padding(.top, DmSpace.s2)
                     }
                 }
             }
@@ -169,9 +171,10 @@ struct NASStatusContent: View {
     // MARK: 离线（两档同一套，标题与上次在线文案由映射层给）
 
     private var offline: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let topAligned = family == .panel
+        return VStack(alignment: .leading, spacing: 0) {
             topRow
-            if offlineTopAligned {
+            if topAligned {
                 offlineBadge.frame(maxWidth: .infinity).padding(.top, DmSpace.s10)
             } else {
                 Spacer(minLength: 0)
@@ -180,9 +183,9 @@ struct NASStatusContent: View {
             }
         }
         // 顶行占视觉重量：内容区从状态行下方起算居中（demo 第 5 稿，+22px）。
-        // 贴顶那一档不加这段 —— 状态行下方直接接内容（与在线态同一条节奏：
+        // 面板档不加这段 —— 状态行下方直接接内容（与在线态同一条节奏：
         // topRow → s10 → 内容块）。
-        .padding(.top, offlineTopAligned ? 0 : 34)
+        .padding(.top, topAligned ? 0 : 34)
     }
 
     /// 离线内容组。两档共用，只是外面套的排布不同。
@@ -290,10 +293,14 @@ struct NASStatusContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func kvRow(k: String, v: String) -> some View {
+    /// `trailing = true`：kv 两端对齐（`Spacer` 撑满列宽，小组件温度列贴右缘
+    /// 用）。`false`：kv 紧挨（间距 s8）—— 列不参与弹性，宽度收缩包内容。
+    private func kvRow(k: String, v: String, trailing: Bool) -> some View {
         HStack(spacing: DmSpace.s8) {
             Text(k).font(.wKv).foregroundColor(.dmInk3)
-            Spacer(minLength: 0)
+            if trailing {
+                Spacer(minLength: 0)
+            }
             Text(v).font(.wKv).monospacedDigit().foregroundColor(.dmInk2)
         }
     }
