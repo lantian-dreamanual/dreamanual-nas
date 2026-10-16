@@ -9,7 +9,10 @@ import Foundation
 /// 文件方案与「`-A` 钥匙串」的防护级别等价 —— 都是同机同用户可读；
 /// 代价说明白：明文文件，靠 0600 权限 + FileVault 兜着。
 ///
-/// 迁移：文件还不存在时读一次钥匙串（可能弹一次授权框），拿到即落盘。
+/// 迁移：已于 2026-10-17 下线。原设计「文件不存在时读一次钥匙串」，但
+/// 钥匙串授权绑签名身份，ad-hoc 重编译后每次都弹授权框；而且只要文件
+/// 一时读不到（比如被临时移开），就会撞上弹框阻塞加载线程。文件方案
+/// 落地以来口令都已迁移完，这条路径只剩制造弹框 —— 彻底移除。
 ///
 /// 位置：`~/Library/Application Support/DreamanualNAS/credential.json`
 /// （目录 0700、文件 0600；键用「端点|用户名」，与 `endpointKey` 同一套）。
@@ -31,19 +34,14 @@ enum CredentialStore {
         return dict
     }
 
-    /// 先文件，再钥匙串（迁移一次），都没有就回 nil。
+    /// 只读文件。没有就是没有 —— 绝不碰钥匙串（见类型注释）。
     static func load(endpointID: String, username: String) -> String? {
         let dict = stored()
         let key = accountKey(endpointID: endpointID, username: username)
         if let value = dict[key], !value.isEmpty { return value }
         // 裸账号键兜底：钥匙串时代用户在终端里存过的那种写法，文件里也认。
         if let value = dict[username], !value.isEmpty { return value }
-
-        guard let migrated = KeychainStore.password(endpointID: endpointID, username: username),
-              !migrated.isEmpty
-        else { return nil }
-        save(password: migrated, endpointID: endpointID, username: username)
-        return migrated
+        return nil
     }
 
     @discardableResult

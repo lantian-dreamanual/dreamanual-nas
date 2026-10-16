@@ -5,7 +5,8 @@ import SwiftUI
 // 2026-10-17 定版（设计稿 v2）：桌面小组件的图库提取通道系统侧失效，状态展示
 // 改走状态栏图标点开的面板。三段：
 //   · 状态区 —— 直接复用小组件的中组件视图 `NASStatusContent`（在线 / 离线
-//     两态原样搬来，零改动）；
+//     两态原样搬来），只改一处：离线那组**贴顶**（`offlineTopAligned`）——
+//     小组件里它是居中排的，面板不是固定中组件格，居中会离状态行老远；
 //   · 播放区 —— 队列非空才渲染（用户拍板：没加歌就不该出现播放控制器）；
 //   · 操作行 —— 打开主窗（实心主按钮）+ 退出。
 //
@@ -21,7 +22,7 @@ struct PanelContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NASStatusContent(display: display, family: .medium)
+            NASStatusContent(display: display, family: .medium, offlineTopAligned: true)
                 .frame(height: 148)
             if let engine = state?.playback, engine.hasQueue {
                 playbackBlock(engine).padding(.top, DmSpace.s10)

@@ -93,6 +93,13 @@ struct NASStatusContent: View {
 
     let display: NASWidgetDisplay
     let family: Family
+    /// 离线那组（`server-off` + 文案）的纵向落位。
+    ///
+    /// 小组件里是**居中**（demo 第 5 稿：顶行占视觉重量，组中心比可用区中心
+    /// 低 3.9px）；状态栏面板里改**贴顶** —— 面板高度不是固定中组件格，
+    /// 居中会让那组离状态行老远（2026-10-17 用户抓图）。在线态两处本来就
+    /// 都是从顶行往下堆，不受这个开关影响。
+    var offlineTopAligned = false
 
     var body: some View {
         Group {
@@ -164,23 +171,33 @@ struct NASStatusContent: View {
     private var offline: some View {
         VStack(alignment: .leading, spacing: 0) {
             topRow
-            Spacer(minLength: 0)
-            VStack(spacing: DmSpace.s6) {
-                ServerOffIcon()
-                    .frame(width: 30, height: 30)
-                    .foregroundColor(.dmInk3)
-                Text(display.offlineTitle)
-                    .font(.wBig)
-                    .foregroundColor(.dmInk2)
-                if let last = display.lastOnlineText {
-                    Text(last).font(.wKv).foregroundColor(.dmInk3).monospacedDigit()
-                }
+            if offlineTopAligned {
+                offlineBadge.frame(maxWidth: .infinity).padding(.top, DmSpace.s10)
+            } else {
+                Spacer(minLength: 0)
+                offlineBadge.frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
-            Spacer(minLength: 0)
         }
         // 顶行占视觉重量：内容区从状态行下方起算居中（demo 第 5 稿，+22px）。
-        .padding(.top, 34)
+        // 贴顶那一档不加这段 —— 状态行下方直接接内容（与在线态同一条节奏：
+        // topRow → s10 → 内容块）。
+        .padding(.top, offlineTopAligned ? 0 : 34)
+    }
+
+    /// 离线内容组。两档共用，只是外面套的排布不同。
+    private var offlineBadge: some View {
+        VStack(spacing: DmSpace.s6) {
+            ServerOffIcon()
+                .frame(width: 30, height: 30)
+                .foregroundColor(.dmInk3)
+            Text(display.offlineTitle)
+                .font(.wBig)
+                .foregroundColor(.dmInk2)
+            if let last = display.lastOnlineText {
+                Text(last).font(.wKv).foregroundColor(.dmInk3).monospacedDigit()
+            }
+        }
     }
 
     // MARK: 零件
