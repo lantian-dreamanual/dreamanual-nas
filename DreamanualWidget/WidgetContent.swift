@@ -98,6 +98,10 @@ struct NASStatusContent: View {
     let display: NASWidgetDisplay
     let family: Family
 
+    /// 面板档存储列宽上限：面板 400 − 外层内边距 24 = 376 可用宽，进度条
+    /// 占约四成、其余留给块间空隙。
+    private static let panelStorageWidth: CGFloat = 150
+
     var body: some View {
         Group {
             if display.offline {
@@ -105,7 +109,8 @@ struct NASStatusContent: View {
             } else if family == .small {
                 smallOnline
             } else {
-                mediumOnline(kvTrailing: family != .panel)
+                mediumOnline(kvTrailing: family != .panel,
+                             storageWidth: family == .panel ? Self.panelStorageWidth : nil)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -132,7 +137,12 @@ struct NASStatusContent: View {
     /// 所在列变成弹性列，抢走块间空隙：温度列被撑宽、「硬盘 1」与温度分开
     /// 老远像两个内容，列宽还随数值位数跳（2026-10-17 用户抓图）。面板档
     /// 块间空隙全给列间的 `Spacer`，三块间距大而均匀、列宽收缩稳定。
-    private func mediumOnline(kvTrailing: Bool) -> some View {
+    ///
+    /// `storageWidth`：存储列的宽度上限。进度条是 `GeometryReader`、天生
+    /// 贪婪，不限宽时它会把三栏之间的空隙吃光（`Spacer` 只剩最小 16）——
+    /// 面板档给它定宽（内容宽 376 的约四成），剩下的才归块间空隙
+    /// （2026-10-17 用户两轮反馈：三栏离得太近）。
+    private func mediumOnline(kvTrailing: Bool, storageWidth: CGFloat? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             topRow
             HStack(alignment: .top, spacing: 0) {
@@ -144,6 +154,7 @@ struct NASStatusContent: View {
                         kvRow(k: "可用", v: free, trailing: kvTrailing).padding(.top, DmSpace.s2)
                     }
                 }
+                .frame(maxWidth: storageWidth, alignment: .leading)
                 Spacer(minLength: DmSpace.s16)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("CPU").font(.wLab).foregroundColor(.dmInk3)
