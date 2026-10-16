@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 import Observation
 
 /// 连接状态机 + 外壳需要的全部全局状态。
@@ -74,6 +75,9 @@ final class AppState {
     // MARK: - 运行状态
 
     private(set) var phase: Phase = .idle
+    /// 最近一次 `connect` 抛的错（成功即清）。自动连的重试判据靠它分型：
+    /// 口令被拒一族不再重试，其余（网络没就绪、中继抖一下）值得再试。
+    private(set) var lastConnectError: (any Error)?
     /// 端点描述，连上之后显示在侧栏底部（走中继还是直连、主机端口、区域）。
     private(set) var endpointLabel = ""
     /// 链路的形态（状态页页头那颗徽章用）。
@@ -275,6 +279,21 @@ final class AppState {
 
     func closeTagEditor() {
         tagEditor = nil
+    }
+
+    // MARK: - 新增开关机计划
+
+    /// 新增计划任务的编辑弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
+    /// 只在计划卡就绪（读到过服务端那一份）时给开 —— 没读到就无从追加进草稿。
+    private(set) var showsPowerAdd = false
+
+    func openPowerAdd() {
+        guard powerSchedule.isReady else { return }
+        showsPowerAdd = true
+    }
+
+    func closePowerAdd() {
+        showsPowerAdd = false
     }
 
     /// 弹窗「保存」：真写 ID3 到 NAS 文件（索引 0 秒跟上）。落地后改曲库行与
@@ -962,18 +981,106 @@ final class AppState {
 
     /// 启动时自动连一次（本机凭据文件里真有那条才动）。
     ///
-    /// 读文件不弹任何系统框；只有文件还没有、要走钥匙串迁移那一次可能弹
-    /// 授权框。所以读取依然不能留在 `@MainActor` 上：挂在主线程时弹窗期间
-    /// 整个窗口都不渲染（2026-10-12 实测：进程活着、窗口 0×0、卡死启动帧）。
+    /// 读文件不弹任何系统框。读取不能留在 `@MainActor` 上：挂在主线程时
+    /// 整个启动都排在它后面。重试交给 `startAutoConnect` —— 这里只负责
+    /// 把凭据读出来。
     func restoreAndAutoConnect() async {
+        startLinkMonitor()
         guard isConnected == false, phase.isBusy == false else { return }
         let endpoint = endpointKey
         let user = trimmedUsername
         let saved = await Task.detached(priority: .userInitiated) {
             CredentialStore.load(endpointID: endpoint, username: user)
         }.value
+        NSLog("[connect] 自动连：端点 %@ · 凭据 %@", endpoint, saved != nil ? "在" : "无")
         guard let password = saved else { return }
-        await connect(password: password)
+        startAutoConnect(password: password)
+    }
+
+    /// 自动连的重试任务（含退避等待）。用户手动连接 / 断开时整套取消。
+    private var autoConnectTask: Task<Void, Never>?
+    /// 网络监视器：只在「断 → 通」跳变的那一拍补连，平时不轮询。
+    private var linkMonitor: NWPathMonitor?
+    /// `nil` = 还没收到过路径回调。首个回调只登记基线，不算跳变 ——
+    /// 否则开机的「网络本来就通」会跟 `restoreAndAutoConnect` 抢着连。
+    private var linkWasSatisfied: Bool?
+
+    /// 失败退避重试：0s / 5s / 15s / 30s / 60s 共五把。开机常见的竞态
+    /// （Wi-Fi 还在连、Clash 还没起）两分钟内基本都能缓过来。三道闸：
+    /// 连上或有人正在连就收手；口令被拒立即收手（DSM 自动封锁按失败
+    /// 次数计，反复送只会把账号锁死）；任务被取消立即收手。
+    func startAutoConnect(password: String) {
+        autoConnectTask?.cancel()
+        autoConnectTask = Task { [weak self] in
+            guard let self else { return }
+            for (n, wait) in zip([1, 2, 3, 4, 5], [0.0, 5.0, 15.0, 30.0, 60.0]) {
+                if Task.isCancelled {
+                    NSLog("[connect] 自动连第 %d 把前被取消", n)
+                    return
+                }
+                if self.isConnected || self.phase.isBusy { return }
+                if let err = self.lastConnectError, Self.isAuthRejection(err) {
+                    NSLog("[connect] 上一次是口令被拒（%@），不重试", self.phase.label)
+                    return
+                }
+                NSLog("[connect] 自动连接第 %d 把", n)
+                if wait > 0 {
+                    NSLog("[connect] 未连上（%@），%d 秒后再试",
+                          self.phase.label, Int(wait))
+                    try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                    if Task.isCancelled { return }
+                    if self.isConnected || self.phase.isBusy { return }
+                }
+                await self.connect(password: password)
+                if self.isConnected { return }
+            }
+            NSLog("[connect] 自动连接五把都没成（%@），等网络恢复或手动连", self.phase.label)
+        }
+    }
+
+    /// 取消自动连。用户在连接表单里自己动手（连 / 断）时调 —— 那之后
+    /// 重试跟用户抢方向盘没有意义。
+    func cancelAutoConnect() {
+        autoConnectTask?.cancel()
+        autoConnectTask = nil
+    }
+
+    /// 口令被拒一族：登录 400 / 停用 / 无权限 / 两步验证 / 自动封锁 / 口令过期。
+    /// 这些换多少次时机都是同一个答案，重试只会触发封锁。
+    static func isAuthRejection(_ error: any Error) -> Bool {
+        guard let err = error as? SynologyError, err.api == "SYNO.API.Auth" else { return false }
+        return [400, 401, 402, 403, 404, 406, 407, 408, 409].contains(err.code)
+    }
+
+    /// 网络恢复自动补连：路径从断到通的那一拍，若还停在 failed / idle，
+    /// 就再起一轮自动连（睡眠唤醒、Wi-Fi 重连都落在这条路上）。
+    private func startLinkMonitor() {
+        guard linkMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in
+                guard let self else { return }
+                guard let was = self.linkWasSatisfied else {
+                    self.linkWasSatisfied = satisfied
+                    return
+                }
+                self.linkWasSatisfied = satisfied
+                guard satisfied, !was else { return }
+                guard !self.isConnected, !self.phase.isBusy else { return }
+                if let err = self.lastConnectError, Self.isAuthRejection(err) { return }
+                let endpoint = self.endpointKey
+                let user = self.trimmedUsername
+                let saved = await Task.detached(priority: .utility) {
+                    CredentialStore.load(endpointID: endpoint, username: user)
+                }.value
+                guard let password = saved, !self.isConnected, !self.phase.isBusy else { return }
+                NSLog("[connect] 网络恢复，自动补连")
+                self.startAutoConnect(password: password)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.dreamanual.nas.linkmonitor"))
+        linkMonitor = monitor
     }
 
     // MARK: - 冒烟验证
@@ -1414,11 +1521,47 @@ final class AppState {
     ///   · `togglerow=<n>` 拨第 n 行的开关 —— **只动草稿、不写 NAS**，看「未保存」徽章；
     ///   · `schedsave` 把草稿写回 NAS 并**回读**；
     ///   · `scheddiscard` 放弃修改（草稿丢回服务端那一份）；
+    ///   · `schedmock` / `schededitor` / `schedadd` / `scheddel=<n>` 只动草稿的四条
+    ///     （灌样例 / 开新增弹窗 / 追加一条 / 删一条）—— **离线也能跑**（NAS 关机时
+    ///     摆界面截图用），命令里只有这几条时不判连接；
     ///   · `schedroundtrip` 整条写回链路：拨 → 存 → 回读核对 → 拨回 → 存 → 回读核对
     ///     （收尾回原样，见 `smokeScheduleRoundtrip`）。
     ///
     /// 顺序即字面顺序：`clear` 之后再 `drop=` 是抹不掉的（手上没快照），要抹就先抹。
     func smokeStatus(_ command: String) async {
+        // 离线可跑的记号（不碰会话，只在草稿上操作）先于连接判据 ——
+        // NAS 关机时也能灌 mock 摆界面截图。
+        func runOffline(_ token: String) {
+            if token == "schedmock" {
+                powerSchedule.injectMock()
+                dumpSchedule()
+            } else if token == "schededitor" {
+                powerSchedule.injectMock()
+                openPowerAdd()
+                NSLog("[sched] 开新增弹窗（灌了 mock 数据）")
+            } else if token == "schedadd" {
+                powerSchedule.add(PowerTask(
+                    kind: .poweron, enabled: true, hour: 22, minute: 5,
+                    weekdays: [0, 6]))
+                NSLog("[sched] 往草稿追加一条 周末 22:05 开机")
+                dumpSchedule()
+            } else if token.hasPrefix("scheddel=") {
+                let index = Int(token.dropFirst("scheddel=".count)) ?? 0
+                powerSchedule.remove(index)
+                NSLog("[sched] 从草稿删第 %d 行", index)
+                dumpSchedule()
+            }
+        }
+        let parts = command.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        if !parts.isEmpty,
+           parts.allSatisfy({ $0 == "schedmock" || $0 == "schededitor"
+                              || $0 == "schedadd" || $0.hasPrefix("scheddel=") }) {
+            for token in parts { runOffline(token) }
+            return
+        }
+
         guard isConnected, let manager = sessionManager else {
             NSLog("[status] 未连接，跳过（phase=%@）", String(describing: phase))
             return
@@ -1467,6 +1610,10 @@ final class AppState {
                 powerSchedule.discard()
                 NSLog("[sched] 放弃修改（草稿丢回服务端那一份）")
                 dumpSchedule()
+            } else if token == "schedmock" || token == "schededitor" || token == "schedadd"
+                        || token.hasPrefix("scheddel=") {
+                // 只动草稿的记号（mock / 编辑器 / 追加 / 删除）与离线路径同一实现。
+                runOffline(token)
             } else if token == "schedroundtrip" {
                 await smokeScheduleRoundtrip(manager)
             } else {
@@ -2584,6 +2731,8 @@ final class AppState {
         guard phase.isBusy == false else { return }
         phase = .resolving
         endpointLabel = ""
+        lastConnectError = nil
+        NSLog("[connect] connect 开始")
 
         // 表单里粘进来的值常带首尾空白，账号那一个字符之差就是 Auth 400，
         // 而错误提示看不出是空白 —— 发出去之前先剪掉。
@@ -2594,6 +2743,7 @@ final class AppState {
             let client: SynologyClient
             if let direct = DirectAddress.parse(directAddress) {
                 // 直连覆盖：局域网或 Tailscale。这条路的证书是 NAS 自签的，要放行。
+                NSLog("[connect] 直连分支 %@:%d", direct.host, direct.port)
                 client = SynologyClient(host: direct.host, port: direct.port, allowSelfSigned: true)
                 endpointLabel = "直连 \(direct.host):\(direct.port)"
                 linkMode = .direct
@@ -2610,10 +2760,12 @@ final class AppState {
             }
 
             phase = .loggingIn
+            NSLog("[connect] probe 前")
             let manager = SessionManager(client: client, account: user, password: password)
 
             // 会话是否真能用，拿一次心跳说话 —— 登录成功但权限不对是另一回事。
             try await manager.probe()
+            NSLog("[connect] probe 通过")
 
             sessionManager = manager
 
@@ -2648,12 +2800,14 @@ final class AppState {
                 CredentialStore.save(password: password, endpointID: key, username: user)
             }
         } catch {
+            lastConnectError = error
             phase = .failed(error.localizedDescription)
             sessionManager = nil
         }
     }
 
     func disconnect() async {
+        cancelAutoConnect()
         playback?.detach()
         playback = nil
         showsQueue = false

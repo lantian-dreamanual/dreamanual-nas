@@ -70,9 +70,8 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
             request.setValue(credentials.token, forHTTPHeaderField: "X-SYNO-TOKEN")
         }
 
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 3600
+        let config = SynologyClient.makeConfiguration(
+            requestTimeout: 60, resourceTimeout: 3600, direct: allowSelfSigned)
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         lock.withLock { self.session = session }
 

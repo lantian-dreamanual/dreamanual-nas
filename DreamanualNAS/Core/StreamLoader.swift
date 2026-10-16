@@ -97,12 +97,14 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
     private let workQueue = DispatchQueue(label: "dreamanual.nas.stream", qos: .userInitiated)
     private let tlsPolicy: TLSPolicyDelegate
     private lazy var probeSession = URLSession(
-        configuration: .default,
+        configuration: SynologyClient.makeConfiguration(
+            requestTimeout: 60, resourceTimeout: 604_800, direct: endpoint.allowSelfSigned),
         delegate: tlsPolicy,
         delegateQueue: nil
     )
     private lazy var streamSession = URLSession(
-        configuration: .default,
+        configuration: SynologyClient.makeConfiguration(
+            requestTimeout: 60, resourceTimeout: 604_800, direct: endpoint.allowSelfSigned),
         delegate: self,
         delegateQueue: nil
     )

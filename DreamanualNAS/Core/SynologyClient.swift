@@ -114,6 +114,23 @@ final class SynologyClient: @unchecked Sendable {
     private var apiMap: [String: SynologyAPIInfo]?
     private let lock = NSLock()
 
+    /// 会话配置的单一来源：普通调用、取流（`StreamLoader`）、下载（`FileDownloader`）
+    /// 各开自己的 URLSession，三处共用 —— 一处改了、另两处忘了，直连就会只坏在
+    /// 某个场景上，很难查。
+    ///
+    /// 🔴 直连（`direct: true`）绕开系统代理：局域网 / Tailscale 地址经 Clash
+    /// 一圈会把首连拖到 30 秒超时边缘（2026-10-17 实测，curl 直连 0.13 秒）；
+    /// 中继必须保留系统代理才出得去。
+    static func makeConfiguration(
+        requestTimeout: TimeInterval, resourceTimeout: TimeInterval, direct: Bool
+    ) -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = resourceTimeout
+        if direct { config.connectionProxyDictionary = [:] }
+        return config
+    }
+
     /// - Parameter allowSelfSigned: 直连（局域网 / Tailscale）传 true，
     ///   QuickConnect 中继传 false。
     init(host: String, port: Int, allowSelfSigned: Bool) {
@@ -125,9 +142,8 @@ final class SynologyClient: @unchecked Sendable {
         comps.path = "/webapi/"
         baseURL = comps.url ?? URL(string: "https://\(host):\(port)/webapi/")!
 
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 300
+        let config = Self.makeConfiguration(
+            requestTimeout: 30, resourceTimeout: 300, direct: allowSelfSigned)
         config.httpAdditionalHeaders = ["Accept": "application/json"]
         session = URLSession(
             configuration: config,

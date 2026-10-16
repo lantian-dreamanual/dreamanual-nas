@@ -117,6 +117,8 @@ struct ConnectView: View {
     /// 两处都可能触发，但 `AppState.connect` 开头就把重复调用挡掉了。
     private func submit() {
         guard !isSubmitDisabled else { return }
+        // 用户亲手接方向盘：停掉后台的自动连重试，别跟这一把抢。
+        state.cancelAutoConnect()
         Task { await state.connect(password: password) }
     }
 

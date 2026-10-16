@@ -49,6 +49,10 @@ struct PanelContent: View {
             return .make(from: data, date: Date(), family: .panel)
         }
         if state.status.phase.isBusy { return .offline(title: "正在读取", lastOnline: nil) }
+        // 失败态单独点名：跟「没连上」不同 —— 连了但没连上，原因在主窗的连接表单。
+        if case .failed = state.status.phase {
+            return .offline(title: "连接失败", lastOnline: WidgetBridge.read()?.takenAt)
+        }
         let title = state.isConnected ? "尚未读取" : "未连接"
         return .offline(title: title, lastOnline: WidgetBridge.read()?.takenAt)
     }

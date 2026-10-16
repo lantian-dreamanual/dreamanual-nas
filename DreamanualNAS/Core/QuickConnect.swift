@@ -42,7 +42,7 @@ enum QuickConnectError: LocalizedError {
         case let .badResponse(text):
             return "QuickConnect 返回了看不懂的内容：\(text)"
         case let .network(text):
-            return "连不上 QuickConnect 服务：\(text)"
+            return "连不上服务器：\(text)"
         }
     }
 }

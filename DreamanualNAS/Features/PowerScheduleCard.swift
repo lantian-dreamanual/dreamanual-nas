@@ -37,6 +37,12 @@ final class PowerScheduleModel {
 
     var isDirty: Bool { draft != nil && draft != server }
 
+    /// 读到服务端那一份了（「新增任务」的可用判据 —— 没读到就无从「追加进草稿」）。
+    var isReady: Bool {
+        if case .ready = phase { return true }
+        return false
+    }
+
     /// 拉一次。默认不刷新已有数据 —— 换模块回来不该白发一轮请求，
     /// 更不该把用户改到一半的草稿冲掉（`server != nil` 时直接返回）。
     func load(on manager: SessionManager?, force: Bool = false) async {
@@ -58,6 +64,24 @@ final class PowerScheduleModel {
     func toggle(_ index: Int) {
         guard var draft, draft.tasks.indices.contains(index) else { return }
         draft.tasks[index].enabled.toggle()
+        self.draft = draft
+        saveNote = nil
+    }
+
+    /// 删一条。**只动草稿** —— 删错用「放弃修改」找回（服务端那份没动过），
+    /// 所以行内不设确认弹层。
+    func remove(_ index: Int) {
+        guard var draft, draft.tasks.indices.contains(index) else { return }
+        draft.tasks.remove(at: index)
+        self.draft = draft
+        saveNote = nil
+    }
+
+    /// 追加一条（编辑弹窗的「添加」）。落表尾；启用态默认开。
+    /// 星期只收 0–6（🔴 给 7 服务端会静默剥成空串，见 `PowerTask.weekdays`）。
+    func add(_ task: PowerTask) {
+        guard var draft else { return }
+        draft.tasks.append(task)
         self.draft = draft
         saveNote = nil
     }
@@ -99,6 +123,20 @@ final class PowerScheduleModel {
         isSaving = false
     }
 
+    /// 冒烟用（`DM_STATUS=schedmock`）：不碰网络灌一份与真机同形的计划，
+    /// 供离线摆界面截图。灌的是 `server` 与 `draft` 两份同值（未改动态）。
+    func injectMock() {
+        let mock = PowerSchedule(tasks: [
+            PowerTask(kind: .poweroff, enabled: true, hour: 0, minute: 30, weekdays: [2, 3, 4, 5]),
+            PowerTask(kind: .poweron, enabled: true, hour: 9, minute: 0, weekdays: [1, 2, 3, 4, 5]),
+            PowerTask(kind: .poweron, enabled: true, hour: 10, minute: 30, weekdays: [0, 6]),
+        ])
+        server = mock
+        draft = mock
+        saveNote = nil
+        phase = .ready
+    }
+
     /// 冒烟用：把两份状态各打一行 —— 屏幕上**看不出来**的那几件（服务端几份、
     /// 草稿脏没脏、`weekdays` 解成了什么、星期那列压成了什么字）靠它对。
     var dumpLines: [String] {
@@ -119,12 +157,9 @@ final class PowerScheduleModel {
 /// 开关机计划卡（原型系统状态屏下半右卡）。
 ///
 /// 形态是**列表卡**（`dmCard()`，内边距 0，卡头与页脚自带 `s14`）：
-/// 卡头（题头 + 未保存徽章）→ 一行一条计划（星期 · 时刻 · 开机/关机徽章 · 开关，
-/// 行间发丝）→ 页脚（左端错误行、右端「放弃修改 / 保存到 NAS」）。
-///
-/// **本批只做开启与关闭**：读计划、逐条拨开关、一次性写回。条目的新增与删除、
-/// 以及立刻关机 / 重启是后面两批 —— 关机真执行过就拔掉了这台机器，而它不在本机
-/// 广播域里、软件唤醒做不到（`docs/接口结论.md` 第二节）。
+/// 卡头（题头 + 未保存徽章）→ 一行一条计划（星期 · 时刻 · 开机/关机徽章 · 删除 · 开关，
+/// 行间发丝）→ 页脚（左端错误行、右端「新增任务 / 放弃修改 / 保存到 NAS」）。
+/// 新增走 `PowerAddCard` 弹窗，删除走行内的废纸篓钮 —— 两者都只动草稿。
 struct PowerScheduleCard: View {
     @Environment(AppState.self) private var state
 
@@ -172,7 +207,9 @@ struct PowerScheduleCard: View {
                             .fill(Color.dmLine)
                             .frame(height: DmLine.hairline)
                     }
-                    PowerScheduleRow(task: task) { model.toggle(index) }
+                    PowerScheduleRow(task: task,
+                                     onToggle: { model.toggle(index) },
+                                     onDelete: { model.remove(index) })
                 }
             }
         } else if case let .failed(reason) = model.phase {
@@ -183,7 +220,10 @@ struct PowerScheduleCard: View {
             note("正在读取开关机计划…", detail: "读的是 NAS 侧保存的那一份。")
         } else {
             note("这台机器还没设开关机计划",
-                 detail: "计划由 NAS 侧的「硬件和电源」保存，这里只能读与改。")
+                 detail: "计划由 NAS 侧的「硬件和电源」保存，这里只能读与改。",
+                 actionTitle: "新增一条") {
+                state.openPowerAdd()
+            }
         }
     }
 
@@ -231,6 +271,9 @@ struct PowerScheduleCard: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: DmSpace.s12)
+            Button("新增任务") { state.openPowerAdd() }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(model.isSaving)
             Button("放弃修改") { model.discard() }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(!model.isDirty || model.isSaving)
@@ -262,12 +305,13 @@ struct PowerScheduleCard: View {
 
 /// 一条计划行（原型 `.sched-row`：内边距 10/14，行间发丝）。
 ///
-/// 四格：星期（定宽一栏，题取 `ink-2`）· 时刻（等宽数字，13/500）·
-/// 开机 / 关机徽章 · 右端开关。停用的那一条整行压一档（字转 `ink-3`、徽章转中性），
-/// 这样「排了但没启用」一眼分得出来，不必去读开关的滑块在哪边。
+/// 五格：星期（定宽一栏，题取 `ink-2`）· 时刻（等宽数字，13/500）·
+/// 开机 / 关机徽章 · 删除钮 · 右端开关。停用的那一条整行压一档（字转 `ink-3`、
+/// 徽章转中性），这样「排了但没启用」一眼分得出来，不必去读开关的滑块在哪边。
 private struct PowerScheduleRow: View {
     let task: PowerTask
     let onToggle: () -> Void
+    let onDelete: () -> Void
 
     /// 星期那一栏的定宽。原型 `.sched-row .d` 是 52，那是以「每天 / 单日」三种
     /// 形态画的；真实计划里最短的长组合是连排区间（`周二至周五`，5 个字），
@@ -292,6 +336,10 @@ private struct PowerScheduleRow: View {
 
             Spacer(minLength: DmSpace.s12)
 
+            // 删除只动草稿、「放弃修改」随时找回，所以不设确认弹层。
+            // 图标用 `trash`（`trash-2` 不在图标兜底表里）。
+            IconButton(iconName: "trash", compact: true, action: onDelete)
+
             Toggle("", isOn: Binding(get: { task.enabled }, set: { _ in onToggle() }))
                 .labelsHidden()
                 .toggleStyle(DmToggleStyle())
@@ -305,5 +353,163 @@ private struct PowerScheduleRow: View {
     private var badgeTone: DmBadge.Tone {
         guard task.enabled else { return .neutral }
         return task.kind == .poweron ? .ok : .warn
+    }
+}
+
+/// 新增计划任务的编辑弹窗（挂根视图的 `.dmModal`，与写操作弹窗同层）。
+///
+/// 三个字段：类型（开机 / 关机，分段控件）· 时刻（时 / 分两个数字框）·
+/// 星期（七颗可多选的片）。**「添加」只往草稿追加** —— 写回仍走卡片页脚的
+/// 「保存到 NAS」，与拨开关同一条「草稿 → 保存」链路。
+///
+/// 校验都落在本地：时刻必须落在 0–23 时 / 0–59 分、星期至少选一天 —— 后一条
+/// 还挡着接口的坑：`weekdays` 空串虽然服务端收，但那条任务等于白排（读回来
+/// 显示「未设星期」）；界面上也不产出 6 以外的数字（给 7 会被静默剥掉）。
+struct PowerAddCard: View {
+    @Environment(AppState.self) private var state
+
+    private var model: PowerScheduleModel { state.powerSchedule }
+
+    @State private var kind: PowerTask.Kind = .poweron
+    @State private var hourText = "09"
+    @State private var minuteText = "00"
+    /// 缺省给工作日 —— 与这台机器现有开机计划最常见的形态同拍。
+    @State private var weekdays: Set<Int> = [1, 2, 3, 4, 5]
+
+    var body: some View {
+        DmModalCard(title: "新增开关机计划", onClose: { state.closePowerAdd() }) {
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                FormLabel("类型")
+                DmSegmented(
+                    PowerTask.Kind.allCases, selection: $kind,
+                    fillsWidth: true, on: .panel,
+                    label: { $0.label }
+                )
+            }
+
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                FormLabel("时刻")
+                HStack(spacing: DmSpace.s6) {
+                    TextField("", text: $hourText)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.center)
+                        .formField(on: .panel)
+                        .frame(width: 56)
+                    Text(":")
+                        .font(.system(size: DmText.t13))
+                        .foregroundColor(Color.dmInk3)
+                    TextField("", text: $minuteText)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.center)
+                        .formField(on: .panel)
+                        .frame(width: 56)
+                    Text("24 小时制")
+                        .font(.system(size: DmText.t11))
+                        .foregroundColor(Color.dmInk3)
+                    Spacer(minLength: 0)
+                }
+                if case let .time(text) = problem {
+                    hint(text, isBad: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                FormLabel("星期")
+                HStack(spacing: DmSpace.s4) {
+                    ForEach(PowerTask.weekOrder, id: \.self) { day in
+                        weekdayChip(day)
+                    }
+                }
+                if case let .weekdays(text) = problem {
+                    hint(text, isBad: true)
+                }
+            }
+
+            if problem == nil {
+                hint("添加后先落在草稿里，点「保存到 NAS」才写回 NAS。", isBad: false)
+            }
+        } foot: {
+            Button("取消") { state.closePowerAdd() }
+                .buttonStyle(SecondaryButtonStyle())
+            Button("添加", action: submit)
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(problem != nil)
+        }
+    }
+
+    /// 本地校验：时刻越界或星期一个没选。`nil` = 可以提交。
+    private var problem: Problem? {
+        if hour == nil || minute == nil {
+            return .time("时刻要落在 0–23 时 / 0–59 分。")
+        }
+        if weekdays.isEmpty {
+            return .weekdays("至少选一天，否则这条任务等于没排。")
+        }
+        return nil
+    }
+
+    private enum Problem {
+        case time(String)
+        case weekdays(String)
+    }
+
+    private var hour: Int? {
+        guard let value = Int(hourText.trimmingCharacters(in: .whitespaces)),
+              (0...23).contains(value) else { return nil }
+        return value
+    }
+
+    private var minute: Int? {
+        guard let value = Int(minuteText.trimmingCharacters(in: .whitespaces)),
+              (0...59).contains(value) else { return nil }
+        return value
+    }
+
+    /// 一颗星期片：选中的走「小块」轨道（`accent-fill` 实底 + `on-accent` 深字），
+    /// 未选中的抬进卡内一档（`panel-2` 底 + 发丝描边）—— 与输入框同一底色。
+    private func weekdayChip(_ day: Int) -> some View {
+        let isSelected = weekdays.contains(day)
+        return Button {
+            if isSelected { weekdays.remove(day) } else { weekdays.insert(day) }
+        } label: {
+            Text(PowerTask.dayName(day))
+                .font(.system(size: DmText.t11))
+                .monospacedDigit()
+                .foregroundColor(isSelected ? Color.dmOnAccent : Color.dmInk2)
+                .padding(.horizontal, DmSpace.s6)
+                .padding(.vertical, DmSpace.s4)
+                .background(
+                    RoundedRectangle(cornerRadius: DmRadius.r6)
+                        .fill(isSelected ? Color.dmAccentFill : Color.dmPanel2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DmRadius.r6)
+                        .strokeBorder(isSelected ? Color.clear : Color.dmLine2,
+                                      lineWidth: DmLine.hairline)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: DmRadius.r6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func hint(_ text: String, isBad: Bool) -> some View {
+        HStack(spacing: DmSpace.s6) {
+            LucideIcon(isBad ? "triangle-alert" : "info", size: DmIcon.i12)
+                .foregroundColor(isBad ? Color.dmDangerInk : Color.dmInk3)
+            Text(text)
+                .font(.system(size: DmText.t11))
+                .foregroundColor(isBad ? Color.dmDangerInk : Color.dmInk3)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func submit() {
+        guard let hour, let minute, !weekdays.isEmpty else { return }
+        model.add(PowerTask(
+            kind: kind, enabled: true,
+            hour: hour, minute: minute,
+            weekdays: weekdays.sorted()
+        ))
+        state.closePowerAdd()
     }
 }

@@ -87,6 +87,13 @@ struct RootView: View {
         ) {
             TagEditorCard()
         }
+        // 新增开关机计划（计划卡页脚 / 空表静场）。与写操作弹窗同一挂法、同一层序。
+        .dmModal(
+            isPresented: state.showsPowerAdd,
+            onDismiss: { state.closePowerAdd() }
+        ) {
+            PowerAddCard()
+        }
     }
 
     /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，
