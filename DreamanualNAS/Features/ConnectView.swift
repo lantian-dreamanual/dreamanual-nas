@@ -11,10 +11,14 @@ struct ConnectView: View {
 
     enum Mode: Hashable { case quickconnect, direct }
 
+    /// 本页四个输入框。焦点用来切输入法：进任一框切 ASCII，全部离开再还原。
+    private enum Field: Hashable { case qcID, directAddress, account, password }
+
     @State private var mode: Mode = .quickconnect
     @State private var password = ""
     /// 口令框挡下全角/中文字符时的即时说明（说清第几位，别让用户自己数）。
     @State private var passwordNote: String?
+    @FocusState private var focused: Field?
 
     var body: some View {
         @Bindable var state = state
@@ -44,12 +48,14 @@ struct ConnectView: View {
                 field("QuickConnect ID") {
                     TextField("例如 mynas", text: $state.qcID)
                         .formField(on: .card)
+                        .focused($focused, equals: .qcID)
                         .onSubmit { submit() }
                 }
             case .direct:
                 field("直连地址") {
                     TextField("主机或主机:端口（局域网 / Tailscale）", text: $state.directAddress)
                         .formField(on: .card)
+                        .focused($focused, equals: .directAddress)
                         .onSubmit { submit() }
                 }
             }
@@ -57,6 +63,7 @@ struct ConnectView: View {
             field("账号") {
                 TextField("DSM 账号", text: $state.username)
                     .formField(on: .card)
+                    .focused($focused, equals: .account)
                     .onSubmit { submit() }
             }
 
@@ -68,6 +75,7 @@ struct ConnectView: View {
                             ? "留空则用已保存的口令" : "DSM 密码",
                         text: passwordBinding)
                         .formField(on: .card)
+                        .focused($focused, equals: .password)
                         .onSubmit { submit() }
 
                     if let passwordNote {
@@ -109,7 +117,13 @@ struct ConnectView: View {
         // 卡片在窗口里居中；窗口高度不够时内容自己滚（与密码管理解锁页同款取舍）。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.dmBg)
-    }
+        // 焦点进任一输入框就把输入法切到 ASCII，四个框都离开再还原 ——
+        // 让用户自己去切输入法是把这个坑转嫁给他（中文输入法的 `!` 是全角）。
+        .onChange(of: focused) { _, now in
+            if now == nil { InputSource.restore() } else { InputSource.enterASCII() }
+        }
+        .onDisappear { InputSource.restore() }
+}
 
     /// 一个字段：标签在上、控件在下，间距 `s6`；字段之间 `s14`。
     private func field<Content: View>(

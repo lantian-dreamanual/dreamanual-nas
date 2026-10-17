@@ -87,6 +87,12 @@ struct DreamanualNASApp: App {
                     if let command = ProcessInfo.processInfo.environment["DM_CONNECT"] {
                         await state.smokeConnect(command)
                     }
+                    // DM_INPUT=switch：切一次 ASCII 输入源、读回来、再还原。
+                    // 焦点那半（进连接页输入框自动切）只能人工点验，这里验的是
+                    // 「这条调用在 app 里真的生效」。
+                    if ProcessInfo.processInfo.environment["DM_INPUT"] == "switch" {
+                        await InputSource.smoke()
+                    }
                     // 冒烟验证：DM_SMOKE=1 时自动播一首并打状态日志。
                     if ProcessInfo.processInfo.environment["DM_SMOKE"] == "1" {
                         await state.smokePlayFirst()
