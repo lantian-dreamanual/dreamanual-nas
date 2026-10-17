@@ -247,6 +247,11 @@ struct LucideIcon: View {
         // 赞赏入口（2026-10-17）。`cup.and.saucer` 问过 `NSImage(systemSymbolName:)`
         // 存在（`mug` / `cup` 都不存在，别试）。
         "coffee": "cup.and.saucer",
+        // 歌单写入这一批（2026-10-17）。两个名字逐个问过 `NSImage(systemSymbolName:)`：
+        // `plus` 是 SF 原生名；`list-plus` SF 没有，取「插进列表」的意象
+        // `text.badge.plus`，与 `list-start` 取 `text.insert` 同族。
+        "plus": "plus",
+        "list-plus": "text.badge.plus",
     ]
 }
 

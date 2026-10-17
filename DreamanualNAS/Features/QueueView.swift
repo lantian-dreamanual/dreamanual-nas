@@ -1,4 +1,7 @@
 import SwiftUI
+// 拖动改序的 `.onDrop(of: [.text], …)` 要 UTType —— 没 import 时错误不在这一行报，
+// 整条修饰链的类型推断直接崩掉（错误落回 ForEach 的 indices 上，误导排查）。
+import UniformTypeIdentifiers
 
 /// 播放队列占主区（原型「队列」屏）：从播放条的队列按钮进出，侧栏没有这一项。
 ///
@@ -50,25 +53,57 @@ struct QueueView: View {
 
     // MARK: 表
 
+    /// 拖动改序的现场状态。**随机播放开着时不给拖** —— 拖的是队列顺序，
+    /// 随机模式下实际播放走打乱后的顺序，拖了也不照它放，等于骗人。
+    @State private var draggingIndex: Int?
+    @State private var dropTargetPosition: Int?
+
     private var queueTable: some View {
         VStack(spacing: 0) {
             header
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(engine.playOrder.indices, id: \.self) { position in
+                    // 🔴 `playOrder.indices` 在新 SDK 里解析到 `indices(where:)` 函数
+                    // 重载（ForEach 报 RangeSet 不可 conform，`Array(...)` 也救不回
+                    // —— 属性查找本身歧义）。走 `enumerated()`，把「位置 → 队列下标」
+                    // 一次拿齐，绕开这组重载。
+                    ForEach(Array(engine.playOrder.enumerated()), id: \.offset) { position, songIndex in
                         let songIndex = engine.playOrder[position]
                         let song = engine.queue[songIndex]
                         QueueRow(
                             order: position + 1,
                             song: song,
-                            isPlaying: engine.position == position
+                            isPlaying: engine.position == position,
+                            isDropTarget: dropTargetPosition == position && draggingIndex != nil
                         ) {
                             engine.play(engine.queue, at: songIndex)
                         } onRate: { stars in
                             Task { await state.rate(song.id, to: stars) }
                         } onContextMenu: { point in
-                            state.openSongMenu(song, at: point, queue: engine.queue)
+                            state.openQueueSongMenu(song, at: point, queueIndex: songIndex)
+                        }
+                        .onDrag {
+                            draggingIndex = songIndex
+                            return NSItemProvider(object: String(songIndex) as NSString)
+                        }
+                        // macOS 的 onDrop 的 isTargeted 是 **Binding<Bool>?**（iOS 才是
+                        // 闭包）—— 落点要记「哪一行」用计算 Binding 折一下。
+                        .onDrop(of: [.text], isTargeted: Binding(
+                            get: { dropTargetPosition != nil },
+                            set: { dropTargetPosition = $0 ? position : nil }
+                        )) { providers in
+                            guard let provider = providers.first else { return false }
+                            provider.loadObject(ofClass: NSString.self) { object, _ in
+                                guard let text = object as? String,
+                                      let from = Int(text) else { return }
+                                Task { @MainActor in
+                                    engine.move(from: from, to: songIndex)
+                                    draggingIndex = nil
+                                    dropTargetPosition = nil
+                                }
+                            }
+                            return true
                         }
                     }
                 }
@@ -127,6 +162,8 @@ private struct QueueRow: View {
     let order: Int
     let song: AudioSong
     let isPlaying: Bool
+    /// 别的行正拖到这一行上（落点亮一档，与表头拖列序的落点竖线同一意图）。
+    var isDropTarget: Bool = false
     let onPlay: () -> Void
     var onRate: ((Int) -> Void)?
     /// 右键（参数是指针位置，已在根视图坐标系里）。
@@ -184,6 +221,7 @@ private struct QueueRow: View {
         }
         .frame(height: 34)
         .background(ListRowState.background(isSelected: isPlaying, hovered: isHovered))
+        .background(isDropTarget ? Color.dmPanel3 : Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
         }

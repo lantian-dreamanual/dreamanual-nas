@@ -266,6 +266,19 @@ enum RatingError: LocalizedError {
     }
 }
 
+/// 歌单写入的失败形态。create 的应答只回「成功」不带 id，
+/// 回读对不上名字就只能实说。
+enum PlaylistError: LocalizedError {
+    case createNotConfirmed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .createNotConfirmed(let name):
+            return "歌单「\(name)」请求成功，但列表里没找到它 —— 请刷新侧栏确认。"
+        }
+    }
+}
+
 // MARK: - 读取层
 
 /// 曲库读取（只读）。会话由 `SessionManager` 管，这里只管「发哪条接口、怎么解包」。
@@ -664,6 +677,74 @@ enum AudioLibrary {
             params: ["id": id, "additional": additional]
         )
         return ((data as? [String: Any])?["songs"] as? [[String: Any]])?.first
+    }
+
+    // MARK: 歌单写入
+
+    /// 新建歌单。参数形状实测定形（2026-10-17 第八轮）：`library=personal` +
+    /// `name` —— `library` 不给也是这条路，但给了不亏。
+    ///
+    /// 🔴 create 的应答**不带新歌单的 id** —— 拉一遍列表按名字对回来。对不上
+    /// 就抛出去（服务端对重名的应答没实测过，重名在调用点先拦，这里只管确认）。
+    static func createPlaylist(
+        _ manager: SessionManager,
+        name: String
+    ) async throws -> AudioPlaylist {
+        _ = try await manager.call(
+            kind: .audio,
+            api: "SYNO.AudioStation.Playlist",
+            version: 2,
+            method: "create",
+            params: ["library": "personal", "name": name]
+        )
+        let list = try await playlists(manager)
+        guard let created = list.first(where: { $0.name == name }) else {
+            throw PlaylistError.createNotConfirmed(name)
+        }
+        return created
+    }
+
+    /// 把歌加进歌单。`updatesongs` + `songs=<曲id>`。
+    ///
+    /// 🔴 **追加语义**（实测：空歌单加一首回读 1 首，同一首再加回读 2 首）——
+    /// 服务端不去重，重复拦截只能在调用点做；多首没测过逗号串的行为，
+    /// 这里的入口按一首一次走。
+    static func addToPlaylist(
+        _ manager: SessionManager,
+        songID: String,
+        playlistID: String
+    ) async throws {
+        _ = try await manager.call(
+            kind: .audio,
+            api: "SYNO.AudioStation.Playlist",
+            version: 2,
+            method: "updatesongs",
+            params: ["id": playlistID, "songs": songID]
+        )
+    }
+
+    /// 歌单里已有的曲目 id。**只要 id 不补标签** —— 供调用点查重：补标签那条路
+    /// （`songs(playlistID:)`）要逐首 `Song.getinfo`，一次歌单核对贵一个数量级。
+    static func playlistSongIDs(
+        _ manager: SessionManager,
+        playlistID: String
+    ) async throws -> Set<String> {
+        let data = try await manager.call(
+            kind: .audio,
+            api: "SYNO.AudioStation.Playlist",
+            version: 2,
+            method: "getinfo",
+            params: [
+                "id": playlistID,
+                "offset": "0",
+                "limit": String(pageSize),
+                "additional": "songs",
+            ]
+        )
+        let box = (((data as? [String: Any])?["playlists"] as? [[String: Any]])?
+            .first?["additional"] as? [String: Any]) ?? [:]
+        let list = (box["songs"] as? [[String: Any]]) ?? []
+        return Set(list.map { jsonString($0["id"]) }.filter { !$0.isEmpty })
     }
 
     // MARK: 艺术家 / 专辑 / 流派

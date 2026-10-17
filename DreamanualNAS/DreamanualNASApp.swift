@@ -127,6 +127,11 @@ struct DreamanualNASApp: App {
                     if let command = ProcessInfo.processInfo.environment["DM_STATUS"] {
                         await state.smokeStatus(command)
                     }
+                    // DM_QUEUE=ops：队列移除与拖序的真机往返（离线可跑 —— 纯队列
+                    // 逻辑，不碰取流）。逐步断言队列顺序与播放位置。
+                    if let command = ProcessInfo.processInfo.environment["DM_QUEUE"] {
+                        await state.smokeQueue(command)
+                    }
                     // DM_SHELL=1：外壳行为冒烟（藏窗 / 合成 ⌘W / 唤起）。
                     if ProcessInfo.processInfo.environment["DM_SHELL"] == "1" {
                         await appDelegate.runShellSmoke()

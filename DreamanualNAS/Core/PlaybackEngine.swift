@@ -124,6 +124,50 @@ final class PlaybackEngine {
         publishNowPlaying()
     }
 
+    /// 从队列移除一条（**队列下标**，不是播放位置 —— 队列表每一行对应一个下标）。
+    ///
+    /// 两张表一起动：`queue` 摘掉那条，`playOrder` 把值 `index` 的位置拿掉、
+    /// 后面的映射值全部前移一格。正在播的那首被移除时**播放不中断** —— item 还在
+    /// player 上，播完自然落到新表里的下一首；移的是正在播的队尾时播放位置收一格。
+    /// 移空队列等同清空（停在当前曲目的结尾没有意义，连 item 一起收掉）。
+    func remove(at index: Int) {
+        guard queue.indices.contains(index) else { return }
+        queue.remove(at: index)
+        let removedPosition = playOrder.firstIndex(of: index)
+        playOrder = playOrder.compactMap { value in
+            value == index ? nil : (value > index ? value - 1 : value)
+        }
+        if let removedPosition {
+            if removedPosition < position { position -= 1 }
+            if position >= playOrder.count { position = max(0, playOrder.count - 1) }
+        }
+        if queue.isEmpty {
+            clearQueue()
+        } else {
+            publishNowPlaying()
+        }
+    }
+
+    /// 拖动改序（队列下标 `from` → `to`，其余行的先后不变）。
+    ///
+    /// `queue` 挪元素，`playOrder` 做值重映射：`from` 的值改成 `to`，介于两者之间的
+    /// 依方向各挪一格。**播放位置（position）不用动** —— 它是 playOrder 的下标，
+    /// 各播放位置的相对次序没变，正在播的那首被拖到哪都还指它。
+    func move(from fromIndex: Int, to toIndex: Int) {
+        guard queue.indices.contains(fromIndex), queue.indices.contains(toIndex),
+              fromIndex != toIndex else { return }
+        let song = queue.remove(at: fromIndex)
+        queue.insert(song, at: toIndex)
+        playOrder = playOrder.map { value -> Int in
+            if value == fromIndex { return toIndex }
+            if fromIndex < toIndex {
+                return (value > fromIndex && value <= toIndex) ? value - 1 : value
+            } else {
+                return (value >= toIndex && value < fromIndex) ? value + 1 : value
+            }
+        }
+    }
+
     /// 评分变更后同步队列里那一首 —— 播放条读 `currentSong`，本地不同步的话
     /// 评完分星还是灭的。
     func applyRating(songID: String, rating: Int) {
@@ -233,6 +277,14 @@ final class PlaybackEngine {
 
     func setVolume(_ value: Double) {
         volume = min(max(0, value), 1)
+    }
+
+    /// 冒烟专用：只把队列摆出来，不开播（队列页右键菜单的形态核对用 ——
+    /// 走 `play` 会真去取流，失败提示会挂上播放条搅了截图）。
+    func smokeFillQueue(_ songs: [AudioSong]) {
+        queue = songs
+        playOrder = Array(songs.indices)
+        position = min(1, max(0, songs.count - 1))
     }
 
     // MARK: - 内部

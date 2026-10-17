@@ -268,18 +268,48 @@ final class AppState {
     private(set) var songMenu: SongMenuRequest?
 
     struct SongMenuRequest: Identifiable {
+        /// 菜单的两级：根级是歌曲的操作，「添加到歌单」点进去原地换成
+        /// 歌单列表（不另开一张卡 —— 原型菜单就是一张卡，二级换内容不换壳）。
+        enum Phase { case root, playlistPicker }
+
         let id = UUID()
         let song: AudioSong
         /// 根视图坐标（左上原点）。
         let point: CGPoint
         /// 点开菜单时那一屏的曲目 —— 菜单里的「播放」拿它当队列（与双击同义）。
         let queue: [AudioSong]
+        var phase: Phase = .root
+        /// 从**队列表**右键打开的：根级多一条「从队列移除」，动作按队列下标走
+        /// （同一首歌在队列里可能出现多次，song id 定不到行）。
+        var fromQueue = false
+        /// 该行对应的队列下标（只在 `fromQueue` 时有意义）。
+        var queueIndex: Int? = nil
     }
 
     func openSongMenu(_ song: AudioSong, at point: CGPoint, queue: [AudioSong]) {
         // TODO(诊断): 右键漂移排查，定位完拆。歌名进日志 —— 菜单是谁的一眼可对。
         rcDebugLog("菜单打开「\(song.artist) - \(song.title)」· 请求点 (\(Int(point.x)),\(Int(point.y)))")
         songMenu = SongMenuRequest(song: song, point: point, queue: queue)
+    }
+
+    /// 队列表行的右键（同一张菜单卡，根级多「从队列移除」一条）。
+    func openQueueSongMenu(_ song: AudioSong, at point: CGPoint, queueIndex: Int) {
+        rcDebugLog("队列菜单打开「\(song.title)」· 队列下标 \(queueIndex)")
+        var request = SongMenuRequest(song: song, point: point, queue: playback?.queue ?? [song])
+        request.fromQueue = true
+        request.queueIndex = queueIndex
+        songMenu = request
+    }
+
+    /// 菜单二级面板：原地换成歌单列表。歌单没拉过就顺手拉一次
+    /// （正常到不了 —— 菜单只在听歌页里开，侧栏那时已经拉过了）。
+    func showPlaylistPickerInMenu() {
+        guard var request = songMenu else { return }
+        request.phase = .playlistPicker
+        songMenu = request
+        if library.playlists.isEmpty {
+            Task { await library.loadPlaylists(sessionManager) }
+        }
     }
 
     func closeSongMenu() {
@@ -296,6 +326,12 @@ final class AppState {
         guard let engine = playback else { return }
         engine.insertNext(song)
         showToast("「\(song.title)」已排到下一首", .ok)
+    }
+
+    /// 队列右键「从队列移除」。正在播的那首被移除时播放不中断（见引擎的注）。
+    func removeFromQueue(_ request: SongMenuRequest) {
+        guard let engine = playback, let index = request.queueIndex else { return }
+        engine.remove(at: index)
     }
 
     // MARK: - 编辑歌曲信息
@@ -332,6 +368,66 @@ final class AppState {
 
     func closeTagEditor() {
         tagEditor = nil
+    }
+
+    // MARK: - 歌单写入
+
+    /// 新建歌单弹窗（挂在根视图 `.dmModal`）。目前只有「新建」一张 ——
+    /// 重命名 / 删除歌单没做（低频，且删歌单动 NAS 上整份数据，做了就要二次确认）。
+    enum LibraryDialog: Equatable {
+        case newPlaylist
+    }
+
+    private(set) var libraryDialog: LibraryDialog?
+
+    func openLibraryDialog(_ dialog: LibraryDialog) {
+        libraryDialog = dialog
+    }
+
+    func closeLibraryDialog() {
+        libraryDialog = nil
+    }
+
+    /// 新建歌单。重名在本地先拦 —— 服务端对重名 create 的应答没实测过，
+    /// 不赌它。建成功顺手刷新侧栏，新歌单立刻可见。
+    func createPlaylist(named name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let manager = sessionManager else { return }
+        if library.playlists.contains(where: { $0.name == trimmed }) {
+            showToast("已经有叫「\(trimmed)」的歌单了", .err)
+            return
+        }
+        do {
+            _ = try await AudioLibrary.createPlaylist(manager, name: trimmed)
+            await library.loadPlaylists(manager)
+            closeLibraryDialog()
+            showToast("已新建「\(trimmed)」", .ok)
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 菜单「添加到歌单」。先查歌单里有没有这首 —— `updatesongs` 是追加语义、
+    /// 服务端不去重，重复全靠这把拦。加完当前正在看这个歌单就重拉，
+    /// 新行当场出现。
+    func addSongToPlaylist(_ song: AudioSong, to playlist: AudioPlaylist) async {
+        closeSongMenu()
+        guard let manager = sessionManager else { return }
+        do {
+            let existing = try await AudioLibrary.playlistSongIDs(manager, playlistID: playlist.id)
+            guard !existing.contains(song.id) else {
+                showToast("「\(playlist.name)」里已经有这首了", .info)
+                return
+            }
+            try await AudioLibrary.addToPlaylist(manager, songID: song.id, playlistID: playlist.id)
+            showToast("已添加到「\(playlist.name)」", .ok)
+            if library.isShowing(playlist) {
+                await library.refresh(manager)
+            }
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
     }
 
     // MARK: - 立刻关机 / 重启
@@ -1385,6 +1481,14 @@ final class AppState {
     /// `reset` 回默认（不排、八列全开）。**核对完记得 `reset`**，别把冒烟留下的
     /// 偏好存进用户的 `UserDefaults`。
     func smokeLibrary(_ command: String) async {
+        // 冒烟 token 在启动瞬间就被消费，自动连却是异步的 —— 先等连接落定
+        // （最多 30 秒）再判（与 `smokeStatus` 同一块；曾在这里直接判「未连接」
+        // 跳过，指令整个白跑）。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager else {
             NSLog("[library] 未连接，跳过（phase=%@）", String(describing: phase))
             return
@@ -1461,6 +1565,10 @@ final class AppState {
                 NSLog("[library] 合成拖动「%@ → %@」：%@ → 列序 %@",
                       from.label, to.label, sent ? "已发出" : "没有位置",
                       library.visibleColumns.map(\.rawValue).joined(separator: "、"))
+            } else if token == "plroundtrip" {
+                // 歌单写接口真机往返：建测试歌单 → 加歌 → 回读 → 查重 → 删。
+                // 唯一真写的是自建歌单，真实歌单不碰（见方法注）。
+                await smokePlaylistRoundtrip(manager)
             } else if token.hasPrefix("draghold=") {
                 let spec = token.dropFirst("draghold=".count).split(separator: ":")
                 guard spec.count == 2,
@@ -1511,6 +1619,137 @@ final class AppState {
         case .all:
             break
         }
+    }
+
+    /// 歌单写接口的真机往返。唯一真写的是自建测试歌单「ZZZ_smoke_tmp」：
+    /// 建 → 加曲库第一首 → 回读 → 重复加（验查重）→ 删 → 复核侧栏。
+    /// 真实歌单只在首尾各数一遍，变了要报出来。
+    private func smokePlaylistRoundtrip(_ manager: SessionManager) async {
+        await library.loadIfNeeded(manager)
+        let probe = "ZZZ_smoke_tmp"
+        var probeID: String?
+        let before = library.playlists
+        NSLog("[playlist] ── 写回验证开始（测试歌单「%@」，测完删）· 侧栏基线 %d 个",
+              probe, before.count)
+        do {
+            _ = try await AudioLibrary.createPlaylist(manager, name: probe)
+            await library.loadPlaylists(manager)
+            guard let created = library.playlists.first(where: { $0.name == probe }) else {
+                NSLog("[playlist] ✗ create 回了成功，侧栏里没对上「%@」", probe)
+                return
+            }
+            probeID = created.id
+            NSLog("[playlist] ✓ 新建 → id=%@（侧栏 %d → %d）",
+                  created.id, before.count, library.playlists.count)
+
+            guard let song = library.songs.first else {
+                NSLog("[playlist] 曲库空，加歌跳过")
+                return
+            }
+            try await AudioLibrary.addToPlaylist(manager, songID: song.id, playlistID: created.id)
+            let ids = try await AudioLibrary.playlistSongIDs(manager, playlistID: created.id)
+            let dedup = ids.contains(song.id)
+            NSLog("[playlist] ✓ 加「%@」→ 回读 %d 首，查重%@",
+                  song.title, ids.count, dedup ? "命中（界面会拦重复添加）" : "未命中？")
+            // 查重拦截本身（不真发第二次 —— 追加语义下会留重复行）：
+            if dedup {
+                NSLog("[playlist] ✓ 重复添加被本地查重拦下，不重复发请求")
+            }
+        } catch {
+            NSLog("[playlist] ✗ %@", error.localizedDescription)
+        }
+        // 收尾：删测试歌单（直接调 delete —— app 界面没有「删歌单」，别走界面层），
+        // 再复核侧栏与真实歌单。
+        defer {
+            NSLog("[playlist] ── 写回验证结束")
+        }
+        if let probeID {
+            _ = try? await manager.call(
+                kind: .audio,
+                api: "SYNO.AudioStation.Playlist",
+                version: 2,
+                method: "delete",
+                params: ["id": probeID]
+            )
+            await library.loadPlaylists(manager)
+            let stillThere = library.playlists.contains { $0.name == probe }
+            NSLog("[playlist] %@ 测试歌单已删除",
+                  stillThere ? "✗ 还在：" : "✓")
+            let namesBefore = Set(before.map(\.name))
+            let namesAfter = Set(library.playlists.map(\.name))
+            if namesAfter == namesBefore {
+                NSLog("[playlist] ✓ 真实歌单与基线一致（%d 个）", library.playlists.count)
+            } else {
+                NSLog("[playlist] ✗ 真实歌单变了：基线 %@ / 现在 %@",
+                      before.map(\.name).joined(separator: "、"),
+                      library.playlists.map(\.name).joined(separator: "、"))
+            }
+        }
+    }
+
+    /// `DM_QUEUE=ops`：队列移除 / 拖序的逐步断言。**离线可跑** —— 只动队列两张表，
+    /// 不碰取流；`play` 会试着开播（无会话只挂一条 streamErrorMessage），无碍。
+    /// 每步的期望序列写在断言里，跑完打 ✓ / ✗ 与现场。
+    func smokeQueue(_ command: String) async {
+        // 引擎在连接成功后才装配（`AppState.connect` 里 attach）—— 先等连接落定。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        guard let engine = playback else {
+            NSLog("[queue] 引擎没装配，跳过（phase=%@）", String(describing: phase))
+            return
+        }
+        for raw in command.split(separator: ",") {
+            let token = raw.trimmingCharacters(in: .whitespaces)
+            guard token == "ops" else {
+                NSLog("[queue] 认不出指令「%@」", token)
+                continue
+            }
+            func fake(_ n: Int) -> AudioSong {
+                AudioSong(["id": "fake\(n)", "title": "样张\(n)", "path": "/music/fake/\(n).mp3",
+                           "additional": ["song_audio": ["duration": 100 + n]]])!
+            }
+            var fails = 0
+            func check(_ step: String, _ got: String, _ want: String) {
+                let ok = got == want
+                if !ok { fails += 1 }
+                NSLog("[queue] %@ %@ → %@", ok ? "✓" : "✗", step, ok ? got : "\(got)（期望 \(want)）")
+            }
+            engine.play((1...5).map(fake), at: 1)
+            check("起播 5 首从第 2 首", Self.queueState(engine),
+                  "queue=样张1,样张2,样张3,样张4,样张5 pos=1 cur=样张2")
+
+            engine.move(from: 3, to: 0)
+            check("拖第 4 首到队首", Self.queueState(engine),
+                  "queue=样张4,样张1,样张2,样张3,样张5 pos=1 cur=样张2")
+
+            engine.remove(at: 4)
+            check("移除队尾", Self.queueState(engine),
+                  "queue=样张4,样张1,样张2,样张3 pos=1 cur=样张2")
+
+            engine.remove(at: 2)
+            check("移除正在播的那首（播放位置落到原下一首）", Self.queueState(engine),
+                  "queue=样张4,样张1,样张3 pos=1 cur=样张3")
+
+            engine.move(from: 0, to: 2)
+            check("把队首拖到队尾", Self.queueState(engine),
+                  "queue=样张1,样张3,样张4 pos=1 cur=样张3")
+
+            while engine.hasQueue { engine.remove(at: 0) }
+            check("逐条移空（等同清空）", engine.hasQueue ? "还有队列" : "已空",
+                  "已空")
+
+            NSLog("[queue] ── 队列操作验证结束：%@",
+                  fails == 0 ? "全部通过" : "\(fails) 步不符")
+        }
+    }
+
+    /// 冒烟断言用的队列状态一行串。
+    private static func queueState(_ engine: PlaybackEngine) -> String {
+        "queue=\(engine.queue.map(\.title).joined(separator: ",")) " +
+        "pos=\(engine.position) cur=\(engine.currentSong?.title ?? "-")"
     }
 
     /// `DM_FILES=<指令>` 时由入口调用：把文件管理页摆到指定状态，供真机截图核对。
@@ -2704,8 +2943,35 @@ final class AppState {
                 await smokeWindow(String(token.dropFirst("window=".count)))
             } else if token == "songmenu" {
                 await smokeSongMenu(manager)
+            } else if token == "songmenupick" {
+                // 歌单二级面板：先按 songmenu 同款把菜单开出来，再切到
+                // playlistPicker —— 截图核对二级形态（歌单行数不定，摆位要真机看）。
+                await smokeSongMenu(manager)
+                showPlaylistPickerInMenu()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                NSLog("[ui] 歌单二级面板已开（%d 个歌单）", library.playlists.count)
             } else if token.hasPrefix("songmenu=") {
                 await smokeSongMenuAt(String(token.dropFirst("songmenu=".count)), manager)
+            } else if token == "playlistdialog" {
+                // 新建歌单弹窗（离线也能摆 —— 弹窗层挂在 isConnected 分支之外）。
+                openLibraryDialog(.newPlaylist)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                NSLog("[ui] 新建歌单弹窗已摆")
+            } else if token == "queuemenu" {
+                // 队列页右键菜单：假歌摆队列（不真取流）、切到队列页、
+                // 开正在播后面那行的菜单 —— 根级多「从队列移除」一条。
+                let fake = (1...5).compactMap { n in
+                    AudioSong(["id": "fake\(n)", "title": "队列样张\(n)", "path": "/music/fake/\(n).mp3",
+                               "additional": ["song_audio": ["duration": 100 + n]]])
+                }
+                guard let engine = playback else { NSLog("[ui] 引擎不在"); continue }
+                engine.smokeFillQueue(fake)
+                showsQueue = true
+                let index = engine.playOrder.indices.contains(engine.position)
+                    ? engine.playOrder[engine.position] : 0
+                openQueueSongMenu(engine.queue[index], at: CGPoint(x: 380, y: 240), queueIndex: index)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                NSLog("[ui] 队列右键菜单已开（队列下标 %d）", index)
             } else if token.hasPrefix("scroll=") {
                 await smokeScroll(String(token.dropFirst("scroll=".count)))
             } else if token.hasPrefix("rclick=") {

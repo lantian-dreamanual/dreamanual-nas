@@ -71,6 +71,16 @@ struct RootView: View {
                 FileDialogCard(dialog: dialog)
             }
         }
+        // 新建歌单弹窗。从右键菜单的二级面板与侧栏「+ 新建」两处进来，
+        // 都发生时菜单已经收掉了 —— 与写操作弹窗同一挂法即可。
+        .dmModal(
+            isPresented: state.libraryDialog != nil,
+            onDismiss: { state.closeLibraryDialog() }
+        ) {
+            if state.libraryDialog != nil {
+                PlaylistDialogCard()
+            }
+        }
         // 上传撞名的三选弹窗。与写操作弹窗同一挂法、同一层序 —— 两者不会同时出现
         // （撞名是在开传之前问的，写操作弹窗是别的动作摆的）。
         .dmModal(
@@ -177,41 +187,73 @@ struct RootView: View {
                         .onTapGesture { state.closeSongMenu() }
 
                     DmMenuCard(width: SongMenu.width) {
-                        DmMenuRow(title: "播放", icon: "play") {
-                            state.closeSongMenu()
-                            state.playFromMenu(request)
-                        }
-                        DmMenuRow(title: "下一首播放", icon: "list-start") {
-                            state.closeSongMenu()
-                            state.playNext(request.song)
-                        }
-                        // 评分那一行：星星自己接点击，行本身不做事。原型 `.mi` 里的
-                        // 内嵌星（`.rate{margin-left:auto}`）。
-                        DmMenuRow(title: "评分", icon: "star", action: {}) {
-                            RatingStars(
-                                rating: request.song.rating,
-                                isSelected: false,
-                                revealsEmpty: true,
-                                onRate: { stars in
-                                    Task { await state.rate(request.song.id, to: stars) }
+                        if request.phase == .root {
+                            DmMenuRow(title: "播放", icon: "play") {
+                                state.closeSongMenu()
+                                state.playFromMenu(request)
+                            }
+                            DmMenuRow(title: "下一首播放", icon: "list-start") {
+                                state.closeSongMenu()
+                                state.playNext(request.song)
+                            }
+                            // 评分那一行：星星自己接点击，行本身不做事。原型 `.mi` 里的
+                            // 内嵌星（`.rate{margin-left:auto}`）。
+                            DmMenuRow(title: "评分", icon: "star", action: {}) {
+                                RatingStars(
+                                    rating: request.song.rating,
+                                    isSelected: false,
+                                    revealsEmpty: true,
+                                    onRate: { stars in
+                                        Task { await state.rate(request.song.id, to: stars) }
+                                    }
+                                )
+                            }
+                            DmMenuRow(title: "添加到歌单", icon: "list-plus") {
+                                state.showPlaylistPickerInMenu()
+                            }
+                            // 队列表右键独有的一条：从队列移除（播放不中断，
+                            // 正在播的那首播完自动落新表的下一首）。
+                            if request.fromQueue {
+                                DmMenuRow(title: "从队列移除", icon: "x") {
+                                    state.closeSongMenu()
+                                    state.removeFromQueue(request)
                                 }
-                            )
-                        }
-                        DmMenuSeparator()
-                        DmMenuRow(title: "下载", icon: "download") {
-                            state.closeSongMenu()
-                            Task { await state.download(request.song) }
-                        }
-                        DmMenuRow(title: "在文件管理中显示", icon: "folder-open") {
-                            Task { await state.revealInFiles(request.song) }
-                        }
-                        DmMenuRow(title: "编辑歌曲信息", icon: "pencil") {
-                            state.closeSongMenu()
-                            state.openTagEditor(request.song)
+                            }
+                            DmMenuSeparator()
+                            DmMenuRow(title: "下载", icon: "download") {
+                                state.closeSongMenu()
+                                Task { await state.download(request.song) }
+                            }
+                            DmMenuRow(title: "在文件管理中显示", icon: "folder-open") {
+                                Task { await state.revealInFiles(request.song) }
+                            }
+                            DmMenuRow(title: "编辑歌曲信息", icon: "pencil") {
+                                state.closeSongMenu()
+                                state.openTagEditor(request.song)
+                            }
+                        } else {
+                            // 二级面板：原地换成歌单列表。开头一条「新建歌单…」——
+                            // 没有合适的歌单时不必先收菜单、去侧栏建再重新右键一遍。
+                            DmMenuRow(title: "新建歌单…", icon: "plus") {
+                                state.closeSongMenu()
+                                state.openLibraryDialog(.newPlaylist)
+                            }
+                            DmMenuSeparator()
+                            ForEach(state.library.playlists) { playlist in
+                                DmMenuRow(title: playlist.name, icon: "list-music") {
+                                    Task { await state.addSongToPlaylist(request.song, to: playlist) }
+                                }
+                            }
                         }
                     }
-                    .offset(x: SongMenu.anchor(request.point, in: geo.size).x,
-                            y: SongMenu.anchor(request.point, in: geo.size).y)
+                    .offset(x: SongMenu.anchor(request.point, in: geo.size,
+                                               phase: request.phase,
+                                               playlistCount: state.library.playlists.count,
+                                               fromQueue: request.fromQueue).x,
+                            y: SongMenu.anchor(request.point, in: geo.size,
+                                               phase: request.phase,
+                                               playlistCount: state.library.playlists.count,
+                                               fromQueue: request.fromQueue).y)
                 }
             }
         }
@@ -296,16 +338,36 @@ struct RootView: View {
 
 /// 歌曲右键菜单的摆位。菜单卡宽固定（原型 `.menu` 的 `min-width:160`，这里给
 /// 196 —— 带内嵌星那一行要放得下），高按项数估：每项 30 + 分隔线 9 + 内边距 8。
+/// 高度跟着**当前这一级**走：根级 7 行，二级面板 = 新建 + 分隔 + 歌单行们。
 enum SongMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
-    /// 项数（播放 / 下一首播放 / 评分 / 下载 / 在文件管理中显示 / 编辑歌曲信息）。
-    static let itemCount = 6
     private static let inset: CGFloat = 8
 
+    /// 当前菜单里有几行（不含分隔线）。根级：播放 / 下一首播放 / 评分 / 添加到歌单 /
+    /// （队列来源多一条「从队列移除」）/ 下载 / 在文件管理中显示 / 编辑歌曲信息。
+    static func rowCount(
+        phase: AppState.SongMenuRequest.Phase,
+        playlistCount: Int,
+        fromQueue: Bool = false
+    ) -> Int {
+        switch phase {
+        case .root: return fromQueue ? 8 : 7
+        case .playlistPicker: return 1 + max(playlistCount, 0)
+        }
+    }
+
     /// 指针位置 → 菜单左上角，越界时收回窗口内（同访达 / 原型那层绝对定位的意思）。
-    static func anchor(_ point: CGPoint, in size: CGSize) -> CGPoint {
-        let height = itemHeight * CGFloat(itemCount) + 9 + 8
+    static func anchor(
+        _ point: CGPoint,
+        in size: CGSize,
+        phase: AppState.SongMenuRequest.Phase = .root,
+        playlistCount: Int = 0,
+        fromQueue: Bool = false
+    ) -> CGPoint {
+        let lines = CGFloat(rowCount(phase: phase, playlistCount: playlistCount, fromQueue: fromQueue))
+        let separators = phase == .root ? CGFloat(1) : CGFloat(1)
+        let height = itemHeight * lines + 9 * separators + 8
         return CGPoint(
             x: min(max(inset, point.x), max(inset, size.width - width - inset)),
             y: min(max(inset, point.y), max(inset, size.height - height - inset))
@@ -349,9 +411,45 @@ enum FileMenu {
     }
 }
 
+/// 新建歌单弹窗：一张名称输入框。重名在 `createPlaylist` 里先拦（本地清单上对），
+/// 这里只拦空名。默认名与文件管理「新建文件夹」同思路 —— 给一个能直接改的名字。
+struct PlaylistDialogCard: View {
+    @Environment(AppState.self) private var state
+
+    @State private var name = "新建歌单"
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        DmModalCard(title: "新建歌单", onClose: { state.closeLibraryDialog() }) {
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                FormLabel("名称")
+                TextField("", text: $name)
+                    .focused($isFocused)
+                    .formField(on: .panel)
+                HStack(spacing: DmSpace.s6) {
+                    LucideIcon("info", size: DmIcon.i12)
+                        .foregroundColor(Color.dmInk3)
+                    Text("重名会拦下，建在个人歌单里。")
+                        .font(.system(size: DmText.t11))
+                        .foregroundColor(Color.dmInk3)
+                    Spacer(minLength: 0)
+                }
+            }
+        } foot: {
+            Button("取消") { state.closeLibraryDialog() }
+                .buttonStyle(SecondaryButtonStyle())
+            Button("创建") {
+                Task { await state.createPlaylist(named: name) }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .onAppear { isFocused = true }
+    }
+}
+
 /// 计划行右键菜单的摆位。两条（编辑 / 删除），宽与歌曲 / 文件菜单同档。
-enum PowerRowMenu {
-    static let width: CGFloat = 160
+enum PowerRowMenu {    static let width: CGFloat = 160
     static let itemHeight: CGFloat = 30
     private static let inset: CGFloat = 8
 

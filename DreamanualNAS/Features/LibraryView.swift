@@ -221,6 +221,11 @@ final class LibraryModel {
         }
     }
 
+    /// 当前是不是正在看这个歌单（加歌成功后决定要不要重拉那一屏）。
+    func isShowing(_ playlist: AudioPlaylist) -> Bool {
+        source == .playlist(playlist)
+    }
+
     func refresh(_ manager: SessionManager?) async {
         guard let manager else { return }
         generation += 1
@@ -683,6 +688,7 @@ struct LibraryView: View {
 private struct LibraryRail: View {
     let model: LibraryModel
     let manager: SessionManager?
+    @Environment(AppState.self) private var state
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -714,15 +720,26 @@ private struct LibraryRail: View {
                         Task { await model.select(source: .all, on: manager) }
                     }
 
-                    // 分组标题行：与密码管理的新建分类同形 —— 低频操作不占整行。
-                    // 「+ 新建歌单」跟着歌单的写入（`Playlist.create`）一起落，见 README。
-                    Text("我的歌单")
-                        .font(.system(size: DmText.t11, weight: .bold))
-                        .kerning(0.66)
-                        .foregroundColor(Color.dmInk3)
-                        .padding(.horizontal, DmSpace.s8)
-                        .padding(.top, DmSpace.s14)
-                        .padding(.bottom, DmSpace.s4)
+                    // 分组标题行：右侧一颗小 +（低频操作不占整行）—— 新建歌单弹窗
+                    // 与右键菜单二级面板里的「新建歌单…」是同一个入口。
+                    HStack(spacing: DmSpace.s4) {
+                        Text("我的歌单")
+                            .font(.system(size: DmText.t11, weight: .bold))
+                            .kerning(0.66)
+                            .foregroundColor(Color.dmInk3)
+                        Spacer(minLength: 0)
+                        Button {
+                            state.openLibraryDialog(.newPlaylist)
+                        } label: {
+                            LucideIcon("plus", size: DmIcon.i12)
+                                .foregroundColor(Color.dmInk3)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, DmSpace.s8)
+                    .padding(.top, DmSpace.s14)
+                    .padding(.bottom, DmSpace.s4)
 
                     ForEach(model.playlists) { playlist in
                         LibraryRailRow(
