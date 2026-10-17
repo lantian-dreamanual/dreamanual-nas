@@ -552,7 +552,11 @@ private struct SettingsPane: View {
                             .formFieldRow()
                             .frame(width: 240)
                     }
+                    // 动作行右对齐到控件列：上面三行都是「标签在左、值贴右边缘」，
+                    // 动作行若从卡片左边缘起头，第四行就跟前三行断了栅格。
+                    // 断开连接是这里唯一不可逆的动作，排在最右端、离重连最远。
                     HStack(spacing: DmSpace.s8) {
+                        Spacer(minLength: 0)
                         // 两颗同档次按钮（与电源卡同一口径）：卡面上不抢层级，
                         // 真要破坏性操作的语义留给它自己的后果提示。
                         Button("重新连接") {
@@ -563,7 +567,6 @@ private struct SettingsPane: View {
                             Task { await state.disconnect() }
                         }
                         .buttonStyle(SecondaryButtonStyle(on: .card))
-                        Spacer(minLength: 0)
                     }
                     .padding(.horizontal, DmSpace.s14)
                     .padding(.vertical, DmSpace.s12)
