@@ -56,6 +56,19 @@ final class AppState {
 
         var isBusy: Bool { self == .resolving || self == .loggingIn }
 
+        /// 界面上的「正在连接」（含自动连的退避等待）：连接页据此锁住输入与按钮，
+        /// 免得用户在重试期间反复点、同时开出第二把连接。
+        ///
+        /// 不复用 `isBusy` —— 自动连循环靠它判断「是不是已经有别的连接在跑」，
+        /// 把 `.retrying` 算进去会让重试链在第一把退避后自己 return
+        /// （`startAutoConnect` 每轮开头就有这个判断）。
+        var isConnecting: Bool {
+            switch self {
+            case .resolving, .loggingIn, .retrying: return true
+            case .idle, .connected, .failed: return false
+            }
+        }
+
         /// 对用户只说三件事：连接中 / 已连接 / 连不上。第几次、几秒后、
         /// 卡在解析还是登录，都是实现细节，进日志不给用户看
         /// （2026-10-17 用户定：没必要知道是第几次连接）。

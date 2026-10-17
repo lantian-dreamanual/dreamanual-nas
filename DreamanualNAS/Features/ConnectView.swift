@@ -41,6 +41,8 @@ struct ConnectView: View {
             DmSegmented([.quickconnect, .direct], selection: $mode, fillsWidth: true, on: .card) {
                 $0 == .quickconnect ? "QuickConnect" : "直连地址"
             }
+            .disabled(isLocked)
+            .opacity(isLocked ? 0.5 : 1)
             .padding(.bottom, DmSpace.s16)
 
             switch mode {
@@ -122,10 +124,19 @@ struct ConnectView: View {
         .onChange(of: focused) { _, now in
             if now == nil { InputSource.restore() } else { InputSource.enterASCII() }
         }
+        // 连接一起来就把焦点摘掉：控件锁上后光标留在里面，看着像还能打字，
+        // 输入法也还挂在 ASCII 上。
+        .onChange(of: isLocked) { _, locked in
+            if locked { focused = nil }
+        }
         .onDisappear { InputSource.restore() }
 }
 
     /// 一个字段：标签在上、控件在下，间距 `s6`；字段之间 `s14`。
+    ///
+    /// 连接进行中（含自动连的退避等待）连控件一起锁住并压暗 —— 与产品线其它
+    /// 禁用态同一语言（图标按钮、开关、主按钮都是整体 0.5）。标签不动：
+    /// 变暗的是「现在不能改的那个框」，标签还是得读得清。
     private func field<Content: View>(
         _ label: String,
         @ViewBuilder content: () -> Content
@@ -133,6 +144,8 @@ struct ConnectView: View {
         VStack(alignment: .leading, spacing: DmSpace.s6) {
             FormLabel(label)
             content()
+                .disabled(isLocked)
+                .opacity(isLocked ? 0.5 : 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, DmSpace.s14)
@@ -190,13 +203,29 @@ struct ConnectView: View {
         mode == .direct ? .direct : .quickconnect
     }
 
+    /// 连接进行中（含自动连的退避等待）：整页输入与按钮锁住。
+    private var isLocked: Bool { state.phase.isConnecting }
+
+    /// 两个条件分开看：**能不能点**只看字段填全没有，**锁没锁**只看连接在不在跑。
+    ///
+    /// 域名 / 账号 / 密码三样缺一样都不让点 —— 以前漏了账号那一项，账号空着
+    /// 按钮是亮的，点下去只换回一句登录失败。密码为空时，本机存过这条端点的
+    /// 凭据也放行（`connect` 里会取来用）。
     private var isSubmitDisabled: Bool {
-        // 密码为空时，本机存过这条端点的凭据也放行（connect 里会取来用）。
+        if isLocked { return true }
+        let endpointReady: Bool
+        switch mode {
+        case .quickconnect:
+            endpointReady = !state.qcID
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .direct:
+            endpointReady = DirectAddress.parse(state.directAddress) != nil
+        }
+        let accountReady = !state.username
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let passwordReady = !password.isEmpty
             || state.hasSavedPassword(for: selectedMethod)
-        return state.phase.isBusy || !passwordReady
-            || (mode == .quickconnect && state.qcID.isEmpty)
-            || (mode == .direct && DirectAddress.parse(state.directAddress) == nil)
+        return !endpointReady || !accountReady || !passwordReady
     }
 
     @ViewBuilder
