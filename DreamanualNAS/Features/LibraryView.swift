@@ -1080,14 +1080,29 @@ private struct TrackHeader: View {
         .contentShape(Rectangle())
         // 一个格子上两个动作：点 = 排序、拖 = 改列序。用 AppKit 接管层而不是
         // SwiftUI 手势 —— 手势那条路合成事件验不到（见 `HeaderGrabber`）。
-        .overlay { grabber(field) }
-        // 调宽把手压在接管层之上（后写的 overlay 在上层先命中）：只占右缘 7px，
-        // 格子中间仍归点击排序。固定列才给 —— 标题列自适应，没有「自己的宽」。
+        // 🔴 固定列要把接管层从右缘让出 `hitWidth`：接管层是平台视图，命中
+        // 测试先于 SwiftUI 层，整个格子罩住时调宽把手收不到任何事件
+        // （2026-10-18 用户实抓）。标题列没有把手，不用让。
+        .overlay {
+            grabber(field)
+                .padding(.trailing, field.width != nil ? ColumnResizer.hitWidth : 0)
+        }
+        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。固定列才给
+        // —— 标题列自适应，没有「自己的宽」；它的右缘分隔线在下面补。
         .overlay(alignment: .trailing) {
             if field.width != nil {
                 ColumnResizer(width: widths[field] ?? field.fixedWidth) {
                     onResize(field, $0)
                 }
+            }
+        }
+        // 标题列右缘的常驻分隔线：固定列的那根由把手画（悬停转主色），
+        // 标题列没有把手，这里补上同一根，全表每条列边界都可见。
+        .overlay(alignment: .trailing) {
+            if field.width == nil {
+                Rectangle()
+                    .fill(Color.dmLine2)
+                    .frame(width: DmLine.base)
             }
         }
         .overlay {

@@ -699,14 +699,26 @@ private struct FilesTable: View {
                 isDraggable: false,
                 onFrame: { model.headerFrames[field] = $0 }
             )
+            // 🔴 固定列要把接管层从右缘让出 `hitWidth`：平台视图命中测试
+            // 先于 SwiftUI 层，整格罩住时调宽把手收不到事件（2026-10-18
+            // 用户实抓）。名称列自适应、没有把手，不用让。
+            .padding(.trailing, field.width != nil ? ColumnResizer.hitWidth : 0)
         }
-        // 调宽把手压在接管层之上（后写的 overlay 在上层先命中）：只占右缘 7px，
-        // 格子中间仍归点击排序。与曲库表同一套（`ColumnResizer`）。
+        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。与曲库表
+        // 同一套（`ColumnResizer`）。
         .overlay(alignment: .trailing) {
             if field.width != nil {
                 ColumnResizer(width: model.effectiveWidth(field)) {
                     model.setColumnWidth($0, for: field)
                 }
+            }
+        }
+        // 名称列右缘的常驻分隔线：固定列的那根由把手画，这里补上同一根。
+        .overlay(alignment: .trailing) {
+            if field.width == nil {
+                Rectangle()
+                    .fill(Color.dmLine2)
+                    .frame(width: DmLine.base)
             }
         }
         .help("点按按这一列排序")

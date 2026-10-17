@@ -49,9 +49,10 @@ final class AppShellController: NSObject {
     /// 那会儿 AppState 还没出生），顺带启动连接态的图标观察。
     func attachPanel(_ state: AppState) {
         appState = state
-        MainActor.assumeIsolated { observeConnectionState() }
-        guard let hosting = panel?.contentView as? NSHostingView<PanelContent> else { return }
-        hosting.rootView = makePanelContent(state: state)
+        MainActor.assumeIsolated {
+            observeConnectionState()
+            refreshPanelContent()
+        }
     }
 
     private func makePanelContent(state: AppState?) -> PanelContent {
@@ -60,6 +61,16 @@ final class AppShellController: NSObject {
             onOpenMain: { [weak self] in self?.showMainWindow() },
             onQuit: { NSApp.terminate(nil) }
         )
+    }
+
+    /// 面板内容重摆。AppState 是 @Observable，但面板是**常驻隐藏的 NSPanel**
+    /// —— 隐藏期间 SwiftUI 的 observation 刷新不落地（2026-10-18 用户实抓：
+    /// 主窗已连接，面板停在挂上那一刻的「未连接」）。所以不依赖自动刷新：
+    /// 状态一变（见 `observeConnectionState`）或打开面板（`showPanel`）时都
+    /// 重摆一次 rootView，内容永远按当下状态现渲染。
+    @MainActor private func refreshPanelContent() {
+        guard let hosting = panel?.contentView as? NSHostingView<PanelContent> else { return }
+        hosting.rootView = makePanelContent(state: appState)
     }
 
     /// 状态栏图标。随连接态在 Lucide `server` / `server-off` 两枚之间切
@@ -87,14 +98,18 @@ final class AppShellController: NSObject {
         return image
     }
 
-    /// 连接态变了换图标。AppState 是 @Observable，外壳不是视图吃不到自动
-    /// 刷新，用观察追踪链手动续：`phase` 一变回主线程重注册并重画。
-    /// 挂上 AppState 才有得追，调用点在 `attachPanel`。
+    /// 连接态变了换图标、重摆面板。AppState 是 @Observable，外壳不是视图
+    /// 吃不到自动刷新，用观察追踪链手动续：`phase` / 状态快照一变回主线程
+    /// 重注册并重画。挂上 AppState 才有得追，调用点在 `attachPanel`。
     @MainActor private func observeConnectionState() {
         guard let state = appState else { return }
         updateStatusIcon()
+        if panel?.isVisible == true { refreshPanelContent() }
         withObservationTracking {
             _ = state.phase
+            // 快照也追：面板开着期间「打开即刷」的取数回来，那一拍要重摆。
+            _ = state.status.phase
+            _ = state.status.snapshot
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.observeConnectionState() }
@@ -176,6 +191,9 @@ final class AppShellController: NSObject {
             hosting.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: height)
         }
         panel.setContentSize(NSSize(width: Self.panelWidth, height: height))
+        // 先按当下状态重摆内容再亮出来（见 `refreshPanelContent`：隐藏期间
+        // 自动刷新不落地，打开这一下必须现渲染）。
+        refreshPanelContent()
 
         // 打开即刷：连着才发，一次全量。与状态页的刷新按钮同一入口。
         if let state = appState, state.isConnected {
@@ -327,6 +345,36 @@ final class AppShellController: NSObject {
 
     @objc func showClicked(_ sender: Any?) {
         showMainWindow()
+    }
+
+    // MARK: 冒烟验证（面板）
+
+    /// `DM_PANEL=1`：面板显示冒烟 —— 等连接落定，程序化开面板，开前 / 开后
+    /// 各打一轮状态（phase / isConnected / 快照有无），供日志与真机截图核对
+    /// 面板显示档位（在线三列 / 尚未读取 / 未连接）。AI 点不了状态栏图标，
+    /// 开面板只能走代码路径。
+    @MainActor func smokePanel() async {
+        guard let state = appState else {
+            NSLog("[panel] 没挂上 AppState，冒烟到此为止")
+            return
+        }
+        // 等连接落定 ≤30s（与其他冒烟同一口径；指令在落定前跑会白跑）。
+        for _ in 0..<60 {
+            if state.isConnected { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        NSLog("[panel] 开面板前 phase=%@ isConnected=%@ 快照=%@",
+              String(describing: state.phase),
+              state.isConnected ? "是" : "否",
+              state.status.snapshot != nil ? "有" : "无")
+        showPanel()
+        // 停 3.5s —— 给「打开即刷」的取数链路走完（中继一趟要秒级）。
+        try? await Task.sleep(nanoseconds: 3_500_000_000)
+        NSLog("[panel] 开面板后 快照=%@ 状态页=%@ 面板可见=%@",
+              state.status.snapshot != nil ? "有" : "无",
+              String(describing: state.status.phase),
+              panel?.isVisible == true ? "是" : "否")
+        NSLog("[panel] 冒烟完（面板保持开着，供截图）")
     }
 
     // MARK: 冒烟验证

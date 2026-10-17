@@ -53,6 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func runShellSmoke() async {
         await shell.smoke()
     }
+
+    /// `DM_PANEL=1`：状态栏面板显示冒烟，见 AppShellController.smokePanel。
+    func runPanelSmoke() async {
+        await shell.smokePanel()
+    }
 }
 
 @main
@@ -135,6 +140,10 @@ struct DreamanualNASApp: App {
                     // DM_SHELL=1：外壳行为冒烟（藏窗 / 合成 ⌘W / 唤起）。
                     if ProcessInfo.processInfo.environment["DM_SHELL"] == "1" {
                         await appDelegate.runShellSmoke()
+                    }
+                    // DM_PANEL=1：状态栏面板显示冒烟（等连接 → 程序化开面板）。
+                    if ProcessInfo.processInfo.environment["DM_PANEL"] == "1" {
+                        await appDelegate.runPanelSmoke()
                     }
                     // DM_WIDGET=feed|state：小组件共享快照的写入 / 回读冒烟。
                     if let command = ProcessInfo.processInfo.environment["DM_WIDGET"] {

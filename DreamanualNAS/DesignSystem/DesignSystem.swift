@@ -1746,8 +1746,15 @@ struct HeaderGrabber: NSViewRepresentable {
 /// 所以两层共存：把手只占边缘 7px 热区（overlay 压在接管层之上，先命中），
 /// 格子中间仍归 `HeaderGrabber`。
 ///
-/// 形态：悬停 / 拖动中显示 3px 主色竖线（与改列序的落点竖线同一语言），光标换
-/// 左右调宽。拖动回调**绝对宽度**（起始宽 + 位移），clamp 由调用方做。
+/// 形态：列边界**常驻一根 1px 竖分隔线**（`line-2`，用户要能一眼看出「这里
+/// 是列边界、可以拖」），悬停 / 拖动中转 3px 主色竖线（与改列序的落点竖线
+/// 同一语言），光标换左右调宽。拖动回调**绝对宽度**（起始宽 + 位移），clamp
+/// 由调用方做。
+///
+/// 🔴 与 `HeaderGrabber` 共存的正确姿势：接管层是平台视图，AppKit 命中测试
+/// 先于 SwiftUI 层 —— **整个格子被它罩住时，本组件收不到任何事件**（2026-10-18
+/// 用户实抓：悬停不换光标、热区形同虚设）。调用方必须把接管层的 frame 从
+/// trailing 让出 `hitWidth` 这么宽（见曲库 / 文件表头），边界这 7px 才归本组件。
 struct ColumnResizer: View {
     /// 当前列宽 —— 拖动的起点宽（手势开始那一刻捕获一次）。
     let width: CGFloat
@@ -1758,16 +1765,22 @@ struct ColumnResizer: View {
     @State private var startWidth: CGFloat = 0
 
     /// 热区宽。比可见线（3px）宽出一截，别让人对着边界线瞄半天。
-    private static let hitWidth: CGFloat = 7
+    /// **internal**：调用方拿它把 `HeaderGrabber` 从右缘让出同样宽。
+    static let hitWidth: CGFloat = 7
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .trailing) {
+            // 常驻分隔线：1px，贴格子右缘 —— 列边界的可见锚点。
+            Rectangle()
+                .fill(Color.dmLine2)
+                .frame(width: DmLine.base)
             if isHovered || isDragging {
                 Rectangle()
                     .fill(Color.dmAccent2)
                     .frame(width: DmLine.bold)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .frame(width: Self.hitWidth)
         .contentShape(Rectangle())
         .onHover { inside in
