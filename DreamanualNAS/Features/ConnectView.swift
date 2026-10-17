@@ -124,7 +124,14 @@ struct ConnectView: View {
         // 用户亲手接方向盘：停掉后台的自动连重试，别跟这一把抢。
         state.cancelAutoConnect()
         // 分段选哪种就按哪种连 —— 直连地址字段残留着不改变这一点。
-        Task { await state.connect(password: password, method: selectedMethod) }
+        Task {
+            await state.connect(password: password, method: selectedMethod)
+            guard !state.isConnected else { return }
+            // 失败就把口令框清掉：窗口关掉再唤起时视图不重建、@State 里的
+            // 旧值会留着，用户以为「已经留空」其实还在送同一条错口令。
+            // 清空后下一次点击直接走本机已存凭据，也少喂 DSM 自动封锁。
+            password = ""
+        }
     }
 
     /// 分段当前选的连接方式，传给 `connect` 与存凭据判断。

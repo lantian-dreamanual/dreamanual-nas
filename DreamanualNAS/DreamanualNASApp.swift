@@ -81,6 +81,12 @@ struct DreamanualNASApp: App {
                     if let ui = ProcessInfo.processInfo.environment["DM_UI"] {
                         await state.smokeUI(ui)
                     }
+                    // DM_CONNECT=qc|direct：按连接页同一条路连一次（口令留空，
+                    // 走本机已存凭据），连完打诊断 —— AI 点不了 UI，这条路只能
+                    // 让程序自己走。
+                    if let command = ProcessInfo.processInfo.environment["DM_CONNECT"] {
+                        await state.smokeConnect(command)
+                    }
                     // 冒烟验证：DM_SMOKE=1 时自动播一首并打状态日志。
                     if ProcessInfo.processInfo.environment["DM_SMOKE"] == "1" {
                         await state.smokePlayFirst()

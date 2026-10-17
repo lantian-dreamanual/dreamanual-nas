@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -2941,6 +2942,77 @@ final class AppState {
         }
     }
 
+    /// `DM_CONNECT=qc|direct` 时由入口调用：按连接页同一条路连一次，口令留空
+    /// （走本机已存凭据），连完把诊断文件打出来。
+    ///
+    /// 为什么要有：真机核对「口令留空 → 用存凭据」这条路不能靠人手点，
+    /// AI 点不了 UI（合成鼠标事件进不了 SwiftUI 手势系统）。
+    func smokeConnect(_ command: String) async {
+        let method: ConnectMethod = command == "direct" ? .direct : .quickconnect
+        await connect(password: "", method: method)
+        NSLog("[connect] 冒烟结果：phase=%@ · endpoint=%@",
+              phase.label, endpointLabel)
+        let url = CredentialStore.fileURL.deletingLastPathComponent()
+            .appendingPathComponent("last-connect.json")
+        if let text = try? String(contentsOf: url, encoding: .utf8) {
+            NSLog("[connect] 诊断：\n%@", text)
+        }
+    }
+
+    /// 连接诊断落盘：`~/Library/Application Support/DreamanualNAS/last-connect.json`，
+    /// 每连一次覆盖。
+    ///
+    /// 为什么要这东西：用户报「账号或口令不对」但确信没输错时，先得分清
+    /// **实际发出去的是哪条口令**。口令不落原文 —— 只记长度与 sha256 前 8 位，
+    /// 同时把本机存的那条也记一份；两者一比就能判「输入 ≠ 已存」还是
+    /// 「已存这条本身也过不了」。这份文件也是排「留空到底生效没有」的唯一证据。
+    private func recordConnectDiag(method: ConnectMethod,
+                                   endpoint: String,
+                                   user: String,
+                                   source: String,
+                                   sentPassword: String,
+                                   error: (any Error)?) {
+        var row: [String: Any] = [
+            "time": ISO8601DateFormatter().string(from: Date()),
+            "method": method == .direct ? "direct" : "quickconnect",
+            "endpoint": endpoint,
+            "account": user,
+            "accountLength": user.count,
+            "accountHasNonASCII": user.unicodeScalars.contains { !$0.isASCII },
+            "passwordSource": source,
+            "passwordLength": sentPassword.count,
+            "passwordSHA8": Self.digest8(sentPassword),
+            "ok": error == nil,
+        ]
+        if let stored = CredentialStore.load(endpointID: endpointKey(for: method),
+                                             username: user) {
+            row["storedLength"] = stored.count
+            row["storedSHA8"] = Self.digest8(stored)
+            row["sameAsStored"] = (stored == sentPassword)
+        } else {
+            row["stored"] = "无"
+        }
+        if let err = error as? SynologyError {
+            row["errorAPI"] = err.api
+            row["errorCode"] = err.code
+        }
+        row["errorText"] = error?.localizedDescription ?? ""
+        let url = CredentialStore.fileURL.deletingLastPathComponent()
+            .appendingPathComponent("last-connect.json")
+        if let data = try? JSONSerialization.data(withJSONObject: row,
+                                                  options: [.prettyPrinted, .sortedKeys]) {
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// 口令摘要前 8 位（比对用，还原不出原文）。
+    private static func digest8(_ text: String) -> String {
+        let digest = SHA256.hash(data: Data(text.utf8))
+        return String(digest.map { String(format: "%02x", $0) }.joined().prefix(8))
+    }
+
     /// - Parameter password: 口令只在内存里传，落盘只落本机凭据文件（0600）。
     /// - Parameter method: 连接页分段选的方式。分支只认它，不认另一个
     ///   字段有没有值 —— 残留的直连地址不抢 QuickConnect 的路。
@@ -2960,6 +3032,19 @@ final class AppState {
         // 口令框留空 = 用本机存的这条端点凭据（连接页在「有存凭据」时才
         // 放行空口令）。成功连接时存的键就是 `endpointKey(for: method)`，
         // 这里按同一把键取，两边不会错位。
+        // 口令来源三种：留空取存凭据 / 输入且与存凭据相同（自动连、
+        // 重启等待这两条看不见界面的路都属这种）/ 输入且不同于存凭据。
+        // 诊断文件里分清这一点，才判得出「是不是送错了口令」。
+        let storedForSource = CredentialStore.load(endpointID: endpointKey(for: method),
+                                                    username: user)
+        let passwordSource: String
+        if password.isEmpty {
+            passwordSource = storedForSource == nil ? "无" : "留空用已存凭据"
+        } else if storedForSource == password {
+            passwordSource = "等同已存凭据（自动连）"
+        } else {
+            passwordSource = "界面输入"
+        }
         let effectivePassword: String
         if password.isEmpty {
             guard let saved = CredentialStore.load(
@@ -2967,6 +3052,9 @@ final class AppState {
             else {
                 lastConnectError = QuickConnectError.badResponse("先填口令")
                 phase = .failed("先填口令")
+                recordConnectDiag(method: method, endpoint: "", user: user,
+                                  source: passwordSource, sentPassword: "",
+                                  error: lastConnectError)
                 return
             }
             effectivePassword = saved
@@ -3042,10 +3130,16 @@ final class AppState {
             Task.detached(priority: .utility) {
                 CredentialStore.save(password: savedPassword, endpointID: key, username: user)
             }
+            recordConnectDiag(method: method, endpoint: endpointLabel, user: user,
+                              source: passwordSource, sentPassword: effectivePassword,
+                              error: nil)
         } catch {
             lastConnectError = error
             phase = .failed(error.localizedDescription)
             sessionManager = nil
+            recordConnectDiag(method: method, endpoint: endpointLabel, user: user,
+                              source: passwordSource, sentPassword: effectivePassword,
+                              error: error)
         }
     }
 
