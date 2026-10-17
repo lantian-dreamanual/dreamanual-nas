@@ -204,7 +204,7 @@ struct ConnectView: View {
         switch state.phase {
         case .idle:
             EmptyView()
-        case .resolving, .loggingIn:
+        case .resolving, .loggingIn, .retrying:
             HStack(spacing: DmSpace.s6) {
                 LucideIcon("loader", size: DmIcon.i12)
                     .foregroundColor(Color.dmInk3)

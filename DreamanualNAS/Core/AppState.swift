@@ -18,6 +18,9 @@ struct ConnectFormError: LocalizedError {
 @MainActor
 @Observable
 final class AppState {
+    /// 进程内的起表：`DM_FAKECONN` 假失败窗口按它计时。
+    static let appStart = Date()
+
     enum Module: String, CaseIterable, Identifiable {
         case music, files, status, settings
         var id: String { rawValue }
@@ -46,6 +49,9 @@ final class AppState {
         case resolving
         case loggingIn
         case connected
+        /// 自动连 / 重启等待的**中间**失败：重试循环还在走，不当终态摆 ——
+        /// 开机网络没就绪那几把，红色「连不上服务器」是吓人（2026-10-17 用户报）。
+        case retrying(attempt: Int, nextWait: Int, message: String)
         case failed(String)
 
         var isBusy: Bool { self == .resolving || self == .loggingIn }
@@ -56,6 +62,8 @@ final class AppState {
             case .resolving: return "正在解析端点…"
             case .loggingIn: return "正在登录…"
             case .connected: return "已连接"
+            case let .retrying(attempt, nextWait, message):
+                return "自动连接第 \(attempt) 次没成（\(message)），\(nextWait) 秒后重试"
             case let .failed(message): return message
             }
         }
@@ -501,13 +509,21 @@ final class AppState {
                     return
                 }
                 NSLog("[connect] 重启等待第 %d 把", attempt)
-                await self.connect(password: password, method: self.resumeMethod)
+                await self.connect(password: password, method: self.resumeMethod, auto: true)
                 if self.isConnected {
                     NSLog("[connect] 重启完成，已自动重连")
                     return
                 }
+                if let err = self.lastConnectError {
+                    self.phase = .retrying(attempt: attempt, nextWait: 20,
+                                           message: err.localizedDescription)
+                }
             }
             NSLog("[connect] 重启等待超时（5 分钟），等手动重连")
+            if let err = self.lastConnectError {
+                self.phase = .failed("NAS 重启后等了 5 分钟还没等到它回来（\(err.localizedDescription)）。"
+                    + "确认 NAS 起来后手动连，网络恢复也会自动补连。")
+            }
         }
     }
 
@@ -1281,7 +1297,8 @@ final class AppState {
         autoConnectTask?.cancel()
         autoConnectTask = Task { [weak self] in
             guard let self else { return }
-            for (n, wait) in zip([1, 2, 3, 4, 5], [0.0, 5.0, 15.0, 30.0, 60.0]) {
+            let waits: [Double] = [0.0, 5.0, 15.0, 30.0, 60.0]
+            for (n, wait) in zip([1, 2, 3, 4, 5], waits) {
                 if Task.isCancelled {
                     NSLog("[connect] 自动连第 %d 把前被取消", n)
                     return
@@ -1299,10 +1316,20 @@ final class AppState {
                     if Task.isCancelled { return }
                     if self.isConnected || self.phase.isBusy { return }
                 }
-                await self.connect(password: password, method: self.resumeMethod)
+                await self.connect(password: password, method: self.resumeMethod, auto: true)
                 if self.isConnected { return }
+                // 中间失败摆「重试中」非终态：用户此刻多半正看着连接页，
+                // 红色失败会让人以为要用手动连（其实重试还在走）。
+                if n < 5, let err = self.lastConnectError {
+                    self.phase = .retrying(attempt: n, nextWait: Int(waits[n]),
+                                           message: err.localizedDescription)
+                }
             }
-            NSLog("[connect] 自动连接五把都没成（%@），等网络恢复或手动连", self.phase.label)
+            NSLog("[connect] 自动连接五把都没成，等网络恢复或手动连")
+            if let err = self.lastConnectError {
+                self.phase = .failed("自动连接试了 5 次都没成（\(err.localizedDescription)）。"
+                    + "网络恢复会自动再试，也可以手动连。")
+            }
         }
     }
 
@@ -3340,7 +3367,10 @@ final class AppState {
     /// - Parameter password: 密码只在内存里传，落盘只落本机凭据文件（0600）。
     /// - Parameter method: 连接页分段选的方式。分支只认它，不认另一个
     ///   字段有没有值 —— 残留的直连地址不抢 QuickConnect 的路。
-    func connect(password: String, method: ConnectMethod) async {
+    /// - Parameter auto: 自动连（启动重试 / 重启等待）传 true：失败不摆
+    ///   `.failed` 终态，只记 `lastConnectError`、phase 回 `.idle`，重试
+    ///   循环紧跟着把它换成 `.retrying`。手动连接照旧摆终态。
+    func connect(password: String, method: ConnectMethod, auto: Bool = false) async {
         guard phase.isBusy == false else { return }
         phase = .resolving
         endpointLabel = ""
@@ -3384,6 +3414,19 @@ final class AppState {
             effectivePassword = saved
         } else {
             effectivePassword = password
+        }
+
+        // 冒烟钩子（`DM_FAKECONN=<秒数>`）：启动后头 N 秒内的连接一律假失败
+        // （模拟开机网络没就绪），真机验自动连的 `.retrying` 形态用 ——
+        // 与计划卡的 `failtoggle` 同一路数。窗口过后连接照常走。
+        if let fake = ProcessInfo.processInfo.environment["DM_FAKECONN"],
+           let window = Double(fake), Date().timeIntervalSince(Self.appStart) < window {
+            lastConnectError = QuickConnectError.network("模拟：网络未就绪")
+            if auto { phase = .idle } else { phase = .failed("模拟：网络未就绪") }
+            recordConnectDiag(method: method, endpoint: "", user: user,
+                              source: passwordSource, sentPassword: "",
+                              error: lastConnectError)
+            return
         }
 
         do {
@@ -3461,9 +3504,16 @@ final class AppState {
                               error: nil)
         } catch {
             lastConnectError = error
-            phase = .failed(Self.connectFailureMessage(
-                error, source: passwordSource, sent: effectivePassword,
-                stored: storedForSource))
+            if auto {
+                // 自动连的中间失败不摆终态（诊断照记）；phase 回 `.idle`，
+                // 重试循环在同一个 await 之后的同步段里换成 `.retrying`，
+                // 中间不产生一帧「未连接」的空档。
+                phase = .idle
+            } else {
+                phase = .failed(Self.connectFailureMessage(
+                    error, source: passwordSource, sent: effectivePassword,
+                    stored: storedForSource))
+            }
             sessionManager = nil
             recordConnectDiag(method: method, endpoint: endpointLabel, user: user,
                               source: passwordSource, sentPassword: effectivePassword,
