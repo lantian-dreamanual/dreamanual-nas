@@ -691,7 +691,9 @@ private struct FilesTable: View {
         .frame(height: FilesMetrics.headerHeight)
         .modifier(FileColumnWidth(field: field, override: model.columnWidths[field]))
         .contentShape(Rectangle())
-        .overlay {
+        // 🔴 对齐必须显式 .leading：overlay 默认居中，缩窄后的接管层仍压住
+        // 热区内半截，把手只剩外沿一半（同日二抓）。贴左缘才让得干净。
+        .overlay(alignment: .leading) {
             HeaderGrabber(
                 onClick: { Task { await model.toggleSort(field, on: manager) } },
                 onDrag: { _ in },

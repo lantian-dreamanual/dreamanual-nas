@@ -1083,7 +1083,9 @@ private struct TrackHeader: View {
         // 🔴 固定列要把接管层从右缘让出 `hitWidth`：接管层是平台视图，命中
         // 测试先于 SwiftUI 层，整个格子罩住时调宽把手收不到任何事件
         // （2026-10-18 用户实抓）。标题列没有把手，不用让。
-        .overlay {
+        // 🔴 对齐必须显式 .leading：overlay 默认居中，缩窄后的接管层仍压住
+        // 热区内半截，把手只剩外沿一半（同日二抓）。贴左缘才让得干净。
+        .overlay(alignment: .leading) {
             grabber(field)
                 .padding(.trailing, field.width != nil ? ColumnResizer.hitWidth : 0)
         }
