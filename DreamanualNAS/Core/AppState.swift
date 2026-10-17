@@ -51,19 +51,19 @@ final class AppState {
         case connected
         /// 自动连 / 重启等待的**中间**失败：重试循环还在走，不当终态摆 ——
         /// 开机网络没就绪那几把，红色「连不上服务器」是吓人（2026-10-17 用户报）。
-        case retrying(attempt: Int, nextWait: Int, message: String)
+        case retrying
         case failed(String)
 
         var isBusy: Bool { self == .resolving || self == .loggingIn }
 
+        /// 对用户只说三件事：连接中 / 已连接 / 连不上。第几次、几秒后、
+        /// 卡在解析还是登录，都是实现细节，进日志不给用户看
+        /// （2026-10-17 用户定：没必要知道是第几次连接）。
         var label: String {
             switch self {
             case .idle: return "未连接"
-            case .resolving: return "正在解析端点…"
-            case .loggingIn: return "正在登录…"
+            case .resolving, .loggingIn, .retrying: return "正在连接…"
             case .connected: return "已连接"
-            case let .retrying(attempt, nextWait, message):
-                return "自动连接第 \(attempt) 次没成（\(message)），\(nextWait) 秒后重试"
             case let .failed(message): return message
             }
         }
@@ -514,15 +514,14 @@ final class AppState {
                     NSLog("[connect] 重启完成，已自动重连")
                     return
                 }
-                if let err = self.lastConnectError {
-                    self.phase = .retrying(attempt: attempt, nextWait: 20,
-                                           message: err.localizedDescription)
-                }
+                // 等待期间对用户也是「连接中」，探测次数只进日志。
+                self.phase = .retrying
             }
             NSLog("[connect] 重启等待超时（5 分钟），等手动重连")
             if let err = self.lastConnectError {
-                self.phase = .failed("NAS 重启后等了 5 分钟还没等到它回来（\(err.localizedDescription)）。"
-                    + "确认 NAS 起来后手动连，网络恢复也会自动补连。")
+                var text = err.localizedDescription
+                if !text.hasSuffix("。"), !text.hasSuffix("！") { text += "。" }
+                self.phase = .failed(text + "NAS 起来后可以手动连，网络恢复也会自动补连。")
             }
         }
     }
@@ -1305,30 +1304,30 @@ final class AppState {
                 }
                 if self.isConnected || self.phase.isBusy { return }
                 if let err = self.lastConnectError, Self.isAuthRejection(err) {
-                    NSLog("[connect] 上一次是密码被拒（%@），不重试", self.phase.label)
+                    NSLog("[connect] 上一次是密码被拒（%@），不重试", err.localizedDescription)
                     return
                 }
                 NSLog("[connect] 自动连接第 %d 把", n)
                 if wait > 0 {
                     NSLog("[connect] 未连上（%@），%d 秒后再试",
-                          self.phase.label, Int(wait))
+                          self.lastConnectError?.localizedDescription ?? "未知",
+                          Int(wait))
                     try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                     if Task.isCancelled { return }
                     if self.isConnected || self.phase.isBusy { return }
                 }
                 await self.connect(password: password, method: self.resumeMethod, auto: true)
                 if self.isConnected { return }
-                // 中间失败摆「重试中」非终态：用户此刻多半正看着连接页，
-                // 红色失败会让人以为要用手动连（其实重试还在走）。
-                if n < 5, let err = self.lastConnectError {
-                    self.phase = .retrying(attempt: n, nextWait: Int(waits[n]),
-                                           message: err.localizedDescription)
-                }
+                // 中间失败对用户只是「还在连接中」：次数与倒计时进日志，界面
+                // 保持一个连接中的状态就够了。
+                if n < 5 { self.phase = .retrying }
             }
             NSLog("[connect] 自动连接五把都没成，等网络恢复或手动连")
             if let err = self.lastConnectError {
-                self.phase = .failed("自动连接试了 5 次都没成（\(err.localizedDescription)）。"
-                    + "网络恢复会自动再试，也可以手动连。")
+                // 错误文案自己带「连不上服务器：…」这种整句，别在外面再套前缀。
+                var text = err.localizedDescription
+                if !text.hasSuffix("。"), !text.hasSuffix("！") { text += "。" }
+                self.phase = .failed(text + "稍后会自动再试，也可以手动连。")
             }
         }
     }
