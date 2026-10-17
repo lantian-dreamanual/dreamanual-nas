@@ -13,6 +13,8 @@ struct ConnectView: View {
 
     @State private var mode: Mode = .quickconnect
     @State private var password = ""
+    /// 口令框挡下全角/中文字符时的即时说明（说清第几位，别让用户自己数）。
+    @State private var passwordNote: String?
 
     var body: some View {
         @Bindable var state = state
@@ -59,13 +61,19 @@ struct ConnectView: View {
             }
 
             field("口令") {
-                SecureField(
-                    // 有存凭据时空着也行：连接时会取本机存的那条。
-                    password.isEmpty && state.hasSavedPassword(for: selectedMethod)
-                        ? "留空则用已保存的口令" : "DSM 密码",
-                    text: $password)
-                    .formField(on: .card)
-                    .onSubmit { submit() }
+                VStack(alignment: .leading, spacing: DmSpace.s8) {
+                    SecureField(
+                        // 有存凭据时空着也行：连接时会取本机存的那条。
+                        password.isEmpty && state.hasSavedPassword(for: selectedMethod)
+                            ? "留空则用已保存的口令" : "DSM 密码",
+                        text: passwordBinding)
+                        .formField(on: .card)
+                        .onSubmit { submit() }
+
+                    if let passwordNote {
+                        noteLine(passwordNote)
+                    }
+                }
             }
 
             Button {
@@ -116,6 +124,34 @@ struct ConnectView: View {
         .padding(.bottom, DmSpace.s14)
     }
 
+    /// 口令框的绑定：DSM 口令只可能是半角 ASCII。中文输入法下打 `!` 得到的是
+    /// 全角「！」，长度不变、内容差一位，送出去只会换回 Auth 400 ——
+    /// 真机上就是这么被卡住的（用户输 12 位、已存凭据也是 12 位）。挡在入口，
+    /// 并说清第几位被挡，别让人对着圆点数数。
+    private var passwordBinding: Binding<String> {
+        Binding(
+            get: { password },
+            set: { raw in
+                let (clean, dropped) = AsciiInput.filter(raw)
+                password = clean
+                passwordNote = dropped.isEmpty ? nil : AsciiInput.note(for: dropped)
+            }
+        )
+    }
+
+    /// 字段下方的即时说明：与 `.failed` 状态行同一套（图标 + 12 号 `danger-ink`）。
+    private func noteLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: DmSpace.s6) {
+            LucideIcon("triangle-alert", size: DmIcon.i12)
+                .foregroundColor(Color.dmDanger)
+            Text(text)
+                .font(.system(size: DmText.t12))
+                .foregroundColor(Color.dmDangerInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// 回车提交：字段上的 `.onSubmit` 管「光标在字段里按回车」，按钮上的
     /// `.keyboardShortcut(.defaultAction)` 管「焦点不在字段里也认回车」。
     /// 两处都可能触发，但 `AppState.connect` 开头就把重复调用挡掉了。
@@ -131,6 +167,7 @@ struct ConnectView: View {
             // 旧值会留着，用户以为「已经留空」其实还在送同一条错口令。
             // 清空后下一次点击直接走本机已存凭据，也少喂 DSM 自动封锁。
             password = ""
+            passwordNote = nil
         }
     }
 
@@ -176,5 +213,44 @@ struct ConnectView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// 只留半角 ASCII 的输入过滤（口令框用）。
+///
+/// 要挡的是输入法带来的「长得一样、字节不同」：全角「！」（U+FF01）、
+/// 全角字母数字（U+FF10…）、中文标点、emoji。全角区间与 ASCII 是固定偏移
+/// 0xFEE0，但这里不做自动转半角 —— 悄悄改用户口令的字，等于把错口令换成
+/// 另一个错口令；挡掉并指明位置，人自己改那一位。
+private enum AsciiInput {
+    struct Dropped {
+        let character: Character
+        /// 在原输入里的位置（从 1 起），提示里说「第 12 位」用。
+        let position: Int
+    }
+
+    static func filter(_ raw: String) -> (text: String, dropped: [Dropped]) {
+        var kept = ""
+        var dropped: [Dropped] = []
+        for (offset, character) in raw.enumerated() {
+            let scalars = character.unicodeScalars
+            let isHalfWidth = scalars.count == 1
+                && (0x20...0x7E).contains(scalars.first!.value)
+            if isHalfWidth {
+                kept.append(character)
+            } else {
+                dropped.append(Dropped(character: character, position: offset + 1))
+            }
+        }
+        return (kept, dropped)
+    }
+
+    static func note(for dropped: [Dropped]) -> String {
+        guard let first = dropped.first else { return "" }
+        let head = dropped.count == 1
+            ? "第 \(first.position) 位的“\(first.character)”不是半角字符"
+            : "第 \(first.position) 位起有 \(dropped.count) 个非半角字符（首个是“\(first.character)”）"
+        let tail = dropped.count == 1 ? "重输这一位" : "重输这几处"
+        return "\(head)，已忽略。口令只能用半角英文输入，把输入法切到英文后\(tail)。"
     }
 }
