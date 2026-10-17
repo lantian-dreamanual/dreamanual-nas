@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// 连接页：QuickConnect ID 或直连地址 + 账号口令。
+/// 连接页：QuickConnect ID 或直连地址 + 账号密码。
 ///
 /// 形态对着密码管理的解锁页（`.lock-card`）落：整屏 `bg`、卡片居中、卡内一律左对齐
 /// （标记 → 标题 → 分段 → 字段 → 主按钮 → 状态行）。卡片取 `panel-2` + `line` 1px
 /// + `r-16` + `shadow-card`，与 `.lock-card` 同一套角色；宽度按本页内容收到 420。
-/// 两种连接方式走分段切换，口令连上即存本机凭据文件（0600，见 CredentialStore）。
+/// 两种连接方式走分段切换，密码连上即存本机凭据文件（0600，见 CredentialStore）。
 struct ConnectView: View {
     @Environment(AppState.self) private var state
 
@@ -16,7 +16,7 @@ struct ConnectView: View {
 
     @State private var mode: Mode = .quickconnect
     @State private var password = ""
-    /// 口令框挡下全角/中文字符时的即时说明（说清第几位，别让用户自己数）。
+    /// 密码框挡下全角/中文字符时的即时说明（说清第几位，别让用户自己数）。
     @State private var passwordNote: String?
     @FocusState private var focused: Field?
 
@@ -67,12 +67,12 @@ struct ConnectView: View {
                     .onSubmit { submit() }
             }
 
-            field("口令") {
+            field("密码") {
                 VStack(alignment: .leading, spacing: DmSpace.s8) {
                     SecureField(
                         // 有存凭据时空着也行：连接时会取本机存的那条。
                         password.isEmpty && state.hasSavedPassword(for: selectedMethod)
-                            ? "留空则用已保存的口令" : "DSM 密码",
+                            ? "留空则用已保存的密码" : "DSM 密码",
                         text: passwordBinding)
                         .formField(on: .card)
                         .focused($focused, equals: .password)
@@ -138,7 +138,7 @@ struct ConnectView: View {
         .padding(.bottom, DmSpace.s14)
     }
 
-    /// 口令框的绑定：DSM 口令只可能是半角 ASCII。中文输入法下打 `!` 得到的是
+    /// 密码框的绑定：DSM 密码只可能是半角 ASCII。中文输入法下打 `!` 得到的是
     /// 全角「！」，长度不变、内容差一位，送出去只会换回 Auth 400 ——
     /// 真机上就是这么被卡住的（用户输 12 位、已存凭据也是 12 位）。挡在入口，
     /// 并说清第几位被挡，别让人对着圆点数数。
@@ -177,8 +177,8 @@ struct ConnectView: View {
         Task {
             await state.connect(password: password, method: selectedMethod)
             guard !state.isConnected else { return }
-            // 失败就把口令框清掉：窗口关掉再唤起时视图不重建、@State 里的
-            // 旧值会留着，用户以为「已经留空」其实还在送同一条错口令。
+            // 失败就把密码框清掉：窗口关掉再唤起时视图不重建、@State 里的
+            // 旧值会留着，用户以为「已经留空」其实还在送同一条错密码。
             // 清空后下一次点击直接走本机已存凭据，也少喂 DSM 自动封锁。
             password = ""
             passwordNote = nil
@@ -191,7 +191,7 @@ struct ConnectView: View {
     }
 
     private var isSubmitDisabled: Bool {
-        // 口令为空时，本机存过这条端点的凭据也放行（connect 里会取来用）。
+        // 密码为空时，本机存过这条端点的凭据也放行（connect 里会取来用）。
         let passwordReady = !password.isEmpty
             || state.hasSavedPassword(for: selectedMethod)
         return state.phase.isBusy || !passwordReady
@@ -230,12 +230,12 @@ struct ConnectView: View {
     }
 }
 
-/// 只留半角 ASCII 的输入过滤（口令框用）。
+/// 只留半角 ASCII 的输入过滤（密码框用）。
 ///
 /// 要挡的是输入法带来的「长得一样、字节不同」：全角「！」（U+FF01）、
 /// 全角字母数字（U+FF10…）、中文标点、emoji。全角区间与 ASCII 是固定偏移
-/// 0xFEE0，但这里不做自动转半角 —— 悄悄改用户口令的字，等于把错口令换成
-/// 另一个错口令；挡掉并指明位置，人自己改那一位。
+/// 0xFEE0，但这里不做自动转半角 —— 悄悄改用户密码的字，等于把错密码换成
+/// 另一个错密码；挡掉并指明位置，人自己改那一位。
 private enum AsciiInput {
     struct Dropped {
         let character: Character
@@ -265,6 +265,6 @@ private enum AsciiInput {
             ? "第 \(first.position) 位的“\(first.character)”不是半角字符"
             : "第 \(first.position) 位起有 \(dropped.count) 个非半角字符（首个是“\(first.character)”）"
         let tail = dropped.count == 1 ? "重输这一位" : "重输这几处"
-        return "\(head)，已忽略。口令只能用半角英文输入，把输入法切到英文后\(tail)。"
+        return "\(head)，已忽略。密码只能用半角英文输入，把输入法切到英文后\(tail)。"
     }
 }

@@ -49,7 +49,7 @@ echo "========== 1b/3 小组件 extension =========="
 # + widget 本体，@main 在 widget bundle 里，主 app 的入口不进来。
 # extension 必须沙箱（macOS 不注册非沙箱的 app extension，图库不出现），
 # 所以凭据层（CredentialStore / KeychainStore）不进 widget —— 沙箱里
-# 读不了主 app 的 credential.json，口令随快照带（见 Core/WidgetBridge.swift
+# 读不了主 app 的 credential.json，密码随快照带（见 Core/WidgetBridge.swift
 # 头注）；主 app 直写 widget 的沙箱容器。
 WIDGET_SOURCES=(
   DreamanualWidget/WidgetContent.swift

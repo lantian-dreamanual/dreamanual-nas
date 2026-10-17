@@ -9,7 +9,7 @@
 //     xcrun swiftc -disable-sandbox -o /tmp/cover-selfcheck $FILES tools/cover-selfcheck/main.swift' && /tmp/cover-selfcheck
 //
 // 参数：`--album <专辑名>` 指定要查的专辑名（默认 `0`，就是用户抓到串台的那张）。
-// 口令从 `CredentialStore` 的本机文件读，端点从文件里的键解析（`qc:<ID>` 走
+// 密码从 `CredentialStore` 的本机文件读，端点从文件里的键解析（`qc:<ID>` 走
 // QuickConnect、`direct:<host>:<port>` 直连）。
 
 import CryptoKit

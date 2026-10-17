@@ -4,7 +4,7 @@ import SwiftUI
 // ============ NAS 状态小组件（WidgetKit 管线） ============
 //
 // 数据链路：优先读主 app 落的共享快照（WidgetBridge，直写 widget 沙箱容器），
-// 30 分钟内直接用；过期先自己连一次 NAS（端点、账号与口令都随快照带）；
+// 30 分钟内直接用；过期先自己连一次 NAS（端点、账号与密码都随快照带）；
 // 都不行就转离线态，「上次在线」取旧快照的 takenAt。
 // 刷新节奏：请求 15 分钟一档；主 app 每次落盘都会捅一次时间线。
 
@@ -77,8 +77,8 @@ struct Provider: TimelineProvider {
     }
 }
 
-/// 小组件自己连一次 NAS。端点与账号、口令都随快照带 —— 沙箱里读不了
-/// 主 app 的 credential.json，口令在主 app 落盘时一并写进快照（0600 同档）。
+/// 小组件自己连一次 NAS。端点与账号、密码都随快照带 —— 沙箱里读不了
+/// 主 app 的 credential.json，密码在主 app 落盘时一并写进快照（0600 同档）。
 enum WidgetFetcher {
     static func fetch(_ connection: WidgetSnapshotData) async -> SystemSnapshot? {
         guard let password = connection.password, !password.isEmpty else { return nil }

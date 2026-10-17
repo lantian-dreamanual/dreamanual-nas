@@ -4,7 +4,7 @@
 
 > **当前状态：听歌 MVP 已通（2026-10-13）。** 接口可行性已在真实机器上逐条验完（见 [接口结论](docs/接口结论.md)），
 > 功能范围已定（见 [产品定义](docs/产品定义.md)），整体界面出了 HTML 原型（[界面原型](design/界面原型.html)）。
-> 地基已通：QuickConnect 端点解析、双会话（FileStation + AudioStation）、本机口令凭据、保活重登、
+> 地基已通：QuickConnect 端点解析、双会话（FileStation + AudioStation）、本机密码凭据、保活重登、
 > 外壳（侧栏 + 主区 + 底部播放条）。**曲库页已接数据**：四维浏览 / 搜索 / 筛选 / 分页懒加载，
 > 真机 12328 首完整渲染。**播放与队列已接**：取流走自定义 scheme + 资源装载代理（`stream.cgi`
 > 要带 `X-SYNO-TOKEN`），真机验证过播放 / 拖进度 / 切歌（`DM_SMOKE=1` 冒烟通路）。
@@ -114,7 +114,7 @@ nas/
 │   │   ├── QuickConnect.swift     QC ID → 中继端点（每次启动重解析）
 │   │   ├── SynologyClient.swift   请求构造 / 信封解码 / 错误码 / 取字节（封面）
 │   │   ├── SessionManager.swift   双会话 + 保活 + 失效重登重放
-│   │   ├── CredentialStore.swift  口令落本机文件（0600，钥匙串只留一次性迁移）
+│   │   ├── CredentialStore.swift  密码落本机文件（0600，钥匙串只留一次性迁移）
 │   │   ├── KeychainStore.swift    已退役的钥匙串读写（仅 CredentialStore 迁移用）
 │   │   ├── AudioLibrary.swift     曲库数据层（四维 / 搜索 / 筛选 / 分页 / 歌单 / 评分读写 / 封面）
 │   │   ├── CoverStore.swift       封面缓存（键按专辑 + 艺术家，负结果也缓存，并发上限 4）

@@ -33,8 +33,8 @@ func dmByteText(_ bytes: Int64) -> String {
 /// extension 启动）；extension 没启动过之前没有快照，小组件首加显示
 /// 离线态，等主 app 下一次推送（页面刷新 / 15 分钟一拍）就有了。
 ///
-/// 口令随快照带（`password` 字段）：沙箱里读不了主 app 的 credential.json，
-/// 自拉链路的口令只能走这份快照。敏感级别说明照旧 —— 明文文件 0600 +
+/// 密码随快照带（`password` 字段）：沙箱里读不了主 app 的 credential.json，
+/// 自拉链路的密码只能走这份快照。敏感级别说明照旧 —— 明文文件 0600 +
 /// FileVault 兜底，与 credential.json 同档。
 struct WidgetSnapshotData: Codable {
     struct Disk: Codable, Equatable {
@@ -53,14 +53,14 @@ struct WidgetSnapshotData: Codable {
     /// 上次关机不正常（`is_system_crashed`）—— 小组件顶行转红。
     var crashed: Bool
 
-    // 连接三件套 + 端点身份 + 口令：小组件自拉时按这套直接连。
+    // 连接三件套 + 端点身份 + 密码：小组件自拉时按这套直接连。
     // 三件套在主 app 的 UserDefaults.standard 里，widget 进程读不到，
-    // 只能随快照带；口令同理（credential.json 在沙箱外）。
+    // 只能随快照带；密码同理（credential.json 在沙箱外）。
     var endpointKey: String
     var qcID: String
     var directAddress: String
     var username: String
-    /// 自拉用的口令。可选是为了旧快照（没这字段）也能解出来。
+    /// 自拉用的密码。可选是为了旧快照（没这字段）也能解出来。
     var password: String?
 
     /// 快照还算不算新鲜。30 分钟内的数据小组件直接用，过了就得自己拉。
@@ -120,7 +120,7 @@ enum WidgetBridge {
     }
 
     /// 主 app 侧：状态拉成功（页面刷新 / 周期推送）就落盘 + 捅一次时间线。
-    /// 口令从 credential.json 取来随快照带（沙箱里的 widget 读不了那盘文件）。
+    /// 密码从 credential.json 取来随快照带（沙箱里的 widget 读不了那盘文件）。
     static func publish(_ snapshot: SystemSnapshot,
                         endpointKey: String, qcID: String,
                         directAddress: String, username: String,

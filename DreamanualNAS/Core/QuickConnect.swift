@@ -50,7 +50,7 @@ enum QuickConnectError: LocalizedError {
 struct QuickConnectResolver {
     static let servURL = URL(string: "https://global.quickconnect.cn/Serv.php")!
 
-    /// 解析 QC ID。公开接口，不需要账号口令。
+    /// 解析 QC ID。公开接口，不需要账号密码。
     ///
     /// 🔴 请求体是**数组**、且 `id` 是服务名 `mainapp_https`、QC ID 放 `serverID`
     /// —— 2026-10-12 实测：这版回 `errno 4 / Alias not found`（正确语义），

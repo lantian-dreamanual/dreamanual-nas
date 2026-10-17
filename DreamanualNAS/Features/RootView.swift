@@ -542,16 +542,11 @@ private struct SettingsPane: View {
                             .formFieldRow()
                             .frame(width: 240)
                     }
-                    // 改地址会让端点键跟着变（见 `endpointKey`）—— 本机存的口令
+                    // 改地址会让端点键跟着变（见 `endpointKey`）—— 本机存的密码
                     // 是按旧键写的，取不到就退回连接页重输，所以这里明说要点重连。
                     settingsNote("局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点「重新连接」生效。")
                     DmSettingsRow("账号") {
                         Text(state.username.isEmpty ? "—" : state.username)
-                            .font(.system(size: DmText.t13))
-                            .foregroundColor(Color.dmInk2)
-                    }
-                    DmSettingsRow("口令") {
-                        Text("存本机，仅本人可读")
                             .font(.system(size: DmText.t13))
                             .foregroundColor(Color.dmInk2)
                     }

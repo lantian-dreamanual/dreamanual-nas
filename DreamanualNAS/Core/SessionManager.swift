@@ -228,7 +228,7 @@ actor SessionManager {
                 sessions[kind] = credentials
                 return credentials
             } catch let error as SynologyError where !error.worthTryingOtherEndpoint {
-                // 账号口令类的错换端点也一样错 —— 重打一遍只会把失败次数翻倍，
+                // 账号密码类的错换端点也一样错 —— 重打一遍只会把失败次数翻倍，
                 // DSM 的自动封锁是照失败次数记的。
                 throw error
             } catch {

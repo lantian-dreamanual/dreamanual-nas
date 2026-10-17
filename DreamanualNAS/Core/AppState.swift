@@ -73,7 +73,7 @@ final class AppState {
         case quickconnect, direct
     }
 
-    // MARK: - 连接表单（持久化，口令除外）
+    // MARK: - 连接表单（持久化，密码除外）
 
     var qcID: String { didSet { defaults.set(qcID, forKey: Keys.qcID) } }
     var directAddress: String { didSet { defaults.set(directAddress, forKey: Keys.direct) } }
@@ -83,7 +83,7 @@ final class AppState {
 
     private(set) var phase: Phase = .idle
     /// 最近一次 `connect` 抛的错（成功即清）。自动连的重试判据靠它分型：
-    /// 口令被拒一族不再重试，其余（网络没就绪、中继抖一下）值得再试。
+    /// 密码被拒一族不再重试，其余（网络没就绪、中继抖一下）值得再试。
     private(set) var lastConnectError: (any Error)?
     /// 端点描述，连上之后显示在侧栏底部（走中继还是直连、主机端口、区域）。
     private(set) var endpointLabel = ""
@@ -1186,7 +1186,7 @@ final class AppState {
 
     /// 失败退避重试：0s / 5s / 15s / 30s / 60s 共五把。开机常见的竞态
     /// （Wi-Fi 还在连、Clash 还没起）两分钟内基本都能缓过来。三道闸：
-    /// 连上或有人正在连就收手；口令被拒立即收手（DSM 自动封锁按失败
+    /// 连上或有人正在连就收手；密码被拒立即收手（DSM 自动封锁按失败
     /// 次数计，反复送只会把账号锁死）；任务被取消立即收手。
     func startAutoConnect(password: String) {
         autoConnectTask?.cancel()
@@ -1199,7 +1199,7 @@ final class AppState {
                 }
                 if self.isConnected || self.phase.isBusy { return }
                 if let err = self.lastConnectError, Self.isAuthRejection(err) {
-                    NSLog("[connect] 上一次是口令被拒（%@），不重试", self.phase.label)
+                    NSLog("[connect] 上一次是密码被拒（%@），不重试", self.phase.label)
                     return
                 }
                 NSLog("[connect] 自动连接第 %d 把", n)
@@ -1226,7 +1226,7 @@ final class AppState {
         rebootReconnectTask = nil
     }
 
-    /// 口令被拒一族：登录 400 / 停用 / 无权限 / 两步验证 / 自动封锁 / 口令过期。
+    /// 密码被拒一族：登录 400 / 停用 / 无权限 / 两步验证 / 自动封锁 / 密码过期。
     /// 这些换多少次时机都是同一个答案，重试只会触发封锁。
     static func isAuthRejection(_ error: any Error) -> Bool {
         guard let err = error as? SynologyError, err.api == "SYNO.API.Auth" else { return false }
@@ -2688,7 +2688,7 @@ final class AppState {
     /// 临时目录（走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）；
     /// `savepanel` 真开一次系统存盘面板（核对文案本地化，不自动关）；
     /// `module=<music|files|status|settings>` 切模块（截图核对各页形态）；
-    /// `reconnect` 真机走一遍重连链路（清旧会话 → 本机口令 → connect）。
+    /// `reconnect` 真机走一遍重连链路（清旧会话 → 本机密码 → connect）。
     func smokeUI(_ command: String) async {
         // 与 `DM_STATUS` 同一条坑：入口在启动瞬间就消费它，自动连却是异步的。
         // 不先等，整套界面指令在「未连接」上直接丢掉（本批真机踩到）。
@@ -2721,7 +2721,7 @@ final class AppState {
             } else if token == "tagload" {
                 await smokeTagLoad(manager)
             } else if token == "reconnect" {
-                // 真机走一遍重连链路：清旧会话 → 本机口令 → connect（日志看 [connect]）。
+                // 真机走一遍重连链路：清旧会话 → 本机密码 → connect（日志看 [connect]）。
                 NSLog("[ui] 触发重新连接")
                 await reconnect()
             } else if token.hasPrefix("module=") {
@@ -2965,10 +2965,10 @@ final class AppState {
     }
 
     /// `DM_CONNECT=qc|direct|reconnect` 时由入口调用：按连接页同一条路连一次，
-    /// 口令留空（走本机已存凭据），连完把诊断文件打出来。
+    /// 密码留空（走本机已存凭据），连完把诊断文件打出来。
     /// `reconnect` 走的是设置页那颗按钮的同一条路（按当前配置选线路）。
     ///
-    /// 为什么要有：真机核对「口令留空 → 用存凭据」这条路不能靠人手点，
+    /// 为什么要有：真机核对「密码留空 → 用存凭据」这条路不能靠人手点，
     /// AI 点不了 UI（合成鼠标事件进不了 SwiftUI 手势系统）。
     func smokeConnect(_ command: String) async {
         if command == "reconnect" {
@@ -2998,10 +2998,10 @@ final class AppState {
 
     /// 登录被拒时的界面文案。
     ///
-    /// 「账号或口令不对」这句话在**输入的口令与本机保存的那条不一致**时
+    /// 「账号或密码不对」这句话在**输入的密码与本机保存的那条不一致**时
     /// 信息量为零 —— 用户确信自己没输错、却只能反复重试。这里把差异说成
     /// 位置与个数（不报字符本身）：哪里打错一眼就能回去改；同时给出
-    /// 「清空口令框用已保存那条」的现成路径。
+    /// 「清空密码框用已保存那条」的现成路径。
     private static func connectFailureMessage(_ error: any Error,
                                               source: String,
                                               sent: String,
@@ -3020,15 +3020,15 @@ final class AppState {
                 ? "第 \(diffs[0] + 1) 位不同"
                 : "第 \(diffs[0] + 1) 位起有 \(diffs.count) 位不同"
         }
-        return "口令与本机已保存的那条不一致（\(note)）。"
-            + "把口令框清空再点连接，会用已保存且能登录的那条。"
+        return "密码与本机已保存的那条不一致（\(note)）。"
+            + "把密码框清空再点连接，会用已保存且能登录的那条。"
     }
 
     /// 连接诊断落盘：`~/Library/Application Support/DreamanualNAS/last-connect.json`，
     /// 每连一次覆盖。
     ///
-    /// 为什么要这东西：用户报「账号或口令不对」但确信没输错时，先得分清
-    /// **实际发出去的是哪条口令**。口令不落原文 —— 只记长度与 sha256 前 8 位，
+    /// 为什么要这东西：用户报「账号或密码不对」但确信没输错时，先得分清
+    /// **实际发出去的是哪条密码**。密码不落原文 —— 只记长度与 sha256 前 8 位，
     /// 同时把本机存的那条也记一份；两者一比就能判「输入 ≠ 已存」还是
     /// 「已存这条本身也过不了」。这份文件也是排「留空到底生效没有」的唯一证据。
     private func recordConnectDiag(method: ConnectMethod,
@@ -3072,13 +3072,13 @@ final class AppState {
         }
     }
 
-    /// 口令摘要前 8 位（比对用，还原不出原文）。
+    /// 密码摘要前 8 位（比对用，还原不出原文）。
     private static func digest8(_ text: String) -> String {
         let digest = SHA256.hash(data: Data(text.utf8))
         return String(digest.map { String(format: "%02x", $0) }.joined().prefix(8))
     }
 
-    /// - Parameter password: 口令只在内存里传，落盘只落本机凭据文件（0600）。
+    /// - Parameter password: 密码只在内存里传，落盘只落本机凭据文件（0600）。
     /// - Parameter method: 连接页分段选的方式。分支只认它，不认另一个
     ///   字段有没有值 —— 残留的直连地址不抢 QuickConnect 的路。
     func connect(password: String, method: ConnectMethod) async {
@@ -3094,12 +3094,12 @@ final class AppState {
         let qc = trimmedQCID
         let user = trimmedUsername
 
-        // 口令框留空 = 用本机存的这条端点凭据（连接页在「有存凭据」时才
-        // 放行空口令）。成功连接时存的键就是 `endpointKey(for: method)`，
+        // 密码框留空 = 用本机存的这条端点凭据（连接页在「有存凭据」时才
+        // 放行空密码）。成功连接时存的键就是 `endpointKey(for: method)`，
         // 这里按同一把键取，两边不会错位。
-        // 口令来源三种：留空取存凭据 / 直接取自存凭据（自动连、重启等待、
+        // 密码来源三种：留空取存凭据 / 直接取自存凭据（自动连、重启等待、
         // 设置页重连这三条看不见输入框的路）/ 界面输入且不同于存凭据。
-        // 诊断文件里分清这一点，才判得出「是不是送错了口令」。
+        // 诊断文件里分清这一点，才判得出「是不是送错了密码」。
         let storedForSource = CredentialStore.load(endpointID: endpointKey(for: method),
                                                     username: user)
         let passwordSource: String
@@ -3115,8 +3115,8 @@ final class AppState {
             guard let saved = CredentialStore.load(
                 endpointID: endpointKey(for: method), username: user), !saved.isEmpty
             else {
-                lastConnectError = QuickConnectError.badResponse("先填口令")
-                phase = .failed("先填口令")
+                lastConnectError = QuickConnectError.badResponse("先填密码")
+                phase = .failed("先填密码")
                 recordConnectDiag(method: method, endpoint: "", user: user,
                                   source: passwordSource, sentPassword: "",
                                   error: lastConnectError)
@@ -3186,7 +3186,7 @@ final class AppState {
             }
             startWidgetPush()
 
-            // 连上即存：口令落本机文件（0600），下次启动自动重连。写也走后台，
+            // 连上即存：密码落本机文件（0600），下次启动自动重连。写也走后台，
             // 不占主线程。方式一并记下 —— 端点键与自动连都按它走。
             lastMethod = method
             defaults.set(Self.raw(of: method), forKey: Keys.method)
@@ -3210,16 +3210,16 @@ final class AppState {
         }
     }
 
-    /// 设置页的「重新连接」：清掉旧会话，用本机存的口令原样再连一次。
+    /// 设置页的「重新连接」：清掉旧会话，用本机存的密码原样再连一次。
     ///
     /// 走哪条路看**当前配置**（`configuredMethod`）：直连地址填了走直连，
     /// 没填走 QuickConnect —— 用户刚在设置页填了地址、点重连，期望的就是
     /// 改走直连，不能拿「上次成功那次」的方式顶回去。
     ///
     /// 与 `disconnect()` 的差别只在**不动本机缓存**（封面 / 歌词 / 开关机计划）——
-    /// 连的还是同一台机器，重拉一遍封面纯属浪费。口令按目标端点键取，取不到
-    /// 时 CredentialStore 会按账号回退；仍然没有就退回连接页让用户重输口令，
-    /// 别拿旧口令硬试（错的凭据会把 DSM 的自动封锁喂起来，见 `接口文档` 登录 400 那条）。
+    /// 连的还是同一台机器，重拉一遍封面纯属浪费。密码按目标端点键取，取不到
+    /// 时 CredentialStore 会按账号回退；仍然没有就退回连接页让用户重输密码，
+    /// 别拿旧密码硬试（错的凭据会把 DSM 的自动封锁喂起来，见 `接口文档` 登录 400 那条）。
     func reconnect() async {
         cancelAutoConnect()
         playback?.detach()
@@ -3244,8 +3244,8 @@ final class AppState {
                                                   username: trimmedUsername),
               !password.isEmpty
         else {
-            toast = ToastMessage("连接设置变了，需要重新输入口令", .info)
-            NSLog("[connect] 重连取不到本端点的口令（端点键 %@），退回连接页", key)
+            toast = ToastMessage("连接设置变了，需要重新输入密码", .info)
+            NSLog("[connect] 重连取不到本端点的密码（端点键 %@），退回连接页", key)
             return
         }
         await connect(password: password, method: method)
@@ -3304,7 +3304,7 @@ final class AppState {
     }
 
     private func publishWidgetSnapshot(_ snapshot: SystemSnapshot) async {
-        // 口令随快照带：widget 沙箱里读不了 credential.json，自拉链路靠它。
+        // 密码随快照带：widget 沙箱里读不了 credential.json，自拉链路靠它。
         let password = CredentialStore.load(endpointID: endpointKey,
                                             username: trimmedUsername) ?? ""
         await WidgetBridge.publish(snapshot, endpointKey: endpointKey,
@@ -3367,7 +3367,7 @@ final class AppState {
     /// 不指定方式时的端点键（自动连 / 重启等待读凭据用）：按 `resumeMethod`。
     private var endpointKey: String { endpointKey(for: resumeMethod) }
 
-    /// 这条端点 + 账号在本机存过口令吗。连接页据此允许口令框留空。
+    /// 这条端点 + 账号在本机存过密码吗。连接页据此允许密码框留空。
     func hasSavedPassword(for method: ConnectMethod) -> Bool {
         guard let saved = CredentialStore.load(endpointID: endpointKey(for: method),
                                                username: trimmedUsername)
