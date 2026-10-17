@@ -567,10 +567,13 @@ private struct FileColumnWidth: ViewModifier {
     func body(content: Content) -> some View {
         // 名称列：min = 覆盖 ?? 保底、max 恒 .infinity —— 覆盖是**最小宽**；
         // 固定列：min == max == 覆盖 ?? 默认宽 —— 钉死。一个 frame 调用表达两种。
+        // 🔴 自适应列的 maxWidth 必须写 .infinity：写 nil 时 frame 不吸收提案宽，
+        // 行宽跟着内容走、被 LazyVStack 整行居中（2026-10-18 用户实抓，曲库表
+        // 同款 `ColumnWidth` 一直是 .infinity 所以没这毛病）。
         let pinned = override ?? field.width
         return content.frame(
             minWidth: field.width == nil ? (override ?? FilesMetrics.nameMinWidth) : pinned,
-            maxWidth: field.width == nil ? nil : pinned,
+            maxWidth: field.width == nil ? .infinity : pinned,
             alignment: field.isNumeric ? .trailing : .leading
         )
     }

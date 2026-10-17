@@ -1824,6 +1824,14 @@ final class AppState {
     ///     不给名字取列表里第一条目录；
     ///   · `reset` 排序回默认。**核对完 reset** —— 排序偏好会写进用户机的 `UserDefaults`。
     func smokeFiles(_ command: String) async {
+        // 冒烟 token 在启动瞬间就被消费，自动连却是异步的 —— 先等连接落定
+        // （最多 30 秒）再判（与 `smokeLibrary` 同一块；直接判「未连接」会让
+        // 指令整个白跑，2026-10-18 实抓）。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager else {
             NSLog("[files] 未连接，跳过（phase=%@）", String(describing: phase))
             return
