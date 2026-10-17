@@ -483,12 +483,13 @@ struct PrimaryButtonStyle: ButtonStyle {
 /// 次按钮：紧凑规格（高 28 / 横向内边距 10 / 圆角 6 / 字号 12）。
 /// 面板内的小动作与弹窗页脚用它。
 ///
-/// `on:` 按落点分两档 —— 与输入框 `formField(on:)` 同一条规矩：控件落在
-/// **卡面上要抬一档**。卡面（`dmCard()` / 设置分组卡）是 `panel-2`，而描边
-/// `line` 与 `panel-2` 同值（都是 `neutral-800`）—— 照面板档画出来，按钮
-/// 底色与卡面同色、描边也看不见，整颗按钮只剩一行 12 号字（2026-10-17
-/// 用户反馈「按钮看着不明显，不像是按钮」）。卡面档抬到 `panel-3` 才有
-/// 填充感，描边同取 `line-2`。
+/// `on:` 按落点分两档。面板档（`panel` 底）是实底；卡面档改**纯描边**：
+/// 卡面（`dmCard()` / 设置分组卡）是 `panel-2`，同卡里的输入框 `formFieldRow()`
+/// 已经是 `panel-3` 实底 —— 按钮若也做实底 `panel-3`，两个壳同色同描边，只差
+/// 4px 高与 1 号字，读起来像同一控件的两种尺寸（2026-10-17 用户追问「是否造成
+/// 认知负担」）。描边把语言分开：**实底＝可输入、描边＝可点**，悬停才填底。
+/// 描边取 `line-2`（`#404040`）—— 面板档的 `line` 与卡面同色，画在卡上等于没画
+/// （2026-10-17 用户反馈「按钮看着不明显，不像是按钮」就是这一条）。
 struct SecondaryButtonStyle: ButtonStyle {
     /// 落点：`.panel` 主区 / 弹窗（底色 `panel`），`.card` 卡面（`panel-2`）。
     var on: DmSurface = .panel
@@ -515,12 +516,12 @@ struct SecondaryButtonStyle: ButtonStyle {
             .onHover { isHovered = $0 }
     }
 
-    /// 卡面档悬停只提字色：`panel-3` 是面板梯度最亮一档，没有更亮的底可换，
-    /// 换更暗会读成「已按下」。
+    /// 卡面档常态透明、悬停才填 `panel-3`：`panel-3` 是面板梯度最亮一档，
+    /// 没有更亮的底可换，换更暗会读成「已按下」。
     private var fill: Color {
         switch on {
         case .panel: return isEnabled && isHovered ? Color.dmPanel3 : Color.dmPanel2
-        case .card: return Color.dmPanel3
+        case .card: return isEnabled && isHovered ? Color.dmPanel3 : Color.clear
         }
     }
 

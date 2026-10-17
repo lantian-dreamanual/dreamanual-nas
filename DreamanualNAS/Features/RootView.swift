@@ -605,8 +605,8 @@ private struct SettingsPane: View {
                             .disabled(updates.isChecking)
                         }
                     }
-                    DmSettingsRow("主页") {
-                        // 应用自己的页面，不甩到主站首页：主站首页是作品集，
+                    DmSettingsRow("官网") {
+                        // 指应用自己在官网上的页面，不甩到主站首页：主站首页是作品集，
                         // 指着它等于让用户自己再找一遍。
                         Button("dreamanual.com/works/nas.html") {
                             if let url = URL(string: "https://dreamanual.com/works/nas.html") {
