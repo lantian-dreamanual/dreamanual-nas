@@ -284,24 +284,32 @@ final class AppState {
     // MARK: - 新增 / 编辑开关机计划
 
     /// 新增 / 编辑计划任务的弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
-    /// `index` = 编辑第几条，nil = 新增。只在计划卡就绪时给开 —— 没读到
-    /// 那一份就无从追加或替换。
-    private(set) var powerEditorIndex: Int?
+    /// 🔴 **显式模式，不用可选下标**：新增没有「第几条」可指，可选下标会把
+    /// 新增态表示成 nil、与「弹窗没开」混同 —— 点「新增任务」就什么都不发生
+    /// （真机踩过：编辑好使、新增点不动）。
+    enum PowerEditor: Hashable {
+        /// 追加一条到表尾。
+        case add
+        /// 编辑第 `index` 条（预填现状）。
+        case edit(index: Int)
+    }
 
-    var showsPowerEditor: Bool { powerEditorIndex != nil }
+    private(set) var powerEditor: PowerEditor?
+
+    var showsPowerEditor: Bool { powerEditor != nil }
 
     func openPowerAdd() {
         guard powerSchedule.isReady else { return }
-        powerEditorIndex = nil
+        powerEditor = .add
     }
 
     func openPowerEdit(_ index: Int) {
         guard powerSchedule.isReady, powerSchedule.tasks.indices.contains(index) else { return }
-        powerEditorIndex = index
+        powerEditor = .edit(index: index)
     }
 
     func closePowerEditor() {
-        powerEditorIndex = nil
+        powerEditor = nil
     }
 
     // MARK: - 计划行右键菜单
@@ -1552,6 +1560,7 @@ final class AppState {
     ///   · `schedadd` 追加一条「周末 22:05 开机」并写回（离线时只动本地）；
     ///   · `scheddel=<n>` 删第 n 条并写回（离线时只动本地）；
     ///   · `schededitor` 开编辑弹窗（第 0 条，先灌 mock）—— 离线也能跑；
+    ///   · `schedaddopen` 开新增弹窗（先灌 mock）—— 离线也能跑；
     ///   · `failtoggle=<n>` 开「写回假失败」拨第 n 行：界面弹回去 + 页脚失败行，
     ///     专门验「失败 → 本地回滚」这条腿（不发请求）；
     ///   · `schedroundtrip` 整条写回链路：拨 → 等写回 → 回读核对 → 拨回 → 等 →
@@ -1570,6 +1579,10 @@ final class AppState {
                 powerSchedule.injectMock()
                 openPowerEdit(0)
                 NSLog("[sched] 开编辑弹窗（第 0 条，灌了 mock 数据）")
+            } else if token == "schedaddopen" {
+                powerSchedule.injectMock()
+                openPowerAdd()
+                NSLog("[sched] 开新增弹窗（灌了 mock 数据）")
             } else if token == "schedadd" {
                 Task {
                     _ = await powerSchedule.commit(PowerTask(
@@ -1587,7 +1600,7 @@ final class AppState {
             $0.trimmingCharacters(in: .whitespaces)
         }
         if !parts.isEmpty,
-           parts.allSatisfy({ $0 == "schedmock" || $0 == "schededitor"
+           parts.allSatisfy({ $0 == "schedmock" || $0 == "schededitor" || $0 == "schedaddopen"
                               || $0 == "schedadd" || $0.hasPrefix("scheddel=") }) {
             for token in parts { runOffline(token) }
             return

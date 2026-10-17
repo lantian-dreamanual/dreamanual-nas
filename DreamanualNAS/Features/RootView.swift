@@ -89,17 +89,25 @@ struct RootView: View {
         }
         // 新增 / 编辑开关机计划（计划卡页脚 / 空表静场 / 行右键菜单）。
         // 与写操作弹窗同一挂法、同一层序。编辑模式预填那一条的现状；
-        // 下标失效（写回刚把它删了）时按新增开。
+        // 下标失效（写回刚把它删了）时按新增开。`.id` 挂在模式上 ——
+        // add ↔ edit 换模式时弹窗要整个重造，@State 才会按新模式的初值重来。
         .dmModal(
             isPresented: state.showsPowerEditor,
             onDismiss: { state.closePowerEditor() }
         ) {
-            if let index = state.powerEditorIndex,
-               let task = powerScheduleTask(at: index) {
-                PowerAddCard(mode: .edit(index: index, task: task))
-            } else {
-                PowerAddCard(mode: .add)
+            Group {
+                switch state.powerEditor {
+                case .edit(let index):
+                    if let task = powerScheduleTask(at: index) {
+                        PowerAddCard(mode: .edit(index: index, task: task))
+                    } else {
+                        PowerAddCard(mode: .add)
+                    }
+                default:
+                    PowerAddCard(mode: .add)
+                }
             }
+            .id(state.powerEditor)
         }
         // 计划行右键菜单（编辑 / 删除）：与歌曲 / 文件菜单同一归属、同一套摆位。
         .overlay { powerRowMenuLayer }
