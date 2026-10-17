@@ -59,7 +59,11 @@ struct ConnectView: View {
             }
 
             field("口令") {
-                SecureField("DSM 密码", text: $password)
+                SecureField(
+                    // 有存凭据时空着也行：连接时会取本机存的那条。
+                    password.isEmpty && state.hasSavedPassword(for: selectedMethod)
+                        ? "留空则用已保存的口令" : "DSM 密码",
+                    text: $password)
                     .formField(on: .card)
                     .onSubmit { submit() }
             }
@@ -120,12 +124,19 @@ struct ConnectView: View {
         // 用户亲手接方向盘：停掉后台的自动连重试，别跟这一把抢。
         state.cancelAutoConnect()
         // 分段选哪种就按哪种连 —— 直连地址字段残留着不改变这一点。
-        let method: AppState.ConnectMethod = mode == .direct ? .direct : .quickconnect
-        Task { await state.connect(password: password, method: method) }
+        Task { await state.connect(password: password, method: selectedMethod) }
+    }
+
+    /// 分段当前选的连接方式，传给 `connect` 与存凭据判断。
+    private var selectedMethod: AppState.ConnectMethod {
+        mode == .direct ? .direct : .quickconnect
     }
 
     private var isSubmitDisabled: Bool {
-        state.phase.isBusy || password.isEmpty
+        // 口令为空时，本机存过这条端点的凭据也放行（connect 里会取来用）。
+        let passwordReady = !password.isEmpty
+            || state.hasSavedPassword(for: selectedMethod)
+        return state.phase.isBusy || !passwordReady
             || (mode == .quickconnect && state.qcID.isEmpty)
             || (mode == .direct && DirectAddress.parse(state.directAddress) == nil)
     }

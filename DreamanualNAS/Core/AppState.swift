@@ -2957,6 +2957,23 @@ final class AppState {
         let qc = trimmedQCID
         let user = trimmedUsername
 
+        // 口令框留空 = 用本机存的这条端点凭据（连接页在「有存凭据」时才
+        // 放行空口令）。成功连接时存的键就是 `endpointKey(for: method)`，
+        // 这里按同一把键取，两边不会错位。
+        let effectivePassword: String
+        if password.isEmpty {
+            guard let saved = CredentialStore.load(
+                endpointID: endpointKey(for: method), username: user), !saved.isEmpty
+            else {
+                lastConnectError = QuickConnectError.badResponse("先填口令")
+                phase = .failed("先填口令")
+                return
+            }
+            effectivePassword = saved
+        } else {
+            effectivePassword = password
+        }
+
         do {
             let client: SynologyClient
             switch method {
@@ -2984,7 +3001,7 @@ final class AppState {
 
             phase = .loggingIn
             NSLog("[connect] probe 前")
-            let manager = SessionManager(client: client, account: user, password: password)
+            let manager = SessionManager(client: client, account: user, password: effectivePassword)
 
             // 会话是否真能用，拿一次心跳说话 —— 登录成功但权限不对是另一回事。
             try await manager.probe()
@@ -3020,9 +3037,10 @@ final class AppState {
             // 不占主线程。方式一并记下 —— 端点键与自动连都按它走。
             lastMethod = method
             defaults.set(Self.raw(of: method), forKey: Keys.method)
-            let key = endpointKey
+            let key = endpointKey(for: method)
+            let savedPassword = effectivePassword
             Task.detached(priority: .utility) {
-                CredentialStore.save(password: password, endpointID: key, username: user)
+                CredentialStore.save(password: savedPassword, endpointID: key, username: user)
             }
         } catch {
             lastConnectError = error
@@ -3158,18 +3176,29 @@ final class AppState {
     /// 凭据条目的键：QuickConnect ID 与直连地址是两个不同的「端点身份」，
     /// 各自记各自的凭据，切换连接方式不会互相覆盖。
     ///
-    /// 按上一次成功连接的方式取（`lastMethod`）；没有记录（升级前的存量）
-    /// 退回旧判定 —— 直连地址填了就算直连，与旧行为一致、凭据条目不变。
-    private var endpointKey: String {
-        switch lastMethod {
+    /// 按「这次要用哪种方式连」取键；没有方式可选（升级前的存量）退回
+    /// 旧判定 —— 直连地址填了就算直连，与旧行为一致、凭据条目不变。
+    func endpointKey(for method: ConnectMethod) -> String {
+        switch method {
         case .quickconnect:
             return "qc:\(trimmedQCID)"
-        case .direct, nil:
+        case .direct:
             if let direct = DirectAddress.parse(directAddress) {
                 return "direct:\(direct.host):\(direct.port)"
             }
             return "qc:\(trimmedQCID)"
         }
+    }
+
+    /// 不指定方式时的端点键（自动连 / 重启等待读凭据用）：按 `resumeMethod`。
+    private var endpointKey: String { endpointKey(for: resumeMethod) }
+
+    /// 这条端点 + 账号在本机存过口令吗。连接页据此允许口令框留空。
+    func hasSavedPassword(for method: ConnectMethod) -> Bool {
+        guard let saved = CredentialStore.load(endpointID: endpointKey(for: method),
+                                               username: trimmedUsername)
+        else { return false }
+        return !saved.isEmpty
     }
 
     /// 表单值发出去之前剪掉首尾空白。存储的那份保持原样 —— 一边敲一边被改，
