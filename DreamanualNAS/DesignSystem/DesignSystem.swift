@@ -1738,6 +1738,63 @@ struct HeaderGrabber: NSViewRepresentable {
     }
 }
 
+/// 表头列边界上的**调宽把手**：贴在格子 trailing 边缘的窄热区，按下拖动改列宽。
+///
+/// 为什么是 SwiftUI 手势而不是像 `HeaderGrabber` 那样走 AppKit 接管层：调宽是
+/// **拖**、冒烟通路验不了 SwiftUI 手势（合成事件进不来），但用户真机拖拽走得通
+/// （队列行的拖动改序同一条路）；而表头格子上的**点击排序**必须走接管层 ——
+/// 所以两层共存：把手只占边缘 7px 热区（overlay 压在接管层之上，先命中），
+/// 格子中间仍归 `HeaderGrabber`。
+///
+/// 形态：悬停 / 拖动中显示 3px 主色竖线（与改列序的落点竖线同一语言），光标换
+/// 左右调宽。拖动回调**绝对宽度**（起始宽 + 位移），clamp 由调用方做。
+struct ColumnResizer: View {
+    /// 当前列宽 —— 拖动的起点宽（手势开始那一刻捕获一次）。
+    let width: CGFloat
+    let onResize: (CGFloat) -> Void
+
+    @State private var isHovered = false
+    @State private var isDragging = false
+    @State private var startWidth: CGFloat = 0
+
+    /// 热区宽。比可见线（3px）宽出一截，别让人对着边界线瞄半天。
+    private static let hitWidth: CGFloat = 7
+
+    var body: some View {
+        ZStack {
+            if isHovered || isDragging {
+                Rectangle()
+                    .fill(Color.dmAccent2)
+                    .frame(width: DmLine.bold)
+            }
+        }
+        .frame(width: Self.hitWidth)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            isHovered = inside
+            if inside {
+                NSCursor.resizeLeftRight.set()
+            } else if !isDragging {
+                NSCursor.arrow.set()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    if !isDragging {
+                        isDragging = true
+                        startWidth = width
+                    }
+                    onResize(startWidth + value.translation.width)
+                }
+                .onEnded { _ in
+                    isDragging = false
+                    if !isHovered { NSCursor.arrow.set() }
+                }
+        )
+    }
+}
+
 /// 搜索框：高钉控件档 32、圆角 `r-8`、底按所在面取相邻一档、`line-2` 1px 描边；
 /// 左侧放大镜 14（`ink-3`），横向内边距 12、图标与输入之间 8；聚焦只转描边
 /// （`accent-2`）、底色不动；有内容时右侧出清除钮。宽度由调用点给

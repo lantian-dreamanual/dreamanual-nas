@@ -389,11 +389,35 @@ final class LibraryModel {
         static let sortField = "nas.library.sortField"
         static let sortAscending = "nas.library.sortAscending"
         static let columns = "nas.library.columns"
+        static let columnWidths = "nas.library.columnWidths"
+    }
+
+    /// 列宽覆盖（拖表头右缘改的），跨重启保留。只收固定列 —— 标题列自适应、
+    /// 永远吃视口余量，不在这里面。表头与行共用同一份。
+    var columnWidths: [TrackField: CGFloat] = [:] {
+        didSet { storeColumnWidths() }
     }
 
     init() {
         sort = Self.storedSort()
         visibleColumns = Self.storedColumns()
+        columnWidths = Self.storedColumnWidths()
+    }
+
+    /// 拖宽落模型：clamp 到下限，取整（半个像素的列宽没有意义）。
+    func setColumnWidth(_ width: CGFloat, for field: TrackField) {
+        guard field.width != nil else { return }
+        let next = max(TrackMetrics.minColumnWidth, width.rounded())
+        if next == field.fixedWidth {
+            columnWidths[field] = nil   // 拖回默认宽 = 清掉覆盖
+        } else {
+            columnWidths[field] = next
+        }
+    }
+
+    /// 一列的实际宽度：覆盖优先，默认值兜底。
+    func effectiveWidth(_ field: TrackField) -> CGFloat {
+        columnWidths[field] ?? field.fixedWidth
     }
 
     /// 点表头：同一列切换正序 / 倒序，换一列从正序起（原型「点表头切换正序 / 倒序」）。
@@ -462,14 +486,43 @@ final class LibraryModel {
         storeColumns()
     }
 
-    /// 恢复默认字段：八列全开、回到默认顺序。
+    /// 恢复默认字段：八列全开、回到默认顺序，**拖宽的覆盖一并清掉** ——
+    /// 「恢复默认」就该连宽度一起回默认。
     func resetColumns() {
         visibleColumns = TrackField.allCases
+        columnWidths = [:]
         defaults.removeObject(forKey: PrefKey.columns)
+        defaults.removeObject(forKey: PrefKey.columnWidths)
     }
 
     private func storeColumns() {
         defaults.set(visibleColumns.map(\.rawValue), forKey: PrefKey.columns)
+    }
+
+    private func storeColumnWidths() {
+        let raw = Dictionary(uniqueKeysWithValues: columnWidths.map { ($0.key.rawValue, Double($0.value)) })
+        defaults.set(raw, forKey: PrefKey.columnWidths)
+    }
+
+    /// 读回列宽覆盖。只收**有默认固定宽**的列（存档里混进标题列也不认），
+    /// 宽度 clamp 到下限 —— 存档被手改过也别让一列缩没。plist 里手写的
+    /// 整数经 CFPreferences 进来是 NSNumber，逐值转而不是整字典 cast。
+    private static func storedColumnWidths() -> [TrackField: CGFloat] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: PrefKey.columnWidths) else {
+            NSLog("[prefs] columnWidths 无存档")
+            return [:]
+        }
+        var result: [TrackField: CGFloat] = [:]
+        for (key, value) in raw {
+            // 数值优先（app 自己写的），字符串数字也认（手工改存档 / 外部工具）。
+            let width = (value as? NSNumber)?.doubleValue
+                ?? (value as? String).flatMap(Double.init)
+            guard let field = TrackField(rawValue: key), field.width != nil,
+                  let width else { continue }
+            result[field] = max(TrackMetrics.minColumnWidth, width)
+        }
+        NSLog("[prefs] columnWidths 读回 %d 项: %@", result.count, String(describing: result))
+        return result
     }
 
     /// 分页的两路必须服务端排序（理由见 `toggleSort`）。
@@ -827,14 +880,19 @@ enum TrackMetrics {
     static let configWidth: CGFloat = 32
     /// 标题列保底宽。固定列合计 536，主区一挤自适应列会被压成 0、整列凭空消失。
     static let titleMinWidth: CGFloat = 180
+    /// 固定列拖宽后的下限。再窄右对齐的数字格就贴边了（默认最窄的列是 48）。
+    static let minColumnWidth: CGFloat = 44
 
     /// 表格内容宽。视口比它宽时标题列吸收余量（铺满），比它窄时**横向滚动**
     /// —— 表头与行在同一个滚动容器里，一起滚，列不会各滚各的。
-    /// 固定列合计**与列序无关**（求和），所以这里只按「显示了哪几列」算。
-    static func contentWidth(viewport: CGFloat, visible: [TrackField]) -> CGFloat {
-        let fixed = visible
-            .filter { $0 != .title }
-            .reduce(CGFloat.zero) { $0 + $1.fixedWidth }
+    /// 固定列合计**与列序无关**（求和），所以这里只按「显示了哪几列」算；
+    /// 宽度优先取拖宽覆盖（`widths`），没有就用 `TrackField` 的默认值。
+    static func contentWidth(viewport: CGFloat, visible: [TrackField],
+                             widths: [TrackField: CGFloat] = [:]) -> CGFloat {
+        var fixed = CGFloat.zero
+        for field in visible where field != .title {
+            fixed += widths[field] ?? field.fixedWidth
+        }
         return max(viewport, titleMinWidth + fixed + configWidth)
     }
 }
@@ -860,17 +918,22 @@ private struct TrackTable: View {
             // 内容宽由可见列算出，标题列吸收余量 —— 窗口宽时与以前完全一样。
             GeometryReader { geo in
                 let width = TrackMetrics.contentWidth(viewport: geo.size.width,
-                                                      visible: model.visibleColumns)
+                                                      visible: model.visibleColumns,
+                                                      widths: model.columnWidths)
                 ScrollView(.horizontal) {
                     VStack(spacing: 0) {
                         TrackHeader(
                             sort: model.sort,
                             columns: model.visibleColumns,
+                            widths: model.columnWidths,
                             onSort: { field in
                                 Task { await model.toggleSort(field, on: manager) }
                             },
                             onConfigure: { model.showsFieldMenu = true },
                             onMove: { field, index in model.moveColumn(field, to: index) },
+                            onResize: { field, width in
+                                model.setColumnWidth(width, for: field)
+                            },
                             onFrames: { frames in model.headerFrames = frames }
                         )
 
@@ -882,6 +945,7 @@ private struct TrackTable: View {
                                         isSelected: model.selectedSongID == song.id,
                                         isPlaying: engine?.currentSong?.id == song.id,
                                         visible: model.visibleColumns,
+                                        widths: model.columnWidths,
                                         // 行尾留出字段配置那一格的空道，与表头对齐。
                                         trailingLane: TrackMetrics.configWidth
                                     ) {
@@ -956,10 +1020,14 @@ private struct TrackHeader: View {
     let sort: SongSort?
     /// 列序。与行共用同一份 —— 表头拖动改的就是它。
     let columns: [TrackField]
+    /// 列宽覆盖（拖右缘改的），与行共用同一份。
+    let widths: [TrackField: CGFloat]
     let onSort: (TrackField) -> Void
     let onConfigure: () -> Void
     /// 拖动落点：把一列插到第 `index` 位。
     let onMove: (TrackField, Int) -> Void
+    /// 拖右缘调宽：绝对宽度（clamp 在模型 `setColumnWidth` 里做）。
+    let onResize: (TrackField, CGFloat) -> Void
     /// 各格的位置（窗口坐标）报出去。落点判定在本视图里自己用，报出去是给冒烟通路
     /// 定位用的 —— AI 点不了 UI，只能自己合成鼠标事件，得先知道各格在哪儿。
     let onFrames: ([TrackField: CGRect]) -> Void
@@ -1008,11 +1076,20 @@ private struct TrackHeader: View {
         .foregroundColor(isDragging ? Color.dmAccent2 : Color.dmInk3)
         .padding(.horizontal, TrackMetrics.padH)
         .padding(.vertical, DmSpace.s8)
-        .modifier(ColumnWidth(field: field))
+        .modifier(ColumnWidth(field: field, override: widths[field]))
         .contentShape(Rectangle())
         // 一个格子上两个动作：点 = 排序、拖 = 改列序。用 AppKit 接管层而不是
         // SwiftUI 手势 —— 手势那条路合成事件验不到（见 `HeaderGrabber`）。
         .overlay { grabber(field) }
+        // 调宽把手压在接管层之上（后写的 overlay 在上层先命中）：只占右缘 7px，
+        // 格子中间仍归点击排序。固定列才给 —— 标题列自适应，没有「自己的宽」。
+        .overlay(alignment: .trailing) {
+            if field.width != nil {
+                ColumnResizer(width: widths[field] ?? field.fixedWidth) {
+                    onResize(field, $0)
+                }
+            }
+        }
         .overlay {
             if isDragging {
                 RoundedRectangle(cornerRadius: DmRadius.r4)
@@ -1086,13 +1163,16 @@ private struct TrackHeader: View {
     }
 }
 
-/// 列宽：标题列自适应（保底 `titleMinWidth`），其余按 `TrackField.width`。
-/// 表头与行共用 —— 两边的列必须一样宽，所以宽度只从 `TrackField` 来。
+/// 列宽：标题列自适应（保底 `titleMinWidth`），其余按列宽覆盖、没有就退回
+/// `TrackField.width` 的默认值。表头与行共用 —— 两边的列必须一样宽，
+/// 所以宽度只从这一份来（`override` 由模型 `effectiveWidth` 给）。
 private struct ColumnWidth: ViewModifier {
     let field: TrackField
+    /// 拖宽覆盖（模型 `columnWidths` 里那份）。`nil` = 用默认宽。
+    var override: CGFloat?
 
     func body(content: Content) -> some View {
-        if let width = field.width {
+        if let width = override ?? field.width {
             content.frame(width: width, alignment: field.isTrailing ? .trailing : .leading)
         } else {
             content.frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity,
@@ -1114,6 +1194,8 @@ struct TrackRow: View {
     /// 显示的列，**有序** —— 顺序即列序，与表头共用同一份。
     /// 默认全开：队列行与单视图台架那两处不关心列配置。
     var visible: [TrackField] = TrackField.allCases
+    /// 列宽覆盖（拖表头右缘改的），与表头共用同一份；空 = 全按默认宽。
+    var widths: [TrackField: CGFloat] = [:]
     /// 行尾空道宽。曲库表填 `TrackMetrics.configWidth`（与表头那格字段配置对齐），
     /// 没有这一格的表（队列）留 0。
     var trailingLane: CGFloat = 0
@@ -1133,6 +1215,7 @@ struct TrackRow: View {
         isSelected: Bool,
         isPlaying: Bool = false,
         visible: [TrackField] = TrackField.allCases,
+        widths: [TrackField: CGFloat] = [:],
         trailingLane: CGFloat = 0,
         onSelect: @escaping () -> Void,
         onPlay: (() -> Void)? = nil,
@@ -1143,6 +1226,7 @@ struct TrackRow: View {
         self.isSelected = isSelected
         self.isPlaying = isPlaying
         self.visible = visible
+        self.widths = widths
         self.trailingLane = trailingLane
         self.onSelect = onSelect
         self.onPlay = onPlay
@@ -1162,6 +1246,8 @@ struct TrackRow: View {
                     .foregroundColor(ListRowState.primaryForeground(isSelected: isPlaying))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    // 悬停给全名：列窄了内容吃进省略号，靠它看全（下同）。
+                    .help(song.title)
             }
             .padding(.horizontal, TrackMetrics.padH)
             // 标题列自适应，但**保底 `titleMinWidth`** —— 固定列合计 536，主区一挤
@@ -1227,7 +1313,7 @@ struct TrackRow: View {
                 onRate: onRate
             )
             .padding(.trailing, DmSpace.s8)
-            .modifier(ColumnWidth(field: .rating))
+            .modifier(ColumnWidth(field: .rating, override: widths[.rating]))
         }
     }
 
@@ -1239,7 +1325,8 @@ struct TrackRow: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .padding(.horizontal, TrackMetrics.padH)
-            .modifier(ColumnWidth(field: field))
+            .modifier(ColumnWidth(field: field, override: widths[field]))
+            .help(text)
     }
 
     @ViewBuilder
@@ -1250,7 +1337,8 @@ struct TrackRow: View {
             .lineLimit(1)
             .monospacedDigit()
             .padding(.horizontal, TrackMetrics.padH)
-            .modifier(ColumnWidth(field: field))
+            .modifier(ColumnWidth(field: field, override: widths[field]))
+            .help(text)
     }
 }
 

@@ -746,10 +746,7 @@ private struct SettingsPane: View {
     }
 
     private var versionText: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
-        let build = info?["CFBundleVersion"] as? String ?? "—"
-        return "\(short)（\(build)）"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 
     /// 检查结果的状态色：成功取 `ok-ink`、发现新版取 `accent-2`、失败取

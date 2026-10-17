@@ -542,21 +542,30 @@ enum FilesMetrics {
     /// 搜索框宽（原型 `.toolbar .right` 里 `.searchbox{width:200px}`）。
     /// 与选目标弹窗那个不同档：那个在弹窗里占满一行，这个挤在工具条右端。
     static let searchWidth: CGFloat = 200
+    /// 固定列拖宽后的下限。再窄右对齐的数字格就贴边了。
+    static let minColumnWidth: CGFloat = 60
 
     /// 内容宽 = `max(视口, 勾选列 + 名称保底 + 固定列之和)`；视口更宽时名称列吸收余量。
-    static func contentWidth(viewport: CGFloat) -> CGFloat {
-        let fixed = FileSortField.allCases.reduce(CGFloat.zero) { $0 + ($1.width ?? 0) }
+    /// 固定列宽优先取拖宽覆盖（`widths`），没有就用 `FileSortField` 的默认值。
+    static func contentWidth(viewport: CGFloat, widths: [FileSortField: CGFloat] = [:]) -> CGFloat {
+        var fixed = CGFloat.zero
+        for field in FileSortField.allCases {
+            fixed += widths[field] ?? (field.width ?? 0)
+        }
         return max(viewport, checkWidth + nameMinWidth + fixed)
     }
 }
 
 /// 列的宽度与对齐：名称列自适应、`size` 列右对齐（数值列）。
 /// 一个 `frame` 调用同时表达两种（固定列的 min == max，就钉死成那个宽）。
+/// 宽度优先取拖宽覆盖（`override`），没有就退回 `FileSortField.width` 默认值。
 private struct FileColumnWidth: ViewModifier {
     let field: FileSortField
+    /// 拖宽覆盖（模型 `columnWidths` 里那份）。`nil` = 用默认宽。
+    var override: CGFloat?
 
     func body(content: Content) -> some View {
-        let fixed = field.width
+        let fixed = override ?? field.width
         return content.frame(
             minWidth: fixed ?? FilesMetrics.nameMinWidth,
             maxWidth: fixed ?? .infinity,
@@ -587,7 +596,8 @@ private struct FilesTable: View {
     var body: some View {
         // 视口窄于内容时横向滚动（表头与行在同一个滚动容器里，一起滚）。
         GeometryReader { geo in
-            let width = FilesMetrics.contentWidth(viewport: geo.size.width)
+            let width = FilesMetrics.contentWidth(viewport: geo.size.width,
+                                                  widths: model.columnWidths)
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
                     header
@@ -602,7 +612,8 @@ private struct FilesTable: View {
                                     sizeText: model.sizeText(for: entry),
                                     isSelected: model.isSelected(entry.path),
                                     isChecked: model.isSelected(entry.path),
-                                    manager: manager
+                                    manager: manager,
+                                    columnWidths: model.columnWidths
                                 ) {
                                     onSelect(entry, Self.mode())
                                 } onToggleCheck: {
@@ -678,7 +689,7 @@ private struct FilesTable: View {
         .lineLimit(1)
         .padding(.horizontal, FilesMetrics.padH)
         .frame(height: FilesMetrics.headerHeight)
-        .modifier(FileColumnWidth(field: field))
+        .modifier(FileColumnWidth(field: field, override: model.columnWidths[field]))
         .contentShape(Rectangle())
         .overlay {
             HeaderGrabber(
@@ -688,6 +699,15 @@ private struct FilesTable: View {
                 isDraggable: false,
                 onFrame: { model.headerFrames[field] = $0 }
             )
+        }
+        // 调宽把手压在接管层之上（后写的 overlay 在上层先命中）：只占右缘 7px，
+        // 格子中间仍归点击排序。与曲库表同一套（`ColumnResizer`）。
+        .overlay(alignment: .trailing) {
+            if field.width != nil {
+                ColumnResizer(width: model.effectiveWidth(field)) {
+                    model.setColumnWidth($0, for: field)
+                }
+            }
         }
         .help("点按按这一列排序")
     }
@@ -703,6 +723,8 @@ struct FileRow: View {
     /// 与「勾上」两件事各自可改 —— 表头全选、Cmd 加选都只动其中一侧时不必两边一起动。
     let isChecked: Bool
     let manager: SessionManager?
+    /// 列宽覆盖（拖表头右缘改的），与表头共用同一份；空 = 全按默认宽。
+    var columnWidths: [FileSortField: CGFloat] = [:]
     let onSelect: () -> Void
     let onToggleCheck: () -> Void
     let onOpen: () -> Void
@@ -729,6 +751,8 @@ struct FileRow: View {
                     .foregroundColor(ListRowState.primaryForeground(isSelected: isSelected))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    // 名称被省略号吃掉时悬停看全名。
+                    .help(entry.name)
             }
             .padding(.horizontal, FilesMetrics.padH)
             .modifier(FileColumnWidth(field: .name))
@@ -762,7 +786,8 @@ struct FileRow: View {
             .lineLimit(1)
             .monospacedDigit()
             .padding(.horizontal, FilesMetrics.padH)
-            .modifier(FileColumnWidth(field: field))
+            .modifier(FileColumnWidth(field: field, override: columnWidths[field]))
+            .help(text)
     }
 }
 
