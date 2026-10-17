@@ -546,13 +546,13 @@ enum FilesMetrics {
     static let minColumnWidth: CGFloat = 60
 
     /// 内容宽 = `max(视口, 勾选列 + 名称保底 + 固定列之和)`；视口更宽时名称列吸收余量。
-    /// 固定列宽优先取拖宽覆盖（`widths`），没有就用 `FileSortField` 的默认值。
+    /// 固定列宽优先取拖宽覆盖（`widths`）；名称列的覆盖是**最小宽**，下限跟着它走。
     static func contentWidth(viewport: CGFloat, widths: [FileSortField: CGFloat] = [:]) -> CGFloat {
         var fixed = CGFloat.zero
         for field in FileSortField.allCases {
             fixed += widths[field] ?? (field.width ?? 0)
         }
-        return max(viewport, checkWidth + nameMinWidth + fixed)
+        return max(viewport, checkWidth + (widths[.name] ?? nameMinWidth) + fixed)
     }
 }
 
@@ -565,10 +565,12 @@ private struct FileColumnWidth: ViewModifier {
     var override: CGFloat?
 
     func body(content: Content) -> some View {
-        let fixed = override ?? field.width
+        // 名称列：min = 覆盖 ?? 保底、max 恒 .infinity —— 覆盖是**最小宽**；
+        // 固定列：min == max == 覆盖 ?? 默认宽 —— 钉死。一个 frame 调用表达两种。
+        let pinned = override ?? field.width
         return content.frame(
-            minWidth: fixed ?? FilesMetrics.nameMinWidth,
-            maxWidth: fixed ?? .infinity,
+            minWidth: field.width == nil ? (override ?? FilesMetrics.nameMinWidth) : pinned,
+            maxWidth: field.width == nil ? nil : pinned,
             alignment: field.isNumeric ? .trailing : .leading
         )
     }
@@ -691,8 +693,9 @@ private struct FilesTable: View {
         .frame(height: FilesMetrics.headerHeight)
         .modifier(FileColumnWidth(field: field, override: model.columnWidths[field]))
         .contentShape(Rectangle())
-        // 🔴 对齐必须显式 .leading：overlay 默认居中，缩窄后的接管层仍压住
-        // 热区内半截，把手只剩外沿一半（同日二抓）。贴左缘才让得干净。
+        // 🔴 接管层要从右缘让出 `hitWidth`：平台视图命中测试先于 SwiftUI 层，
+        // 整格罩住时调宽把手收不到事件（2026-10-18 用户实抓）；对齐必须显式
+        // .leading —— overlay 默认居中，缩窄后仍压住热区内半截（同日二抓）。
         .overlay(alignment: .leading) {
             HeaderGrabber(
                 onClick: { Task { await model.toggleSort(field, on: manager) } },
@@ -701,26 +704,13 @@ private struct FilesTable: View {
                 isDraggable: false,
                 onFrame: { model.headerFrames[field] = $0 }
             )
-            // 🔴 固定列要把接管层从右缘让出 `hitWidth`：平台视图命中测试
-            // 先于 SwiftUI 层，整格罩住时调宽把手收不到事件（2026-10-18
-            // 用户实抓）。名称列自适应、没有把手，不用让。
-            .padding(.trailing, field.width != nil ? ColumnResizer.hitWidth : 0)
+            .padding(.trailing, ColumnResizer.hitWidth)
         }
-        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。与曲库表
-        // 同一套（`ColumnResizer`）。
+        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。**全列都给**
+        // —— 名称列拖出的是最小宽，视口有富余时仍吸收余量。与曲库表同一套。
         .overlay(alignment: .trailing) {
-            if field.width != nil {
-                ColumnResizer(width: model.effectiveWidth(field)) {
-                    model.setColumnWidth($0, for: field)
-                }
-            }
-        }
-        // 名称列右缘的常驻分隔线：固定列的那根由把手画，这里补上同一根。
-        .overlay(alignment: .trailing) {
-            if field.width == nil {
-                Rectangle()
-                    .fill(Color.dmLine2)
-                    .frame(width: DmLine.base)
+            ColumnResizer(width: model.effectiveWidth(field)) {
+                model.setColumnWidth($0, for: field)
             }
         }
         .help("点按按这一列排序")
@@ -769,7 +759,7 @@ struct FileRow: View {
                     .help(entry.name)
             }
             .padding(.horizontal, FilesMetrics.padH)
-            .modifier(FileColumnWidth(field: .name))
+            .modifier(FileColumnWidth(field: .name, override: columnWidths[.name]))
 
             // 大小格吃参数不吃 `entry.sizeText` —— 目录的体积在 `sizes` 缓存里，
             // 条目本身永远没有（`List` 不给目录字节数）。

@@ -1763,6 +1763,10 @@ struct ColumnResizer: View {
     @State private var isHovered = false
     @State private var isDragging = false
     @State private var startWidth: CGFloat = 0
+    /// 拖动起点的**全局**坐标。位移必须在全局系里量 —— 把手贴在被调宽的边缘上，
+    /// 视图坐标系里量的话列一动视图跟着动，位移被反馈吃掉，拖起来疯狂抖动
+    /// （2026-10-18 用户实抓）。
+    @State private var startLocation: CGPoint = .zero
 
     /// 热区宽。比可见线（3px）宽出一截，别让人对着边界线瞄半天。
     /// **internal**：调用方拿它把 `HeaderGrabber` 从右缘让出同样宽。
@@ -1792,13 +1796,14 @@ struct ColumnResizer: View {
             }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
                     if !isDragging {
                         isDragging = true
                         startWidth = width
+                        startLocation = value.startLocation
                     }
-                    onResize(startWidth + value.translation.width)
+                    onResize(startWidth + value.location.x - startLocation.x)
                 }
                 .onEnded { _ in
                     isDragging = false

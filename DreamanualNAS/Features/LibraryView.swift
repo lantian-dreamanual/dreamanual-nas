@@ -392,8 +392,9 @@ final class LibraryModel {
         static let columnWidths = "nas.library.columnWidths"
     }
 
-    /// 列宽覆盖（拖表头右缘改的），跨重启保留。只收固定列 —— 标题列自适应、
-    /// 永远吃视口余量，不在这里面。表头与行共用同一份。
+    /// 列宽覆盖（拖表头右缘改的），跨重启保留。**全列都收** —— 标题列的
+    /// 覆盖是**最小宽**（自适应语义不变，见 `ColumnWidth`），其余列是钉死宽。
+    /// 表头与行共用同一份。
     var columnWidths: [TrackField: CGFloat] = [:] {
         didSet { storeColumnWidths() }
     }
@@ -405,10 +406,11 @@ final class LibraryModel {
     }
 
     /// 拖宽落模型：clamp 到下限，取整（半个像素的列宽没有意义）。
+    /// 拖回默认宽就清掉覆盖（标题列默认 `titleMinWidth`）。
     func setColumnWidth(_ width: CGFloat, for field: TrackField) {
-        guard field.width != nil else { return }
         let next = max(TrackMetrics.minColumnWidth, width.rounded())
-        if next == field.fixedWidth {
+        let fallback = field.width ?? TrackMetrics.titleMinWidth
+        if next == fallback {
             columnWidths[field] = nil   // 拖回默认宽 = 清掉覆盖
         } else {
             columnWidths[field] = next
@@ -504,9 +506,9 @@ final class LibraryModel {
         defaults.set(raw, forKey: PrefKey.columnWidths)
     }
 
-    /// 读回列宽覆盖。只收**有默认固定宽**的列（存档里混进标题列也不认），
-    /// 宽度 clamp 到下限 —— 存档被手改过也别让一列缩没。plist 里手写的
-    /// 整数经 CFPreferences 进来是 NSNumber，逐值转而不是整字典 cast。
+    /// 读回列宽覆盖。**全列都收**（标题列的覆盖是最小宽），宽度 clamp 到
+    /// 下限 —— 存档被手改过也别让一列缩没。plist 里手写的整数经 CFPreferences
+    /// 进来是 NSNumber，逐值转而不是整字典 cast。
     private static func storedColumnWidths() -> [TrackField: CGFloat] {
         guard let raw = UserDefaults.standard.dictionary(forKey: PrefKey.columnWidths) else {
             NSLog("[prefs] columnWidths 无存档")
@@ -517,8 +519,7 @@ final class LibraryModel {
             // 数值优先（app 自己写的），字符串数字也认（手工改存档 / 外部工具）。
             let width = (value as? NSNumber)?.doubleValue
                 ?? (value as? String).flatMap(Double.init)
-            guard let field = TrackField(rawValue: key), field.width != nil,
-                  let width else { continue }
+            guard let field = TrackField(rawValue: key), let width else { continue }
             result[field] = max(TrackMetrics.minColumnWidth, width)
         }
         NSLog("[prefs] columnWidths 读回 %d 项: %@", result.count, String(describing: result))
@@ -893,7 +894,8 @@ enum TrackMetrics {
         for field in visible where field != .title {
             fixed += widths[field] ?? field.fixedWidth
         }
-        return max(viewport, titleMinWidth + fixed + configWidth)
+        // 标题列的覆盖是**最小宽**：内容宽下限跟着它走，视口更宽仍吸收余量。
+        return max(viewport, (widths[.title] ?? titleMinWidth) + fixed + configWidth)
     }
 }
 
@@ -1080,31 +1082,18 @@ private struct TrackHeader: View {
         .contentShape(Rectangle())
         // 一个格子上两个动作：点 = 排序、拖 = 改列序。用 AppKit 接管层而不是
         // SwiftUI 手势 —— 手势那条路合成事件验不到（见 `HeaderGrabber`）。
-        // 🔴 固定列要把接管层从右缘让出 `hitWidth`：接管层是平台视图，命中
-        // 测试先于 SwiftUI 层，整个格子罩住时调宽把手收不到任何事件
-        // （2026-10-18 用户实抓）。标题列没有把手，不用让。
-        // 🔴 对齐必须显式 .leading：overlay 默认居中，缩窄后的接管层仍压住
-        // 热区内半截，把手只剩外沿一半（同日二抓）。贴左缘才让得干净。
+        // 🔴 接管层要从右缘让出 `hitWidth`：平台视图命中测试先于 SwiftUI 层，
+        // 整格罩住时调宽把手收不到任何事件（2026-10-18 用户实抓）；对齐必须
+        // 显式 .leading —— overlay 默认居中，缩窄后仍压住热区内半截（同日二抓）。
         .overlay(alignment: .leading) {
             grabber(field)
-                .padding(.trailing, field.width != nil ? ColumnResizer.hitWidth : 0)
+                .padding(.trailing, ColumnResizer.hitWidth)
         }
-        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。固定列才给
-        // —— 标题列自适应，没有「自己的宽」；它的右缘分隔线在下面补。
+        // 调宽把手：只占右缘 7px 热区，格子中间仍归点击排序。**全列都给**
+        // —— 标题列拖出的是最小宽，视口有富余时仍吸收余量。
         .overlay(alignment: .trailing) {
-            if field.width != nil {
-                ColumnResizer(width: widths[field] ?? field.fixedWidth) {
-                    onResize(field, $0)
-                }
-            }
-        }
-        // 标题列右缘的常驻分隔线：固定列的那根由把手画（悬停转主色），
-        // 标题列没有把手，这里补上同一根，全表每条列边界都可见。
-        .overlay(alignment: .trailing) {
-            if field.width == nil {
-                Rectangle()
-                    .fill(Color.dmLine2)
-                    .frame(width: DmLine.base)
+            ColumnResizer(width: widths[field] ?? (field.width ?? TrackMetrics.titleMinWidth)) {
+                onResize(field, $0)
             }
         }
         .overlay {
@@ -1189,12 +1178,14 @@ private struct ColumnWidth: ViewModifier {
     var override: CGFloat?
 
     func body(content: Content) -> some View {
-        if let width = override ?? field.width {
-            content.frame(width: width, alignment: field.isTrailing ? .trailing : .leading)
-        } else {
-            content.frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity,
-                          alignment: field.isTrailing ? .trailing : .leading)
-        }
+        // 自适应列（标题）：min = 覆盖 ?? 保底、max 恒 .infinity —— 覆盖是**最小宽**；
+        // 固定列：min == max == 覆盖 ?? 默认宽 —— 钉死。一个 frame 调用表达两种。
+        let pinned = override ?? field.width
+        return content.frame(
+            minWidth: field.width == nil ? (override ?? TrackMetrics.titleMinWidth) : pinned,
+            maxWidth: field.width == nil ? nil : pinned,
+            alignment: field.isTrailing ? .trailing : .leading
+        )
     }
 }
 
@@ -1267,9 +1258,11 @@ struct TrackRow: View {
                     .help(song.title)
             }
             .padding(.horizontal, TrackMetrics.padH)
-            // 标题列自适应，但**保底 `titleMinWidth`** —— 固定列合计 536，主区一挤
-            // 自适应列会被压成 0、整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
-            .frame(minWidth: TrackMetrics.titleMinWidth, maxWidth: .infinity, alignment: .leading)
+            // 标题列自适应，**覆盖是最小宽**（与表头同一份）；无覆盖时保底
+            // `titleMinWidth` —— 固定列合计 536，主区一挤自适应列会被压成 0、
+            // 整列凭空消失（真机踩过）。标题列不可隐藏（主键列）。
+            .frame(minWidth: widths[.title] ?? TrackMetrics.titleMinWidth,
+                   maxWidth: .infinity, alignment: .leading)
 
             // 列序由模型给，行跟着表头一起换位（表头拖动改列序时两边同步）。
             ForEach(visible.filter { $0 != .title }) { field in

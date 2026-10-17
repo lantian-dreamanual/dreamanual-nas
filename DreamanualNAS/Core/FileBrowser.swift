@@ -79,8 +79,8 @@ final class FileBrowser {
         static let columnWidths = "nas.files.columnWidths"
     }
 
-    /// 列宽覆盖（拖表头右缘改的），跨重启保留。只收固定列 —— 名称列自适应、
-    /// 永远吃视口余量，不在这里面。表头与行共用同一份。
+    /// 列宽覆盖（拖表头右缘改的），跨重启保留。**全列都收** —— 名称列的
+    /// 覆盖是**最小宽**（自适应语义不变），其余列是钉死宽。表头与行共用同一份。
     var columnWidths: [FileSortField: CGFloat] = [:] {
         didSet { defaults.set(
             Dictionary(uniqueKeysWithValues: columnWidths.map { ($0.key.rawValue, Double($0.value)) }),
@@ -98,24 +98,24 @@ final class FileBrowser {
             for (key, value) in raw {
                 let width = (value as? NSNumber)?.doubleValue
                     ?? (value as? String).flatMap(Double.init)
-                guard let field = FileSortField(rawValue: key), field.width != nil,
-                      let width else { continue }
+                guard let field = FileSortField(rawValue: key), let width else { continue }
                 columnWidths[field] = max(FilesMetrics.minColumnWidth, width)
             }
         }
     }
 
     /// 拖宽落模型：clamp 到下限，取整（半个像素的列宽没有意义）。
-    /// 拖回默认宽就清掉覆盖，别让存档里堆着与默认同值的条目。
+    /// 拖回默认宽就清掉覆盖（名称列默认 `nameMinWidth`）。**全列都收**
+    /// —— 名称列的覆盖是**最小宽**（自适应语义不变，见 `FileColumnWidth`）。
     func setColumnWidth(_ width: CGFloat, for field: FileSortField) {
-        guard field.width != nil else { return }
         let next = max(FilesMetrics.minColumnWidth, width.rounded())
-        columnWidths[field] = next == field.width ? nil : next
+        let fallback = field.width ?? FilesMetrics.nameMinWidth
+        columnWidths[field] = next == fallback ? nil : next
     }
 
-    /// 一列的实际宽度：覆盖优先，默认值兜底。
+    /// 一列的实际宽度：覆盖优先，默认值兜底（名称列没有固定宽，兜底取保底宽）。
     func effectiveWidth(_ field: FileSortField) -> CGFloat {
-        columnWidths[field] ?? (field.width ?? 0)
+        columnWidths[field] ?? (field.width ?? FilesMetrics.nameMinWidth)
     }
 
     // MARK: - 装载
