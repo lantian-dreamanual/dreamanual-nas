@@ -561,11 +561,11 @@ private struct SettingsPane: View {
                         Button("重新连接") {
                             Task { await state.reconnect() }
                         }
-                        .buttonStyle(SecondaryButtonStyle())
+                        .buttonStyle(SecondaryButtonStyle(on: .card))
                         Button("断开连接") {
                             Task { await state.disconnect() }
                         }
-                        .buttonStyle(SecondaryButtonStyle())
+                        .buttonStyle(SecondaryButtonStyle(on: .card))
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, DmSpace.s14)

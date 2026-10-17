@@ -253,9 +253,10 @@ private struct PowerActionRow: View {
             }
             Spacer(minLength: 0)
             // 两颗入口同构（次按钮描边）—— 危险语义全留给确认弹窗里的执行钮，
-            // 卡面上红实心与描边并排是对撞不是层级。
+            // 卡面上红实心与描边并排是对撞不是层级。卡面档（`panel-3` 底）：
+            // 电源卡是 `dmCard()`，面板档画在这里与卡面同色，看不出是按钮。
             Button(action: action) { label }
-                .buttonStyle(SecondaryButtonStyle())
+                .buttonStyle(SecondaryButtonStyle(on: .card))
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s10)

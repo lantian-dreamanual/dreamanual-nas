@@ -289,7 +289,7 @@ struct PowerScheduleCard: View {
             Spacer(minLength: DmSpace.s12)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(SecondaryButtonStyle())
+                    .buttonStyle(SecondaryButtonStyle(on: .card))
             }
         }
         .padding(.horizontal, DmSpace.s14)
@@ -310,7 +310,7 @@ struct PowerScheduleCard: View {
             }
             Spacer(minLength: DmSpace.s12)
             Button("新增任务") { state.openPowerAdd() }
-                .buttonStyle(SecondaryButtonStyle())
+                .buttonStyle(SecondaryButtonStyle(on: .card))
                 .disabled(model.isWriting)
         }
         .padding(.horizontal, DmSpace.s14)

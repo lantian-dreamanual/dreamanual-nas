@@ -479,7 +479,17 @@ struct PrimaryButtonStyle: ButtonStyle {
 
 /// 次按钮：紧凑规格（高 28 / 横向内边距 10 / 圆角 6 / 字号 12）。
 /// 面板内的小动作与弹窗页脚用它。
+///
+/// `on:` 按落点分两档 —— 与输入框 `formField(on:)` 同一条规矩：控件落在
+/// **卡面上要抬一档**。卡面（`dmCard()` / 设置分组卡）是 `panel-2`，而描边
+/// `line` 与 `panel-2` 同值（都是 `neutral-800`）—— 照面板档画出来，按钮
+/// 底色与卡面同色、描边也看不见，整颗按钮只剩一行 12 号字（2026-10-17
+/// 用户反馈「按钮看着不明显，不像是按钮」）。卡面档抬到 `panel-3` 才有
+/// 填充感，描边同取 `line-2`。
 struct SecondaryButtonStyle: ButtonStyle {
+    /// 落点：`.panel` 主区 / 弹窗（底色 `panel`），`.card` 卡面（`panel-2`）。
+    var on: DmSurface = .panel
+
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
@@ -492,14 +502,27 @@ struct SecondaryButtonStyle: ButtonStyle {
             .frame(height: DmControl.h28)
             .background(
                 RoundedRectangle(cornerRadius: DmRadius.r6)
-                    .fill(isEnabled && isHovered ? Color.dmPanel3 : Color.dmPanel2)
+                    .fill(fill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DmRadius.r6)
-                    .strokeBorder(Color.dmLine, lineWidth: DmLine.base)
+                    .strokeBorder(stroke, lineWidth: DmLine.base)
             )
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
             .onHover { isHovered = $0 }
+    }
+
+    /// 卡面档悬停只提字色：`panel-3` 是面板梯度最亮一档，没有更亮的底可换，
+    /// 换更暗会读成「已按下」。
+    private var fill: Color {
+        switch on {
+        case .panel: return isEnabled && isHovered ? Color.dmPanel3 : Color.dmPanel2
+        case .card: return Color.dmPanel3
+        }
+    }
+
+    private var stroke: Color {
+        on == .panel ? Color.dmLine : Color.dmLine2
     }
 }
 
