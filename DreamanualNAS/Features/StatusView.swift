@@ -210,12 +210,12 @@ private struct PowerCard: View {
             .padding(.bottom, DmSpace.s10)
 
             PowerActionRow(icon: "power", title: "立刻关机", note: nil,
-                           button: "关机…", isDanger: true) {
+                           button: "关机…") {
                 state.openPowerConfirm(.shutdown)
             }
             PowerActionRow(icon: "refresh-cw", title: "重新启动",
                            note: "约 2 分钟后恢复在线",
-                           button: "重启…", isDanger: false) {
+                           button: "重启…") {
                 state.openPowerConfirm(.reboot)
             }
         }
@@ -229,7 +229,6 @@ private struct PowerActionRow: View {
     let title: String
     let note: String?
     let button: String
-    let isDanger: Bool
     let action: () -> Void
 
     private var label: some View {
@@ -253,13 +252,10 @@ private struct PowerActionRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if isDanger {
-                Button(action: action) { label }
-                    .buttonStyle(DangerButtonStyle())
-            } else {
-                Button(action: action) { label }
-                    .buttonStyle(SecondaryButtonStyle())
-            }
+            // 两颗入口同构（次按钮描边）—— 危险语义全留给确认弹窗里的执行钮，
+            // 卡面上红实心与描边并排是对撞不是层级。
+            Button(action: action) { label }
+                .buttonStyle(SecondaryButtonStyle())
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s10)
