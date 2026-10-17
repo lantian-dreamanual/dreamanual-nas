@@ -1562,6 +1562,13 @@ final class AppState {
             return
         }
 
+        // 冒烟 token 在启动瞬间就被消费，自动连却是异步的 —— 先等连接落定
+        // （最多 30 秒）再走后面的判据；凭据不对的失败也一样等满，冒烟场景可接受。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager else {
             NSLog("[status] 未连接，跳过（phase=%@）", String(describing: phase))
             return
