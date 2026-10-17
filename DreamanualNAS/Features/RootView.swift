@@ -556,6 +556,10 @@ private struct SettingsPane: View {
                             .foregroundColor(Color.dmInk2)
                     }
                     settingsNote("每 4 分钟一次心跳，会话失效自动重登并重放当前请求。")
+                    // 直连地址填了就走直连、没填走 QuickConnect：把结果写在
+                    // 按钮上方，点之前就知道会连到哪（用户报过「填了直连重连
+                    // 还是中继」，就是这里没对齐）。
+                    settingsNote("「重新连接」将走：\(state.reconnectTargetLabel)")
                     HStack(spacing: DmSpace.s8) {
                         // 两颗同档次按钮（与电源卡同一口径）：卡面上不抢层级，
                         // 真要破坏性操作的语义留给它自己的后果提示。

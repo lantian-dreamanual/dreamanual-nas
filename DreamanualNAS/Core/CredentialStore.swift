@@ -35,12 +35,28 @@ enum CredentialStore {
     }
 
     /// 只读文件。没有就是没有 —— 绝不碰钥匙串（见类型注释）。
+    ///
+    /// 端点键取不到时按账号回退：端点键区分的是「怎么连到这台 NAS」
+    /// （QuickConnect ID / 直连地址），账号口令是同一个。不这么做的话，
+    /// 换个线路（设置页填直连地址、或地址改了个端口）就得把口令再输一遍。
+    /// 同一账号存在多条**内容不同**的记录时才放弃 —— 那说明可能是两台
+    /// NAS 共用账号，猜错口令会把 DSM 的自动封锁喂起来。
     static func load(endpointID: String, username: String) -> String? {
         let dict = stored()
         let key = accountKey(endpointID: endpointID, username: username)
         if let value = dict[key], !value.isEmpty { return value }
         // 裸账号键兜底：钥匙串时代用户在终端里存过的那种写法，文件里也认。
         if let value = dict[username], !value.isEmpty { return value }
+        guard !username.isEmpty else { return nil }
+        let sameAccount = dict
+            .filter { $0.key.hasSuffix("|\(username)") && !$0.value.isEmpty }
+            .map(\.value)
+        let distinct = Set(sameAccount)
+        if distinct.count == 1 { return distinct.first }
+        if distinct.count > 1 {
+            NSLog("[credential] 账号 %@ 有 %d 条不同口令，端点键 %@ 取不到，不猜",
+                  username, distinct.count, endpointID)
+        }
         return nil
     }
 

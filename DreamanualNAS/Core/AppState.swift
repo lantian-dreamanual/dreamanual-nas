@@ -174,6 +174,28 @@ final class AppState {
     private var resumeMethod: ConnectMethod {
         lastMethod ?? (DirectAddress.parse(directAddress) != nil ? .direct : .quickconnect)
     }
+
+    /// 设置页「重新连接」按**当前配置**走：直连地址填了就走直连。
+    ///
+    /// 与 `resumeMethod` 的差别就是用户报的那个 bug —— 上次成功走的是中继
+    /// （比如在家先用 QuickConnect 连过），设置页里填好直连地址点「重新
+    /// 连接」，按上次成功的方式又回了中继。设置页那条说明写的是「填了优先
+    /// 于 QuickConnect」，行为得对得上它。
+    private var configuredMethod: ConnectMethod {
+        DirectAddress.parse(directAddress) != nil ? .direct : .quickconnect
+    }
+
+    /// 设置页「重新连接」这一步会连到哪 —— 换线路正是这只按钮的常见用途，
+    /// 点之前就得看得见结果，而不是点完从「线路」那一行才发现还是中继。
+    var reconnectTargetLabel: String {
+        switch configuredMethod {
+        case .direct:
+            guard let direct = DirectAddress.parse(directAddress) else { return "直连" }
+            return "直连 \(direct.host):\(direct.port)"
+        case .quickconnect:
+            return trimmedQCID.isEmpty ? "QuickConnect" : "QuickConnect · \(trimmedQCID)"
+        }
+    }
     var isConnected: Bool { phase == .connected }
 
     func select(_ module: Module) {
@@ -2942,16 +2964,31 @@ final class AppState {
         }
     }
 
-    /// `DM_CONNECT=qc|direct` 时由入口调用：按连接页同一条路连一次，口令留空
-    /// （走本机已存凭据），连完把诊断文件打出来。
+    /// `DM_CONNECT=qc|direct|reconnect` 时由入口调用：按连接页同一条路连一次，
+    /// 口令留空（走本机已存凭据），连完把诊断文件打出来。
+    /// `reconnect` 走的是设置页那颗按钮的同一条路（按当前配置选线路）。
     ///
     /// 为什么要有：真机核对「口令留空 → 用存凭据」这条路不能靠人手点，
     /// AI 点不了 UI（合成鼠标事件进不了 SwiftUI 手势系统）。
     func smokeConnect(_ command: String) async {
+        if command == "reconnect" {
+            NSLog("[connect] 冒烟(重连)：直连字段「%@」", directAddress)
+            await reconnect()
+            NSLog("[connect] 冒烟(重连)结果：phase=%@ · endpoint=%@ · link=%@",
+                  phase.label, endpointLabel, linkMode?.label ?? "—")
+            dumpConnectDiag()
+            return
+        }
         let method: ConnectMethod = command == "direct" ? .direct : .quickconnect
         await connect(password: "", method: method)
         NSLog("[connect] 冒烟结果：phase=%@ · endpoint=%@",
               phase.label, endpointLabel)
+        dumpConnectDiag()
+    }
+
+    /// 把最近一次连接诊断打到日志（冒烟通路用；诊断文件本身在
+    /// `~/Library/Application Support/DreamanualNAS/last-connect.json`）。
+    private func dumpConnectDiag() {
         let url = CredentialStore.fileURL.deletingLastPathComponent()
             .appendingPathComponent("last-connect.json")
         if let text = try? String(contentsOf: url, encoding: .utf8) {
@@ -3060,8 +3097,8 @@ final class AppState {
         // 口令框留空 = 用本机存的这条端点凭据（连接页在「有存凭据」时才
         // 放行空口令）。成功连接时存的键就是 `endpointKey(for: method)`，
         // 这里按同一把键取，两边不会错位。
-        // 口令来源三种：留空取存凭据 / 输入且与存凭据相同（自动连、
-        // 重启等待这两条看不见界面的路都属这种）/ 输入且不同于存凭据。
+        // 口令来源三种：留空取存凭据 / 直接取自存凭据（自动连、重启等待、
+        // 设置页重连这三条看不见输入框的路）/ 界面输入且不同于存凭据。
         // 诊断文件里分清这一点，才判得出「是不是送错了口令」。
         let storedForSource = CredentialStore.load(endpointID: endpointKey(for: method),
                                                     username: user)
@@ -3069,7 +3106,7 @@ final class AppState {
         if password.isEmpty {
             passwordSource = storedForSource == nil ? "无" : "留空用已存凭据"
         } else if storedForSource == password {
-            passwordSource = "等同已存凭据（自动连）"
+            passwordSource = "本机已存凭据"
         } else {
             passwordSource = "界面输入"
         }
@@ -3175,9 +3212,13 @@ final class AppState {
 
     /// 设置页的「重新连接」：清掉旧会话，用本机存的口令原样再连一次。
     ///
+    /// 走哪条路看**当前配置**（`configuredMethod`）：直连地址填了走直连，
+    /// 没填走 QuickConnect —— 用户刚在设置页填了地址、点重连，期望的就是
+    /// 改走直连，不能拿「上次成功那次」的方式顶回去。
+    ///
     /// 与 `disconnect()` 的差别只在**不动本机缓存**（封面 / 歌词 / 开关机计划）——
-    /// 连的还是同一台机器，重拉一遍封面纯属浪费。口令按当前端点键取：
-    /// 刚改过直连地址的话键跟着变了、取不到，那就退回连接页让用户重输口令，
+    /// 连的还是同一台机器，重拉一遍封面纯属浪费。口令按目标端点键取，取不到
+    /// 时 CredentialStore 会按账号回退；仍然没有就退回连接页让用户重输口令，
     /// 别拿旧口令硬试（错的凭据会把 DSM 的自动封锁喂起来，见 `接口文档` 登录 400 那条）。
     func reconnect() async {
         cancelAutoConnect()
@@ -3197,15 +3238,24 @@ final class AppState {
         linkMode = nil
         phase = .idle
 
-        guard let password = CredentialStore.load(endpointID: endpointKey,
-                                                 username: trimmedUsername),
+        let method = configuredMethod
+        let key = endpointKey(for: method)
+        guard let password = CredentialStore.load(endpointID: key,
+                                                  username: trimmedUsername),
               !password.isEmpty
         else {
             toast = ToastMessage("连接设置变了，需要重新输入口令", .info)
-            NSLog("[connect] 重连取不到本端点的口令（端点键 %@），退回连接页", endpointKey)
+            NSLog("[connect] 重连取不到本端点的口令（端点键 %@），退回连接页", key)
             return
         }
-        await connect(password: password, method: resumeMethod)
+        await connect(password: password, method: method)
+        if !isConnected {
+            NSLog("[connect] 重连没成（%@）：%@",
+                  method == .direct ? "直连" : "QuickConnect", phase.label)
+            toast = ToastMessage(method == .direct
+                ? "直连没连上（\(phase.label)）—— 检查地址，或清空直连地址改走 QuickConnect"
+                : "QuickConnect 没连上（\(phase.label)）", .err)
+        }
     }
 
     func disconnect() async {
