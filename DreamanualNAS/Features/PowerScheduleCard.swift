@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// 开关机计划页的状态：**服务端那一份**与**界面上在编的那一份**。
+/// 开关机计划页的状态：**一份列表，操作即写回**。
 ///
-/// 两份分开是这套界面的要害：拨开关只动 `draft`，「保存到 NAS」才写回，
-/// 「放弃修改」就是把 `draft` 丢回 `server`（原型那句「改完一次性写回」说的就是它）。
-/// 与系统状态快照同一归属（挂在 `AppState` 上）—— 换模块再回来，改到一半的开关还在。
+/// 每个操作（拨开关 / 删除）先改本地这份 —— 界面立即变 —— 再把「提交 → 回读核对」
+/// 排到串行写回链上；失败就把这份恢复成操作前的样子，原因挂在 `failureNote`。
+/// 没有单独的「保存」按钮，也没有「未保存」这个状态。写回期间操作全部锁住
+/// （行开关禁用、右键不出菜单、新增钮禁用），不与在途写回打架；离线摆样
+/// （manager 为空）时只改本地、不排队。
 @MainActor
 @Observable
 final class PowerScheduleModel {
@@ -15,141 +17,176 @@ final class PowerScheduleModel {
         case failed(String)
     }
 
-    /// 一次保存的下场，给调用点决定提示什么。
-    enum SaveOutcome: Equatable {
-        case saved
-        /// 服务端回读的那一份与提交的不同（这个接口会静默剥掉非法的 `weekdays`）。
-        case drifted
-        case failed(String)
-    }
-
     private(set) var phase: Phase = .idle
-    /// 服务端那一份。保存后放的是**回读**的那一份，不是提交的那一份。
-    private(set) var server: PowerSchedule?
-    /// 界面上在编的那一份。
-    private(set) var draft: PowerSchedule?
-    private(set) var isSaving = false
-    /// 上一次保存失败的原因（卡片页脚那一行）。改一次或存成功就清掉。
-    private(set) var saveNote: String?
+    /// 界面显示、也是「当前生效」的那一份。写回成功后放**回读**的那一份
+    /// （这个接口会静默剥掉非法 `weekdays`，以回读为准，不是提交的那份）。
+    private(set) var tasks: [PowerTask] = []
+    /// 有写回在途：行开关禁用、右键菜单不出、新增钮禁用。
+    private(set) var isWriting = false
+    /// 上一次写回失败的原因（页脚那一行）。下一次操作或读成功就清掉。
+    private(set) var failureNote: String?
 
-    /// 界面上画的就是这一份。
-    var tasks: [PowerTask] { draft?.tasks ?? [] }
+    /// 冒烟用（`DM_STATUS=failtoggle`）：置上之后写回一律假失败（不发请求），
+    /// 专门验「失败 → 本地回滚」这条腿；网络层的失败与它共用同一个 catch。
+    var smokeFailWrites = false
 
-    var isDirty: Bool { draft != nil && draft != server }
+    /// 写回串行链：把每次「提交 → 回读核对」排在上一把后面，连续操作不并发打架。
+    private var writeChain: Task<Void, Never>?
 
-    /// 读到服务端那一份了（「新增任务」的可用判据 —— 没读到就无从「追加进草稿」）。
     var isReady: Bool {
         if case .ready = phase { return true }
         return false
     }
 
-    /// 拉一次。默认不刷新已有数据 —— 换模块回来不该白发一轮请求，
-    /// 更不该把用户改到一半的草稿冲掉（`server != nil` 时直接返回）。
+    /// 拉一次。默认不刷新已有数据 —— 换模块回来不该白发一轮请求。
     func load(on manager: SessionManager?, force: Bool = false) async {
         guard let manager else { return }
-        if !force, server != nil || phase == .loading { return }
+        if !force, phase == .ready || phase == .loading { return }
         phase = .loading
         do {
             let schedule = try await PowerScheduleAPI.load(manager)
-            server = schedule
-            draft = schedule
-            saveNote = nil
+            tasks = schedule.tasks
+            failureNote = nil
             phase = .ready
         } catch {
             phase = .failed(error.localizedDescription)
         }
     }
 
-    /// 拨一条的开关。**只动草稿，不碰 NAS** —— 写回是页脚那颗按钮的事。
-    func toggle(_ index: Int) {
-        guard var draft, draft.tasks.indices.contains(index) else { return }
-        draft.tasks[index].enabled.toggle()
-        self.draft = draft
-        saveNote = nil
-    }
-
-    /// 删一条。**只动草稿** —— 删错用「放弃修改」找回（服务端那份没动过），
-    /// 所以行内不设确认弹层。
-    func remove(_ index: Int) {
-        guard var draft, draft.tasks.indices.contains(index) else { return }
-        draft.tasks.remove(at: index)
-        self.draft = draft
-        saveNote = nil
-    }
-
-    /// 追加一条（编辑弹窗的「添加」）。落表尾；启用态默认开。
-    /// 星期只收 0–6（🔴 给 7 服务端会静默剥成空串，见 `PowerTask.weekdays`）。
-    func add(_ task: PowerTask) {
-        guard var draft else { return }
-        draft.tasks.append(task)
-        self.draft = draft
-        saveNote = nil
-    }
-
-    func discard() {
-        draft = server
-        saveNote = nil
-    }
-
-    /// 写回 NAS 并**以回读为准**收工。
-    ///
-    /// 🔴 两次都比对：判据是服务端回读的那一份，不是 `save` 的返回值 ——
-    /// 这个接口对非法 `weekdays` 是静默剥掉（照回 `success`，那条任务变空星期），
-    /// 与评分接口对不存在的 id 照样回 `success` 同一族。
-    @discardableResult
-    func save(on manager: SessionManager?) async -> SaveOutcome {
-        guard let manager, let draft, isDirty else { return .saved }
-        isSaving = true
-        defer { isSaving = false }
-        do {
-            let confirmed = try await PowerScheduleAPI.save(draft, on: manager)
-            server = confirmed
-            self.draft = confirmed
-            saveNote = nil
-            phase = .ready
-            return confirmed == draft ? .saved : .drifted
-        } catch {
-            saveNote = error.localizedDescription
-            return .failed(error.localizedDescription)
+    /// 拨一条的开关。乐观：界面立即变，写回在链上排队。
+    func toggle(_ index: Int, on manager: SessionManager?) {
+        mutate(on: manager) { tasks in
+            guard tasks.indices.contains(index) else { return false }
+            tasks[index].enabled.toggle()
+            return true
         }
     }
 
-    /// 断开时清掉 —— 换了机器或换了一条链路，计划表不作数，改到一半的草稿也不该留下。
+    /// 删一条（右键菜单）。乐观：界面立即变，写回在链上排队。
+    /// 写回是整表覆盖，失败整份恢复，所以不设确认弹层。
+    func remove(_ index: Int, on manager: SessionManager?) {
+        mutate(on: manager) { tasks in
+            guard tasks.indices.contains(index) else { return false }
+            tasks.remove(at: index)
+            return true
+        }
+    }
+
+    /// 弹窗提交：追加（`index` = nil）或整条替换，**当场等写回结果** ——
+    /// 成功弹窗才关，失败留在弹窗里（填的字不丢）。与行操作共用 `isWriting`
+    /// 这把锁：弹窗开着时行开关是禁用的，两边不会并发写。
+    /// 星期只收 0–6（🔴 给 7 服务端会静默剥成空串，见 `PowerTask.weekdays`）。
+    /// manager 为空（离线摆样）时只改本地、直接算成功。
+    @discardableResult
+    func commit(_ task: PowerTask, replacing index: Int?, on manager: SessionManager?) async -> Bool {
+        guard isReady, !isWriting else { return false }
+        var updated = tasks
+        if let index {
+            guard updated.indices.contains(index) else { return false }
+            updated[index] = task
+        } else {
+            updated.append(task)
+        }
+        guard let manager else {
+            tasks = updated
+            return true
+        }
+        let before = tasks
+        tasks = updated
+        isWriting = true
+        defer { isWriting = false }
+        do {
+            let confirmed = try await PowerScheduleAPI.save(
+                PowerSchedule(tasks: updated), on: manager)
+            tasks = confirmed.tasks
+            return true
+        } catch {
+            tasks = before
+            failureNote = error.localizedDescription
+            return false
+        }
+    }
+
+    /// 乐观写回的公共底座：先改本地，再把提交排在写回链尾；失败恢复 `before`。
+    private func mutate(on manager: SessionManager?, _ change: (inout [PowerTask]) -> Bool) {
+        var updated = tasks
+        guard change(&updated) else { return }
+        let before = tasks
+        tasks = updated
+        failureNote = nil
+        guard let manager else { return }   // 离线摆样：只动本地
+        let submitted = updated
+        let previous = writeChain ?? Task {}
+        writeChain = Task { [weak self] in
+            await previous.value
+            await self?.writeAndVerify(submitted, rollbackTo: before, on: manager)
+        }
+    }
+
+    /// 提交 → 回读核对。🔴 判据是回读的那一份，不是 `save` 的返回值：
+    /// 这个接口对非法 `weekdays` 是静默剥掉（照回 `success`，那条任务变空星期），
+    /// 与评分接口对不存在的 id 照样回 `success` 同一族。
+    private func writeAndVerify(
+        _ submitted: [PowerTask], rollbackTo before: [PowerTask], on manager: SessionManager
+    ) async {
+        isWriting = true
+        defer { isWriting = false }
+        do {
+            if smokeFailWrites {
+                throw PowerScheduleError.badResponse("冒烟：写回假失败（没发请求）")
+            }
+            let confirmed = try await PowerScheduleAPI.save(
+                PowerSchedule(tasks: submitted), on: manager)
+            tasks = confirmed.tasks
+            phase = .ready
+        } catch {
+            tasks = before
+            failureNote = error.localizedDescription
+        }
+    }
+
+    /// 断开时清掉 —— 换了机器或换了一条链路，计划表不作数。
     func clear() {
-        server = nil
-        draft = nil
+        tasks = []
         phase = .idle
-        saveNote = nil
-        isSaving = false
+        failureNote = nil
+        isWriting = false
+        smokeFailWrites = false
+        writeChain = nil
     }
 
     /// 冒烟用（`DM_STATUS=schedmock`）：不碰网络灌一份与真机同形的计划，
-    /// 供离线摆界面截图。灌的是 `server` 与 `draft` 两份同值（未改动态）。
+    /// 供离线摆界面截图。
     func injectMock() {
-        let mock = PowerSchedule(tasks: [
+        tasks = [
             PowerTask(kind: .poweroff, enabled: true, hour: 0, minute: 30, weekdays: [2, 3, 4, 5]),
             PowerTask(kind: .poweron, enabled: true, hour: 9, minute: 0, weekdays: [1, 2, 3, 4, 5]),
             PowerTask(kind: .poweron, enabled: true, hour: 10, minute: 30, weekdays: [0, 6]),
-        ])
-        server = mock
-        draft = mock
-        saveNote = nil
+        ]
+        failureNote = nil
         phase = .ready
     }
 
-    /// 冒烟用：把两份状态各打一行 —— 屏幕上**看不出来**的那几件（服务端几份、
-    /// 草稿脏没脏、`weekdays` 解成了什么、星期那列压成了什么字）靠它对。
+    /// 冒烟用：等在途写回落定（先让一拍再轮询，链上的下一把可能刚要起）。
+    func waitWritesSettled() async {
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        for _ in 0..<200 where isWriting {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    /// 冒烟用：把状态各打一行 —— 屏幕上**看不出来**的那几件（几条、在写没有、
+    /// `weekdays` 解成了什么）靠它对。
     var dumpLines: [String] {
         var out: [String] = []
-        out.append("阶段 \(phase) · 服务端 \(server.map { String($0.tasks.count) } ?? "—") 条"
-                   + " · 草稿 \(draft.map { String($0.tasks.count) } ?? "—") 条"
-                   + " · 未保存 \(isDirty ? "是" : "否")")
+        out.append("阶段 \(phase) · \(tasks.isEmpty ? "—" : String(tasks.count)) 条"
+                   + " · 在写 \(isWriting ? "是" : "否")")
         for (index, task) in tasks.enumerated() {
             out.append("#\(index) \(task.kind.label) \(task.weekdayText) \(task.timeText)"
                        + " 开关\(task.enabled ? "开" : "关")"
                        + " · weekdays=\(task.weekdays.map(String.init).joined(separator: ","))")
         }
-        if let saveNote { out.append("上次保存失败：\(saveNote)") }
+        if let failureNote { out.append("上次写回失败：\(failureNote)") }
         return out
     }
 }
@@ -157,9 +194,10 @@ final class PowerScheduleModel {
 /// 开关机计划卡（原型系统状态屏下半右卡）。
 ///
 /// 形态是**列表卡**（`dmCard()`，内边距 0，卡头与页脚自带 `s14`）：
-/// 卡头（题头 + 未保存徽章）→ 一行一条计划（星期 · 时刻 · 开机/关机徽章 · 删除 · 开关，
-/// 行间发丝）→ 页脚（左端错误行、右端「新增任务 / 放弃修改 / 保存到 NAS」）。
-/// 新增走 `PowerAddCard` 弹窗，删除走行内的废纸篓钮 —— 两者都只动草稿。
+/// 卡头（题头 + 条数）→ 一行一条计划（星期 · 时刻 · 开机/关机徽章 · 开关，
+/// 行间发丝）→ 页脚（左端失败行、右端「新增任务」）。
+/// 行操作即写回：开关拨了就提交；编辑与删除走行右键菜单（悬浮整行提示可点），
+/// 新增走 `PowerAddCard` 弹窗 —— 三个入口全部当场写 NAS，失败原样回退。
 struct PowerScheduleCard: View {
     @Environment(AppState.self) private var state
 
@@ -175,7 +213,7 @@ struct PowerScheduleCard: View {
         .dmCard()
     }
 
-    /// 卡头：题头 + 右侧（改动未存时给徽章，否则给条数）。
+    /// 卡头：题头 + 右侧条数。
     private var head: some View {
         HStack(spacing: DmSpace.s8) {
             Text("开关机计划")
@@ -183,9 +221,7 @@ struct PowerScheduleCard: View {
                 .foregroundColor(Color.dmInk)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            if model.isDirty {
-                DmBadge("未保存", tone: .warn)
-            } else if !model.tasks.isEmpty {
+            if !model.tasks.isEmpty {
                 Text("\(model.tasks.count) 条")
                     .font(.system(size: DmText.t11))
                     .monospacedDigit()
@@ -207,9 +243,14 @@ struct PowerScheduleCard: View {
                             .fill(Color.dmLine)
                             .frame(height: DmLine.hairline)
                     }
-                    PowerScheduleRow(task: task,
-                                     onToggle: { model.toggle(index) },
-                                     onDelete: { model.remove(index) })
+                    PowerScheduleRow(
+                        task: task,
+                        isWriting: model.isWriting,
+                        onToggle: { model.toggle(index, on: state.sessionManager) },
+                        onContext: { point in
+                            state.openPowerRowMenu(index, at: point)
+                        }
+                    )
                 }
             }
         } else if case let .failed(reason) = model.phase {
@@ -255,16 +296,13 @@ struct PowerScheduleCard: View {
         .padding(.bottom, DmSpace.s14)
     }
 
-    /// 页脚：左端放上一次保存的失败原因，右端两颗按钮。
-    ///
-    /// 两颗按钮都按 `isDirty` 判禁用 —— 没改动时「保存到 NAS」没有可写的东西，
-    /// 让它可点会写成一次无谓的请求（这个接口的写是整表覆盖）。
+    /// 页脚：左端放上一次写回失败的原因（操作已回退），右端「新增任务」。
     private var footer: some View {
         HStack(spacing: DmSpace.s8) {
-            if let saveNote = model.saveNote {
+            if let failureNote = model.failureNote {
                 LucideIcon("triangle-alert", size: DmIcon.i12)
                     .foregroundColor(Color.dmDangerInk)
-                Text(saveNote)
+                Text(failureNote)
                     .font(.system(size: DmText.t11))
                     .foregroundColor(Color.dmDangerInk)
                     .lineLimit(1)
@@ -273,27 +311,7 @@ struct PowerScheduleCard: View {
             Spacer(minLength: DmSpace.s12)
             Button("新增任务") { state.openPowerAdd() }
                 .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.isSaving)
-            Button("放弃修改") { model.discard() }
-                .buttonStyle(SecondaryButtonStyle())
-                .disabled(!model.isDirty || model.isSaving)
-            Button(model.isSaving ? "正在写入…" : "保存到 NAS") {
-                Task {
-                    let outcome = await model.save(on: state.sessionManager)
-                    switch outcome {
-                    case .saved:
-                        state.showToast("开关机计划已保存到 NAS", .ok)
-                    case .drifted:
-                        // 服务端回读与提交的不同（它会静默剥掉非法星期这类东西）
-                        // —— 不说明的话，用户只看见自己拨的开关弹回去了。
-                        state.showToast("已写入，但服务端回读与提交的不同，界面已按服务端那一份显示", .info)
-                    case let .failed(reason):
-                        state.showToast(reason, .err)
-                    }
-                }
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(!model.isDirty || model.isSaving)
+                .disabled(model.isWriting)
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s12)
@@ -305,13 +323,19 @@ struct PowerScheduleCard: View {
 
 /// 一条计划行（原型 `.sched-row`：内边距 10/14，行间发丝）。
 ///
-/// 五格：星期（定宽一栏，题取 `ink-2`）· 时刻（等宽数字，13/500）·
-/// 开机 / 关机徽章 · 删除钮 · 右端开关。停用的那一条整行压一档（字转 `ink-3`、
-/// 徽章转中性），这样「排了但没启用」一眼分得出来，不必去读开关的滑块在哪边。
+/// 三格：星期（定宽一栏，题取 `ink-2`）· 时刻（等宽数字，13/500）· 开机/关机徽章，
+/// 右端开关。停用的那一条整行压一档（字转 `ink-3`、徽章转中性），这样「排了但
+/// 没启用」一眼分得出来，不必去读开关的滑块在哪边。
+///
+/// 编辑与删除在**行右键菜单**里（桌面应用惯例，入口不常驻行上）；悬浮给 `panel-3`
+/// 一档背板示意整行可点。开关拨了当场写 NAS —— 写回期间禁用，写完自动回来。
 private struct PowerScheduleRow: View {
     let task: PowerTask
+    let isWriting: Bool
     let onToggle: () -> Void
-    let onDelete: () -> Void
+    let onContext: (CGPoint) -> Void
+
+    @State private var isHovered = false
 
     /// 星期那一栏的定宽。原型 `.sched-row .d` 是 52，那是以「每天 / 单日」三种
     /// 形态画的；真实计划里最短的长组合是连排区间（`周二至周五`，5 个字），
@@ -336,16 +360,20 @@ private struct PowerScheduleRow: View {
 
             Spacer(minLength: DmSpace.s12)
 
-            // 删除只动草稿、「放弃修改」随时找回，所以不设确认弹层。
-            // 图标用 `trash`（`trash-2` 不在图标兜底表里）。
-            IconButton(iconName: "trash", compact: true, action: onDelete)
-
             Toggle("", isOn: Binding(get: { task.enabled }, set: { _ in onToggle() }))
                 .labelsHidden()
                 .toggleStyle(DmToggleStyle())
+                .disabled(isWriting)
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s10)
+        // 悬浮背板与右键捕获层：编辑 / 删除的入口在菜单里，悬浮给 `panel-3` 一档
+        // （主区悬停口径）示意整行可点；捕获层只接右键，左键与悬停照常穿透。
+        .background(
+            Rectangle().fill(isHovered ? Color.dmPanel3 : Color.clear)
+        )
+        .trackingHover($isHovered)
+        .overlay { RightClickCatcher(onRightClick: onContext) }
     }
 
     /// 开关机两态各占一个语义色（原型 `.pill ok` / `.pill warn`）；停用的一律中性
@@ -356,28 +384,54 @@ private struct PowerScheduleRow: View {
     }
 }
 
-/// 新增计划任务的编辑弹窗（挂根视图的 `.dmModal`，与写操作弹窗同层）。
+/// 新增 / 编辑计划任务的弹窗（挂根视图的 `.dmModal`，与写操作弹窗同层）。
 ///
 /// 三个字段：类型（开机 / 关机，分段控件）· 时刻（时 / 分两个数字框）·
-/// 星期（七颗可多选的片）。**「添加」只往草稿追加** —— 写回仍走卡片页脚的
-/// 「保存到 NAS」，与拨开关同一条「草稿 → 保存」链路。
+/// 星期（七颗可多选的片）。**提交当场写 NAS**：成功关弹窗、失败留在弹窗里
+/// （填的字不丢，改完再试或取消）。编辑模式预填那一条的现状。
 ///
 /// 校验都落在本地：时刻必须落在 0–23 时 / 0–59 分、星期至少选一天 —— 后一条
 /// 还挡着接口的坑：`weekdays` 空串虽然服务端收，但那条任务等于白排（读回来
 /// 显示「未设星期」）；界面上也不产出 6 以外的数字（给 7 会被静默剥掉）。
 struct PowerAddCard: View {
+    enum Mode {
+        /// 追加一条到表尾。
+        case add
+        /// 编辑第 `index` 条（预填现状）。
+        case edit(index: Int, task: PowerTask)
+    }
+
     @Environment(AppState.self) private var state
 
     private var model: PowerScheduleModel { state.powerSchedule }
+
+    let mode: Mode
 
     @State private var kind: PowerTask.Kind = .poweron
     @State private var hourText = "09"
     @State private var minuteText = "00"
     /// 缺省给工作日 —— 与这台机器现有开机计划最常见的形态同拍。
     @State private var weekdays: Set<Int> = [1, 2, 3, 4, 5]
+    @State private var isSubmitting = false
+
+    init(mode: Mode) {
+        self.mode = mode
+        if case let .edit(_, task) = mode {
+            _kind = State(initialValue: task.kind)
+            _hourText = State(initialValue: String(format: "%02d", task.hour))
+            _minuteText = State(initialValue: String(format: "%02d", task.minute))
+            _weekdays = State(initialValue: Set(task.weekdays))
+        }
+    }
+
+    private var isEdit: Bool {
+        if case .edit = mode { return true }
+        return false
+    }
 
     var body: some View {
-        DmModalCard(title: "新增开关机计划", onClose: { state.closePowerAdd() }) {
+        DmModalCard(title: isEdit ? "编辑开关机计划" : "新增开关机计划",
+                    onClose: { state.closePowerEditor() }) {
             VStack(alignment: .leading, spacing: DmSpace.s6) {
                 FormLabel("类型")
                 DmSegmented(
@@ -426,14 +480,16 @@ struct PowerAddCard: View {
             }
 
             if problem == nil {
-                hint("添加后先落在草稿里，点「保存到 NAS」才写回 NAS。", isBad: false)
+                hint(isEdit ? "保存后立即写回 NAS。" : "添加后立即写回 NAS。",
+                     isBad: false)
             }
         } foot: {
-            Button("取消") { state.closePowerAdd() }
+            Button("取消") { state.closePowerEditor() }
                 .buttonStyle(SecondaryButtonStyle())
-            Button("添加", action: submit)
+                .disabled(isSubmitting)
+            Button(isEdit ? "保存" : "添加", action: submit)
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(problem != nil)
+                .disabled(problem != nil || isSubmitting)
         }
     }
 
@@ -505,11 +561,26 @@ struct PowerAddCard: View {
 
     private func submit() {
         guard let hour, let minute, !weekdays.isEmpty else { return }
-        model.add(PowerTask(
-            kind: kind, enabled: true,
+        // 编辑保留那一条的启用态（启用与否是行上的开关管的事，弹窗不改它）。
+        let original: PowerTask?
+        if case let .edit(_, task) = mode { original = task } else { original = nil }
+        let task = PowerTask(
+            kind: kind, enabled: original?.enabled ?? true,
             hour: hour, minute: minute,
             weekdays: weekdays.sorted()
-        ))
-        state.closePowerAdd()
+        )
+        let editIndex: Int?
+        if case let .edit(index, _) = mode { editIndex = index } else { editIndex = nil }
+        isSubmitting = true
+        Task {
+            let saved = await model.commit(task, replacing: editIndex,
+                                           on: state.sessionManager)
+            isSubmitting = false
+            if saved {
+                state.showToast(isEdit ? "开关机计划已更新" : "开关机计划已写入 NAS", .ok)
+                state.closePowerEditor()
+            }
+            // 失败留在弹窗：填的字不丢，改完再试或取消。
+        }
     }
 }

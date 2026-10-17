@@ -87,13 +87,64 @@ struct RootView: View {
         ) {
             TagEditorCard()
         }
-        // 新增开关机计划（计划卡页脚 / 空表静场）。与写操作弹窗同一挂法、同一层序。
+        // 新增 / 编辑开关机计划（计划卡页脚 / 空表静场 / 行右键菜单）。
+        // 与写操作弹窗同一挂法、同一层序。编辑模式预填那一条的现状；
+        // 下标失效（写回刚把它删了）时按新增开。
         .dmModal(
-            isPresented: state.showsPowerAdd,
-            onDismiss: { state.closePowerAdd() }
+            isPresented: state.showsPowerEditor,
+            onDismiss: { state.closePowerEditor() }
         ) {
-            PowerAddCard()
+            if let index = state.powerEditorIndex,
+               let task = powerScheduleTask(at: index) {
+                PowerAddCard(mode: .edit(index: index, task: task))
+            } else {
+                PowerAddCard(mode: .add)
+            }
         }
+        // 计划行右键菜单（编辑 / 删除）：与歌曲 / 文件菜单同一归属、同一套摆位。
+        .overlay { powerRowMenuLayer }
+    }
+
+    /// 计划表第 `index` 条（弹窗编辑模式预填用）。
+    private func powerScheduleTask(at index: Int) -> PowerTask? {
+        let tasks = state.powerSchedule.tasks
+        return tasks.indices.contains(index) ? tasks[index] : nil
+    }
+
+    /// 计划行右键菜单层：与歌曲菜单同构（透明遮罩接「点别处关闭」，菜单卡按
+    /// 指针摆、越界收回窗口内）。两条：编辑、删除 —— 都当场写 NAS。
+    @ViewBuilder
+    private var powerRowMenuLayer: some View {
+        GeometryReader { geo in
+            if let request = state.powerRowMenu {
+                let spot = PowerRowMenu.spot(request.point, in: geo.size)
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { state.closePowerRowMenu() }
+
+                    DmMenuCard(width: PowerRowMenu.width) {
+                        DmMenuRow(title: "编辑", icon: "pencil") {
+                            state.closePowerRowMenu()
+                            state.openPowerEdit(request.index)
+                        }
+                        DmMenuRow(title: "删除", icon: "trash") {
+                            state.closePowerRowMenu()
+                            state.powerSchedule.remove(request.index, on: state.sessionManager)
+                            Task {
+                                await state.powerSchedule.waitWritesSettled()
+                                if let note = state.powerSchedule.failureNote {
+                                    state.showToast(note, .err)
+                                }
+                            }
+                        }
+                    }
+                    .offset(x: spot.x, y: spot.y)
+                }
+            }
+        }
+        // 与歌曲菜单同一条规矩：geo 原点钉窗口顶（见 songMenuLayer 的注）。
+        .ignoresSafeArea()
     }
 
     /// 右键菜单层：一层透明遮罩接住「点别处关闭」，菜单卡按指针位置摆，
@@ -274,6 +325,22 @@ enum FileMenu {
     /// 指针位置 → 菜单左上角，越界时收回窗口内。
     static func spot(_ point: CGPoint, in size: CGSize, entries: [FileEntry]) -> CGPoint {
         let height = itemHeight * CGFloat(rowCount(entries)) + separator + inset
+        return CGPoint(
+            x: min(max(inset, point.x), max(inset, size.width - width - inset)),
+            y: min(max(inset, point.y), max(inset, size.height - height - inset))
+        )
+    }
+}
+
+/// 计划行右键菜单的摆位。两条（编辑 / 删除），宽与歌曲 / 文件菜单同档。
+enum PowerRowMenu {
+    static let width: CGFloat = 160
+    static let itemHeight: CGFloat = 30
+    private static let inset: CGFloat = 8
+
+    /// 指针位置 → 菜单左上角，越界时收回窗口内。
+    static func spot(_ point: CGPoint, in size: CGSize) -> CGPoint {
+        let height = itemHeight * 2 + 8
         return CGPoint(
             x: min(max(inset, point.x), max(inset, size.width - width - inset)),
             y: min(max(inset, point.y), max(inset, size.height - height - inset))

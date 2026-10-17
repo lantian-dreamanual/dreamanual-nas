@@ -281,19 +281,49 @@ final class AppState {
         tagEditor = nil
     }
 
-    // MARK: - 新增开关机计划
+    // MARK: - 新增 / 编辑开关机计划
 
-    /// 新增计划任务的编辑弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
-    /// 只在计划卡就绪（读到过服务端那一份）时给开 —— 没读到就无从追加进草稿。
-    private(set) var showsPowerAdd = false
+    /// 新增 / 编辑计划任务的弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
+    /// `index` = 编辑第几条，nil = 新增。只在计划卡就绪时给开 —— 没读到
+    /// 那一份就无从追加或替换。
+    private(set) var powerEditorIndex: Int?
+
+    var showsPowerEditor: Bool { powerEditorIndex != nil }
 
     func openPowerAdd() {
         guard powerSchedule.isReady else { return }
-        showsPowerAdd = true
+        powerEditorIndex = nil
     }
 
-    func closePowerAdd() {
-        showsPowerAdd = false
+    func openPowerEdit(_ index: Int) {
+        guard powerSchedule.isReady, powerSchedule.tasks.indices.contains(index) else { return }
+        powerEditorIndex = index
+    }
+
+    func closePowerEditor() {
+        powerEditorIndex = nil
+    }
+
+    // MARK: - 计划行右键菜单
+
+    /// 计划行的右键菜单（编辑 / 删除）。挂在根上 —— 行在卡片里，菜单画在行里
+    /// 会被盖住；与歌曲 / 文件两个菜单同一归属。
+    struct PowerRowMenuRequest: Identifiable {
+        let id = UUID()
+        let index: Int
+        let point: CGPoint
+    }
+
+    private(set) var powerRowMenu: PowerRowMenuRequest?
+
+    func openPowerRowMenu(_ index: Int, at point: CGPoint) {
+        // 写回在途不出菜单：菜单里的动作都要写 NAS，在途时点了也得排队或被锁。
+        guard powerSchedule.isReady, !powerSchedule.isWriting else { return }
+        powerRowMenu = PowerRowMenuRequest(index: index, point: point)
+    }
+
+    func closePowerRowMenu() {
+        powerRowMenu = nil
     }
 
     /// 弹窗「保存」：真写 ID3 到 NAS 文件（索引 0 秒跟上）。落地后改曲库行与
@@ -1518,37 +1548,38 @@ final class AppState {
     ///     —— 真机上造不出干净的部分失败（要把某条接口单独打断）；
     ///   · `clear` 清掉快照，回到载入初态；
     ///   · `sched` 把开关机计划重读一遍并打点（走界面同一条 `load(force:)`）；
-    ///   · `togglerow=<n>` 拨第 n 行的开关 —— **只动草稿、不写 NAS**，看「未保存」徽章；
-    ///   · `schedsave` 把草稿写回 NAS 并**回读**；
-    ///   · `scheddiscard` 放弃修改（草稿丢回服务端那一份）；
-    ///   · `schedmock` / `schededitor` / `schedadd` / `scheddel=<n>` 只动草稿的四条
-    ///     （灌样例 / 开新增弹窗 / 追加一条 / 删一条）—— **离线也能跑**（NAS 关机时
-    ///     摆界面截图用），命令里只有这几条时不判连接；
-    ///   · `schedroundtrip` 整条写回链路：拨 → 存 → 回读核对 → 拨回 → 存 → 回读核对
-    ///     （收尾回原样，见 `smokeScheduleRoundtrip`）。
+    ///   · `togglerow=<n>` 拨第 n 行的开关 —— 操作即写回，等写回落定再打点；
+    ///   · `schedadd` 追加一条「周末 22:05 开机」并写回（离线时只动本地）；
+    ///   · `scheddel=<n>` 删第 n 条并写回（离线时只动本地）；
+    ///   · `schededitor` 开编辑弹窗（第 0 条，先灌 mock）—— 离线也能跑；
+    ///   · `failtoggle=<n>` 开「写回假失败」拨第 n 行：界面弹回去 + 页脚失败行，
+    ///     专门验「失败 → 本地回滚」这条腿（不发请求）；
+    ///   · `schedroundtrip` 整条写回链路：拨 → 等写回 → 回读核对 → 拨回 → 等 →
+    ///     回读核对（收尾回原样，见 `smokeScheduleRoundtrip`）。
     ///
     /// 顺序即字面顺序：`clear` 之后再 `drop=` 是抹不掉的（手上没快照），要抹就先抹。
     func smokeStatus(_ command: String) async {
-        // 离线可跑的记号（不碰会话，只在草稿上操作）先于连接判据 ——
-        // NAS 关机时也能灌 mock 摆界面截图。
+        // 离线可跑的记号（不碰会话）先于连接判据 —— NAS 关机时也能灌 mock 摆界面
+        // 截图；`schedadd` / `scheddel=` 离线时只动本地（写回要 manager，没有就跳过）。
         func runOffline(_ token: String) {
+            let manager = sessionManager
             if token == "schedmock" {
                 powerSchedule.injectMock()
                 dumpSchedule()
             } else if token == "schededitor" {
                 powerSchedule.injectMock()
-                openPowerAdd()
-                NSLog("[sched] 开新增弹窗（灌了 mock 数据）")
+                openPowerEdit(0)
+                NSLog("[sched] 开编辑弹窗（第 0 条，灌了 mock 数据）")
             } else if token == "schedadd" {
-                powerSchedule.add(PowerTask(
-                    kind: .poweron, enabled: true, hour: 22, minute: 5,
-                    weekdays: [0, 6]))
-                NSLog("[sched] 往草稿追加一条 周末 22:05 开机")
-                dumpSchedule()
+                Task {
+                    _ = await powerSchedule.commit(PowerTask(
+                        kind: .poweron, enabled: true, hour: 22, minute: 5,
+                        weekdays: [0, 6]), replacing: nil, on: manager)
+                    dumpSchedule()
+                }
             } else if token.hasPrefix("scheddel=") {
                 let index = Int(token.dropFirst("scheddel=".count)) ?? 0
-                powerSchedule.remove(index)
-                NSLog("[sched] 从草稿删第 %d 行", index)
+                powerSchedule.remove(index, on: manager)
                 dumpSchedule()
             }
         }
@@ -1604,26 +1635,28 @@ final class AppState {
             } else if token == "sched" {
                 await powerSchedule.load(on: manager, force: true)
                 dumpSchedule()
-            } else if token.hasPrefix("togglerow=") {
-                let index = Int(token.dropFirst("togglerow=".count)) ?? 0
-                powerSchedule.toggle(index)
-                NSLog("[sched] 拨第 %d 行的开关（只动草稿，还没写 NAS）", index)
-                dumpSchedule()
-            } else if token == "schedsave" {
-                let outcome = await powerSchedule.save(on: manager)
-                NSLog("[sched] 保存结果 %@", String(describing: outcome))
-                dumpSchedule()
-            } else if token == "scheddiscard" {
-                powerSchedule.discard()
-                NSLog("[sched] 放弃修改（草稿丢回服务端那一份）")
-                dumpSchedule()
-            } else if token == "schedmock" || token == "schededitor" || token == "schedadd"
-                        || token.hasPrefix("scheddel=") {
-                // 只动草稿的记号（mock / 编辑器 / 追加 / 删除）与离线路径同一实现。
-                runOffline(token)
-            } else if token == "schedroundtrip" {
-                await smokeScheduleRoundtrip(manager)
-            } else {
+        } else if token.hasPrefix("togglerow=") {
+            let index = Int(token.dropFirst("togglerow=".count)) ?? 0
+            powerSchedule.toggle(index, on: manager)
+            await powerSchedule.waitWritesSettled()
+            dumpSchedule()
+        } else if token.hasPrefix("failtoggle=") {
+            let index = Int(token.dropFirst("failtoggle=".count)) ?? 0
+            powerSchedule.smokeFailWrites = true
+            powerSchedule.toggle(index, on: manager)
+            await powerSchedule.waitWritesSettled()
+            powerSchedule.smokeFailWrites = false
+            dumpSchedule()
+        } else if token == "schedadd" || token == "schedmock" || token == "schededitor"
+                    || token.hasPrefix("scheddel=") {
+            // 只动草稿的记号（mock / 编辑器 / 追加 / 删除）与离线路径同一实现；
+            // 在线时 add / del 照样写回。
+            runOffline(token)
+            await powerSchedule.waitWritesSettled()
+            dumpSchedule()
+        } else if token == "schedroundtrip" {
+            await smokeScheduleRoundtrip(manager)
+        } else {
                 NSLog("[status] 认不出指令「%@」", token)
             }
         }
@@ -1631,39 +1664,39 @@ final class AppState {
 
     /// 冒烟用：开关机计划的**整条写回链路**。
     ///
-    /// 屏幕上点不了 UI（没有辅助功能权限，点击被静默丢弃），所以「开关真能改到 NAS 上」
-    /// 这件事只能在视图之外证一遍。每一步都走界面那两下 —— `toggle` 拨草稿、
-    /// `save` 写回并回读 —— 挑最后一行的开关拨两次、存两次，**收尾回原样**：
-    /// 第一次保存后核对服务端那一份确实变了，第二次保存后核对与原样逐字一致。
+    /// 屏幕上点不了 UI（没有辅助功能权限，点击被静默丢弃），所以「开关真能改到
+    /// NAS 上」这件事只能在视图之外证一遍。操作即写回：拨开关 → 等写回落定 →
+    /// 打点核对 → 拨回 → 再等 → 再核对，**收尾回原样**。
     ///
-    /// 🔴 判据是**服务端回读的那一份**，不是 `save` 的返回值：这个接口对非法的
-    /// `weekdays` 是静默剥掉（照回 `success`）。
+    /// 🔴 判据是**写回后的那一份**（成功路径放的就是服务端回读），不是任何返回值：
+    /// 这个接口对非法的 `weekdays` 是静默剥掉（照回 `success`）。
     private func smokeScheduleRoundtrip(_ manager: SessionManager) async {
-        guard let before = powerSchedule.server, !before.tasks.isEmpty else {
-            NSLog("[sched] 手上没有服务端那一份（先 sched 读一次），跳过往返")
+        guard !powerSchedule.tasks.isEmpty else {
+            NSLog("[sched] 手上没有那一份计划（先 sched 读一次），跳过往返")
             return
         }
-        let index = before.tasks.count - 1
-        var expected = before.tasks
+        let before = powerSchedule.tasks
+        let index = before.count - 1
+        var expected = before
         expected[index].enabled.toggle()
         NSLog("[sched] 往返起点 #%d %@ %@ 开关%@ → 目标 %@",
-              index, before.tasks[index].kind.label, before.tasks[index].timeText,
-              before.tasks[index].enabled ? "开" : "关",
+              index, before[index].kind.label, before[index].timeText,
+              before[index].enabled ? "开" : "关",
               expected[index].enabled ? "开" : "关")
 
-        powerSchedule.toggle(index)
-        _ = await powerSchedule.save(on: manager)
-        let first = powerSchedule.server?.tasks ?? []
-        NSLog("[sched] 往返 1/2 服务端回读 %@ · 与目标一致 %@",
+        powerSchedule.toggle(index, on: manager)
+        await powerSchedule.waitWritesSettled()
+        let first = powerSchedule.tasks
+        NSLog("[sched] 往返 1/2 写回后 %@ · 与目标一致 %@",
               first.map { "\($0.timeText)/\($0.enabled ? "开" : "关")" }.joined(separator: " "),
               first == expected ? "是" : "否 ✗")
 
-        powerSchedule.toggle(index)
-        _ = await powerSchedule.save(on: manager)
-        let second = powerSchedule.server?.tasks ?? []
-        NSLog("[sched] 往返 2/2 服务端回读 %@ · 与原样逐字一致 %@",
+        powerSchedule.toggle(index, on: manager)
+        await powerSchedule.waitWritesSettled()
+        let second = powerSchedule.tasks
+        NSLog("[sched] 往返 2/2 写回后 %@ · 与原样逐字一致 %@",
               second.map { "\($0.timeText)/\($0.enabled ? "开" : "关")" }.joined(separator: " "),
-              second == before.tasks ? "是" : "否 ✗")
+              second == before ? "是" : "否 ✗")
         dumpSchedule()
     }
 
