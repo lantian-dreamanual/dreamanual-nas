@@ -109,6 +109,14 @@ struct RootView: View {
             }
             .id(state.powerEditor)
         }
+        // 关机 / 重启的确认弹窗（电源卡两颗按钮）。指令在确认框里发；
+        // 换动作前必先关弹窗，@State 不用挂身份。
+        .dmModal(
+            isPresented: state.powerConfirm != nil,
+            onDismiss: { state.closePowerConfirm() }
+        ) {
+            PowerConfirmCard()
+        }
         // 计划行右键菜单（编辑 / 删除）：与歌曲 / 文件菜单同一归属、同一套摆位。
         .overlay { powerRowMenuLayer }
     }

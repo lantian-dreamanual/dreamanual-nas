@@ -281,6 +281,90 @@ final class AppState {
         tagEditor = nil
     }
 
+    // MARK: - 立刻关机 / 重启
+
+    /// 关机 / 重启的确认弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
+    /// 两颗都要二次确认（原型 data-note：确认框里列出影响）。
+    enum PowerConfirm: Equatable {
+        case shutdown
+        case reboot
+    }
+
+    private(set) var powerConfirm: PowerConfirm?
+
+    func openPowerConfirm(_ kind: PowerConfirm) {
+        powerConfirm = kind
+    }
+
+    func closePowerConfirm() {
+        powerConfirm = nil
+    }
+
+    private var powerConfirmBusy = false
+
+    /// 确认框里点下去：发指令、本地断开；重启再起一条专用等待重连。
+    ///
+    /// 🔴 这条指令**没有回读**（`SystemPowerAPI` 头注释）—— 应答 success 只证明
+    /// NAS 收到了，不证明它已经（或将会）照做；所以成功与否的后续判据不在界面，
+    /// 而在链路监控（NAS 掉了面板转离线）与重启等待重连（回来了自动补连）。
+    func confirmPower(_ kind: PowerConfirm) async {
+        guard let manager = sessionManager, !powerConfirmBusy else { return }
+        powerConfirmBusy = true
+        defer { powerConfirmBusy = false }
+        do {
+            try await SystemPowerAPI.power(kind == .shutdown ? .shutdown : .reboot,
+                                           on: manager)
+        } catch {
+            NSLog("[power] %@ 指令失败：%@",
+                  kind == .shutdown ? "关机" : "重启", String(describing: error))
+            showToast("指令没发出去 —— \(error.localizedDescription)", .err)
+            return
+        }
+        let endpoint = endpointKey
+        let user = trimmedUsername
+        powerConfirm = nil
+        // 会话马上就没用了：本地先断干净（停保活、清快照），面板转离线。
+        await disconnect()
+        if kind == .shutdown {
+            showToast("关机指令已发出，NAS 正在下电", .ok)
+        } else {
+            showToast("重启指令已发出，NAS 回来就自动重连", .ok)
+            startRebootReconnect(endpoint: endpoint, user: user)
+        }
+    }
+
+    private var rebootReconnectTask: Task<Void, Never>?
+
+    /// 重启后的专用等待重连。NAS 下电到回来约 2 分钟，常规自动连五把
+    /// （0/5/15/30/60 秒）撑不过这个窗口 —— 这条每 20 秒探一把、最多 5 分钟；
+    /// 到点收手留给手动。用户中途自己动手（连 / 断）时随 `cancelAutoConnect`
+    /// 一起取消，不跟人抢方向盘。
+    func startRebootReconnect(endpoint: String, user: String) {
+        rebootReconnectTask?.cancel()
+        rebootReconnectTask = Task { [weak self] in
+            guard let self else { return }
+            for attempt in 1...15 {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                if Task.isCancelled { return }
+                if self.isConnected || self.phase.isBusy { return }
+                let saved = await Task.detached(priority: .utility) {
+                    CredentialStore.load(endpointID: endpoint, username: user)
+                }.value
+                guard let password = saved else {
+                    NSLog("[connect] 重启等待：拿不到凭据，收手")
+                    return
+                }
+                NSLog("[connect] 重启等待第 %d 把", attempt)
+                await self.connect(password: password)
+                if self.isConnected {
+                    NSLog("[connect] 重启完成，已自动重连")
+                    return
+                }
+            }
+            NSLog("[connect] 重启等待超时（5 分钟），等手动重连")
+        }
+    }
+
     // MARK: - 新增 / 编辑开关机计划
 
     /// 新增 / 编辑计划任务的弹窗（挂在根视图的 `.dmModal`，与写操作弹窗同层）。
@@ -1081,6 +1165,8 @@ final class AppState {
     func cancelAutoConnect() {
         autoConnectTask?.cancel()
         autoConnectTask = nil
+        rebootReconnectTask?.cancel()
+        rebootReconnectTask = nil
     }
 
     /// 口令被拒一族：登录 400 / 停用 / 无权限 / 两步验证 / 自动封锁 / 口令过期。
@@ -1561,6 +1647,9 @@ final class AppState {
     ///   · `scheddel=<n>` 删第 n 条并写回（离线时只动本地）；
     ///   · `schededitor` 开编辑弹窗（第 0 条，先灌 mock）—— 离线也能跑；
     ///   · `schedaddopen` 开新增弹窗（先灌 mock）—— 离线也能跑；
+    ///   · `powerconfirm` 摆关机确认弹窗 —— 离线也能跑；
+    ///   · `powerreboot` **真重启**：发指令、断开、等它回来自动重连（只该在
+    ///     真机验证时用）；
     ///   · `failtoggle=<n>` 开「写回假失败」拨第 n 行：界面弹回去 + 页脚失败行，
     ///     专门验「失败 → 本地回滚」这条腿（不发请求）；
     ///   · `schedroundtrip` 整条写回链路：拨 → 等写回 → 回读核对 → 拨回 → 等 →
@@ -1570,6 +1659,14 @@ final class AppState {
     func smokeStatus(_ command: String) async {
         // 离线可跑的记号（不碰会话）先于连接判据 —— NAS 关机时也能灌 mock 摆界面
         // 截图；`schedadd` / `scheddel=` 离线时只动本地（写回要 manager，没有就跳过）。
+        // 🔴 判定收进**一个函数**：整条命令全离线 → 提前截流；与在线记号混用 →
+        // 在线循环里也认它。两处共用一份清单，新记号不会再漏改一边
+        // （`open,powerconfirm` 那次只改白名单、在线循环认不出，弹窗没摆出来）。
+        func isOfflineToken(_ token: String) -> Bool {
+            token == "schedmock" || token == "schededitor" || token == "schedaddopen"
+                || token == "schedadd" || token == "powerconfirm"
+                || token.hasPrefix("scheddel=")
+        }
         func runOffline(_ token: String) {
             let manager = sessionManager
             if token == "schedmock" {
@@ -1583,6 +1680,9 @@ final class AppState {
                 powerSchedule.injectMock()
                 openPowerAdd()
                 NSLog("[sched] 开新增弹窗（灌了 mock 数据）")
+            } else if token == "powerconfirm" {
+                openPowerConfirm(.shutdown)
+                NSLog("[power] 摆关机确认弹窗")
             } else if token == "schedadd" {
                 Task {
                     _ = await powerSchedule.commit(PowerTask(
@@ -1599,9 +1699,7 @@ final class AppState {
         let parts = command.split(separator: ",").map {
             $0.trimmingCharacters(in: .whitespaces)
         }
-        if !parts.isEmpty,
-           parts.allSatisfy({ $0 == "schedmock" || $0 == "schededitor" || $0 == "schedaddopen"
-                              || $0 == "schedadd" || $0.hasPrefix("scheddel=") }) {
+        if !parts.isEmpty, parts.allSatisfy(isOfflineToken) {
             for token in parts { runOffline(token) }
             return
         }
@@ -1669,8 +1767,16 @@ final class AppState {
             dumpSchedule()
         } else if token == "schedroundtrip" {
             await smokeScheduleRoundtrip(manager)
+        } else if token == "powerreboot" {
+            // 真重启 —— NAS 两分钟后回来，等待重连自己接盘。只该在真机验证时用。
+            NSLog("[power] 冒烟：确认框之外直接发重启指令")
+            await confirmPower(.reboot)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            dumpStatus()
+        } else if isOfflineToken(token) {
+            runOffline(token)
         } else {
-                NSLog("[status] 认不出指令「%@」", token)
+            NSLog("[status] 认不出指令「%@」", token)
             }
         }
     }

@@ -75,10 +75,12 @@ final class SystemStatusModel {
 /// 形态照原型 `design/界面原型.html` 的系统状态屏：页头（副行写固件与开机时长、
 /// 右端链路徽章 + 刷新）→ 四张状态卡 → 存储与硬盘。
 ///
-/// **读写半**：温度 / CPU / 内存 / 运行时长 / 容量 / 硬盘（只读），加上开关机计划的
-/// 读取与逐条启用停用（写）。原型下半屏还有两张卡没落：电源（立刻关机 / 重启）与
-/// 计划卡上的「添加」—— 关机真执行过就拔掉了这台机器，而它不在本机广播域里、
-/// 软件唤醒做不到，得挑时间单独验（`docs/接口结论.md` 第二节）。
+/// **读写半**：温度 / CPU / 内存 / 运行时长 / 容量 / 硬盘（只读），加开关机计划的
+/// 读取与增删改（写，操作即写回），加电源卡（立刻关机 / 重启，都要二次确认；
+/// `SystemPowerAPI` 没有回读这一步 —— 发出即成功，后续真假交给链路监控与
+/// 重启等待重连，见 `Core/SystemPower.swift` 头注释）。**关机没真机执行过**
+/// —— 真执行就把这台机器拔了、软件唤醒做不到（`docs/接口结论.md` 第二节）；
+/// 重启已真机往返验证。
 ///
 /// 与原型的三处偏离，都是接口决定的，不是设计取舍：
 ///   ① 原型每块盘一条进度条 —— 服务端**不给单盘已用量**（SHR 之下盘也不是各自
@@ -170,8 +172,11 @@ struct StatusView: View {
                              load: snapshot.load)
                 }
 
-                // 计划表独立于上面这四块（另一条接口、另一份失败），整行一张卡。
-                PowerScheduleCard()
+                // 原型下半屏的 grid2：电源 | 开关机计划 并排、由高的那张定高。
+                HStack(alignment: .top, spacing: DmSpace.s12) {
+                    PowerCard()
+                    PowerScheduleCard()
+                }
             }
             .padding(.horizontal, DmSpace.s24)
             .padding(.bottom, DmSpace.s20)
@@ -180,6 +185,174 @@ struct StatusView: View {
 }
 
 // ============ 卡片 ============
+
+/// 电源卡（原型 `.card.list` 那张）：卡头「电源」+ 提示 → 两行（立刻关机 / 重新启动）。
+///
+/// 🔴 提示行**必须**写「关机后无法远程唤醒」—— 关机后唯一出路是 NAS 侧的
+/// 开机计划，这条写在卡上、不放帮助文档（原型 data-note 原话）。两颗按钮
+/// 都只开确认弹窗，指令在确认框里发（原型：关机与重启都要二次确认）。
+private struct PowerCard: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                Text("电源")
+                    .font(.system(size: DmText.t13, weight: .semibold))
+                    .foregroundColor(Color.dmInk)
+                Text("关机后无法远程唤醒：要它自己开机，先设好右边的开机计划。")
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, DmSpace.s14)
+            .padding(.top, DmSpace.s14)
+            .padding(.bottom, DmSpace.s10)
+
+            PowerActionRow(icon: "power", title: "立刻关机", note: nil,
+                           button: "关机…", isDanger: true) {
+                state.openPowerConfirm(.shutdown)
+            }
+            PowerActionRow(icon: "refresh-cw", title: "重新启动",
+                           note: "约 2 分钟后恢复在线",
+                           button: "重启…", isDanger: false) {
+                state.openPowerConfirm(.reboot)
+            }
+        }
+        .dmCard()
+    }
+}
+
+/// 电源卡的一行（原型 `.srow`：上沿发丝、内边距 10/14、右端按钮）。
+private struct PowerActionRow: View {
+    let icon: String
+    let title: String
+    let note: String?
+    let button: String
+    let isDanger: Bool
+    let action: () -> Void
+
+    private var label: some View {
+        HStack(spacing: DmSpace.s6) {
+            LucideIcon(icon, size: DmIcon.i12)
+            Text(button)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s12) {
+            VStack(alignment: .leading, spacing: DmSpace.s2) {
+                Text(title)
+                    .font(.system(size: DmText.t13))
+                    .foregroundColor(Color.dmInk)
+                if let note {
+                    Text(note)
+                        .font(.system(size: DmText.t11))
+                        .monospacedDigit()
+                        .foregroundColor(Color.dmInk3)
+                }
+            }
+            Spacer(minLength: 0)
+            if isDanger {
+                Button(action: action) { label }
+                    .buttonStyle(DangerButtonStyle())
+            } else {
+                Button(action: action) { label }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.vertical, DmSpace.s10)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.dmLine)
+                .frame(height: DmLine.hairline)
+        }
+    }
+}
+
+/// 关机 / 重启的确认弹窗（挂根视图 `.dmModal`，470 自绘卡）。
+///
+/// 影响清单按动作给：共通一条「传输会中断」，关机加「无法远程唤醒」
+/// （硬约束走 `DmDangerNote`），重启加「约 2 分钟回来、会自动重连」。
+/// 执行中两颗按钮都锁 —— 指令发出去 NAS 就下电了，重复点没有意义。
+struct PowerConfirmCard: View {
+    @Environment(AppState.self) private var state
+    @State private var isExecuting = false
+
+    private var kind: AppState.PowerConfirm? { state.powerConfirm }
+
+    private var isShutdown: Bool { kind == .shutdown }
+
+    var body: some View {
+        DmModalCard(title: isShutdown ? "立刻关机" : "重新启动",
+                    onClose: { state.closePowerConfirm() }) {
+            VStack(alignment: .leading, spacing: DmSpace.s10) {
+                if isShutdown {
+                    DmDangerNote(text: dangerNote)
+                }
+                impact("arrow-down-up", "正在进行的播放与文件传输会中断。")
+                if isShutdown {
+                    impact("power", "关机后无法远程唤醒 —— 要它自己开机，先在计划卡里排好开机时间。")
+                } else {
+                    impact("clock", "NAS 约 2 分钟后恢复在线，客户端会自动重连。")
+                }
+            }
+        } foot: {
+            Button("取消") { state.closePowerConfirm() }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(isExecuting)
+            Button(isShutdown ? "关机" : "重启", action: submit)
+                .anyButton(danger: isShutdown)
+                .disabled(isExecuting)
+        }
+    }
+
+    /// 关机的硬约束（红色提示块）；重启不需要 —— 它自己会回来。
+    private var dangerNote: String {
+        "关机后无法远程唤醒，唯一出路是 NAS 侧的开机计划。"
+    }
+
+    private func impact(_ icon: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: DmSpace.s8) {
+            LucideIcon(icon, size: DmIcon.i12)
+                .foregroundColor(Color.dmInk3)
+                .padding(.top, DmSpace.s2)
+            Text(text)
+                .font(.system(size: DmText.t12))
+                .foregroundColor(Color.dmInk2)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func submit() {
+        guard let kind, !isExecuting else { return }
+        isExecuting = true
+        Task {
+            await state.confirmPower(kind)
+            isExecuting = false
+        }
+    }
+}
+
+/// 两颗确认按钮只差样式、不差布局 —— 用一个小包装挑，免得写两遍 Button。
+private struct AnyButton: ViewModifier {
+    let danger: Bool
+
+    func body(content: Content) -> some View {
+        if danger {
+            content.buttonStyle(DangerButtonStyle())
+        } else {
+            content.buttonStyle(PrimaryButtonStyle())
+        }
+    }
+}
+
+extension View {
+    fileprivate func anyButton(danger: Bool) -> some View { modifier(AnyButton(danger: danger)) }
+}
 
 /// 一张状态卡（原型 `.stat`）：11 的标签行（图标 + 字）、20 的主值（末尾小字是单位）、
 /// 11 的脚注。底 `panel-2`、圆角 `r-12`、发丝描边、内边距 `s14`。
