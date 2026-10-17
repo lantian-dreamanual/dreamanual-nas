@@ -2959,6 +2959,34 @@ final class AppState {
         }
     }
 
+    /// 登录被拒时的界面文案。
+    ///
+    /// 「账号或口令不对」这句话在**输入的口令与本机保存的那条不一致**时
+    /// 信息量为零 —— 用户确信自己没输错、却只能反复重试。这里把差异说成
+    /// 位置与个数（不报字符本身）：哪里打错一眼就能回去改；同时给出
+    /// 「清空口令框用已保存那条」的现成路径。
+    private static func connectFailureMessage(_ error: any Error,
+                                              source: String,
+                                              sent: String,
+                                              stored: String?) -> String {
+        guard let err = error as? SynologyError,
+              err.api == "SYNO.API.Auth", err.code == 400,
+              source == "界面输入", let stored, !sent.isEmpty, stored != sent
+        else { return error.localizedDescription }
+        let a = Array(sent), b = Array(stored)
+        let note: String
+        if a.count != b.count {
+            note = "长度不同：输入 \(a.count) 位，已保存 \(b.count) 位"
+        } else {
+            let diffs = (0..<a.count).filter { a[$0] != b[$0] }
+            note = diffs.count == 1
+                ? "第 \(diffs[0] + 1) 位不同"
+                : "第 \(diffs[0] + 1) 位起有 \(diffs.count) 位不同"
+        }
+        return "口令与本机已保存的那条不一致（\(note)）。"
+            + "把口令框清空再点连接，会用已保存且能登录的那条。"
+    }
+
     /// 连接诊断落盘：`~/Library/Application Support/DreamanualNAS/last-connect.json`，
     /// 每连一次覆盖。
     ///
@@ -3135,7 +3163,9 @@ final class AppState {
                               error: nil)
         } catch {
             lastConnectError = error
-            phase = .failed(error.localizedDescription)
+            phase = .failed(Self.connectFailureMessage(
+                error, source: passwordSource, sent: effectivePassword,
+                stored: storedForSource))
             sessionManager = nil
             recordConnectDiag(method: method, endpoint: endpointLabel, user: user,
                               source: passwordSource, sentPassword: effectivePassword,
