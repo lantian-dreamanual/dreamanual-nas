@@ -4,6 +4,13 @@ import Foundation
 import Network
 import Observation
 
+/// 连接表单的本地校验错误：没经过任何服务，错误文案自己就是全文，
+/// 不借 `QuickConnectError`（那会套上「QuickConnect 返回了看不懂的内容」）。
+struct ConnectFormError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 /// 连接状态机 + 外壳需要的全部全局状态。
 ///
 /// 这一版只做到「连上、两个会话都在、心跳活着」；曲库 / 文件 / 系统三个模块
@@ -185,17 +192,6 @@ final class AppState {
         DirectAddress.parse(directAddress) != nil ? .direct : .quickconnect
     }
 
-    /// 设置页「重新连接」这一步会连到哪 —— 换线路正是这只按钮的常见用途，
-    /// 点之前就得看得见结果，而不是点完从「线路」那一行才发现还是中继。
-    var reconnectTargetLabel: String {
-        switch configuredMethod {
-        case .direct:
-            guard let direct = DirectAddress.parse(directAddress) else { return "直连" }
-            return "直连 \(direct.host):\(direct.port)"
-        case .quickconnect:
-            return trimmedQCID.isEmpty ? "QuickConnect" : "QuickConnect · \(trimmedQCID)"
-        }
-    }
     var isConnected: Bool { phase == .connected }
 
     func select(_ module: Module) {
@@ -3132,8 +3128,10 @@ final class AppState {
             switch method {
             case .direct:
                 guard let direct = DirectAddress.parse(directAddress) else {
-                    throw QuickConnectError.badResponse(
-                        "直连地址没填对：填主机或主机:端口（局域网 / Tailscale）")
+                    // 本地校验拦下的，别借道 QuickConnectError —— 那会套上
+                    // 「QuickConnect 返回了看不懂的内容」的前缀，张冠李戴。
+                    throw ConnectFormError(
+                        message: "直连地址没填对：填主机或主机:端口（局域网 / Tailscale）")
                 }
                 // 这条路的证书是 NAS 自签的，要放行。
                 NSLog("[connect] 直连分支 %@:%d", direct.host, direct.port)

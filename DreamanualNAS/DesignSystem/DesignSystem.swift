@@ -615,20 +615,37 @@ struct DmSettingsGroup<Content: View>: View {
 /// 设置行：标签左、控件右，内边距 12/14（与密码管理 `.srow` 同档）。
 struct DmSettingsRow<Content: View>: View {
     let label: String
+    /// 附注：解释这一行，跟着行走、不被当成独立段落（2026-10-17 用户定）。
+    let note: String?
+    /// 附注是警告时取 `danger-ink` —— 只换颜色，位置与字号不动，避免跳版。
+    let noteIsWarning: Bool
     @ViewBuilder let control: () -> Content
 
-    init(_ label: String, @ViewBuilder control: @escaping () -> Content) {
+    init(_ label: String,
+         note: String? = nil,
+         noteIsWarning: Bool = false,
+         @ViewBuilder control: @escaping () -> Content) {
         self.label = label
+        self.note = note
+        self.noteIsWarning = noteIsWarning
         self.control = control
     }
 
     var body: some View {
-        HStack(spacing: DmSpace.s16) {
-            Text(label)
-                .font(.system(size: DmText.t13))
-                .foregroundColor(Color.dmInk)
-            Spacer(minLength: 0)
-            control()
+        VStack(alignment: .leading, spacing: DmSpace.s2) {
+            HStack(spacing: DmSpace.s16) {
+                Text(label)
+                    .font(.system(size: DmText.t13))
+                    .foregroundColor(Color.dmInk)
+                Spacer(minLength: 0)
+                control()
+            }
+            if let note {
+                Text(note)
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(noteIsWarning ? Color.dmDangerInk : Color.dmInk2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s12)

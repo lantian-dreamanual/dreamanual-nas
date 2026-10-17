@@ -525,6 +525,8 @@ private struct SettingsPane: View {
             VStack(alignment: .leading, spacing: DmSpace.s24) {
                 // ===== 连接 =====
                 DmSettingsGroup(title: "连接") {
+                    // 服务器 / 线路合并成一行：`endpointLabel` 本来就是「线路 + 地址」
+                    // 拼的，分开写等于把同一件事说两遍（2026-10-17 用户定）。
                     DmSettingsRow("服务器") {
                         Text(state.endpointLabel.isEmpty ? "—" : state.endpointLabel)
                             .font(.system(size: DmText.t13))
@@ -532,29 +534,21 @@ private struct SettingsPane: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
-                    DmSettingsRow("线路") {
-                        Text(state.linkMode?.label ?? "—")
-                            .font(.system(size: DmText.t13))
-                            .foregroundColor(Color.dmInk2)
-                    }
-                    DmSettingsRow("直连地址") {
-                        TextField("留空走 QuickConnect", text: $state.directAddress)
-                            .formFieldRow()
-                            .frame(width: 240)
-                    }
-                    // 改地址会让端点键跟着变（见 `endpointKey`）—— 本机存的密码
-                    // 是按旧键写的，取不到就退回连接页重输，所以这里明说要点重连。
-                    settingsNote("局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点「重新连接」生效。")
                     DmSettingsRow("账号") {
                         Text(state.username.isEmpty ? "—" : state.username)
                             .font(.system(size: DmText.t13))
                             .foregroundColor(Color.dmInk2)
                     }
-                    settingsNote("每 4 分钟一次心跳，会话失效自动重登并重放当前请求。")
-                    // 直连地址填了就走直连、没填走 QuickConnect：把结果写在
-                    // 按钮上方，点之前就知道会连到哪（用户报过「填了直连重连
-                    // 还是中继」，就是这里没对齐）。
-                    settingsNote("「重新连接」将走：\(state.reconnectTargetLabel)")
+                    // 说明挂在地址行下面，只讲这一行的事：格式、优先级、什么时候生效。
+                    // 解析不了时同一位置换成警告 —— 不然用户以为填的是直连，重连却
+                    // 退回 QuickConnect，而界面上一个字都不提。
+                    DmSettingsRow("直连地址",
+                                  note: directAddressNote,
+                                  noteIsWarning: isDirectAddressInvalid) {
+                        TextField("留空走 QuickConnect", text: $state.directAddress)
+                            .formFieldRow()
+                            .frame(width: 240)
+                    }
                     HStack(spacing: DmSpace.s8) {
                         // 两颗同档次按钮（与电源卡同一口径）：卡面上不抢层级，
                         // 真要破坏性操作的语义留给它自己的后果提示。
@@ -614,13 +608,16 @@ private struct SettingsPane: View {
         return "\(short)（\(build)）"
     }
 
-    /// 组内说明行：字号 12 / `ink-2`，与行同内边距（贴左，不缩进）。
-    private func settingsNote(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: DmText.t12))
-            .foregroundColor(Color.dmInk2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, DmSpace.s14)
-            .padding(.vertical, DmSpace.s12)
+    /// 直连地址解析不了（端口不是数字、段数不对等）—— 重连会退回 QuickConnect。
+    /// 留空不算错：那本来就是「走 QuickConnect」。
+    private var isDirectAddressInvalid: Bool {
+        !state.directAddress.isEmpty && DirectAddress.parse(state.directAddress) == nil
+    }
+
+    private var directAddressNote: String {
+        if isDirectAddressInvalid {
+            return "这个地址认不出，重连会走 QuickConnect。按「主机」或「主机:端口」填，端口用数字。"
+        }
+        return "局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点「重新连接」生效。"
     }
 }
