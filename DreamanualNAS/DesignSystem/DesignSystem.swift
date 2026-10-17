@@ -1505,24 +1505,6 @@ struct DmMenuSeparator: View {
 ///
 /// SwiftUI 自己没有右键手势，`.contextMenu` 出的是**系统菜单**（NSMenu）—— 与第八节
 /// 的菜单卡不是一套形态，所以这里自己接。
-/// 右键漂移诊断：报点与菜单层几何追加落盘（`~/Library/Application Support/
-/// DreamanualNAS/rc-debug.log`）。定位完整条拆掉。
-func rcDebugLog(_ line: String) {
-    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("DreamanualNAS", isDirectory: true)
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let url = dir.appendingPathComponent("rc-debug.log")
-    let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-    let text = "[\(stamp)] \(line)\n"
-    if let handle = try? FileHandle(forWritingTo: url) {
-        defer { try? handle.closeFile() }
-        handle.seekToEndOfFile()
-        handle.write(Data(text.utf8))
-    } else {
-        try? text.write(to: url, atomically: true, encoding: .utf8)
-    }
-}
-
 struct RightClickCatcher: NSViewRepresentable {
     /// 参数已在根视图坐标系里（左上原点）。
     let onRightClick: (CGPoint) -> Void
@@ -1565,8 +1547,6 @@ struct RightClickCatcher: NSViewRepresentable {
             let point = content.isFlipped
                 ? inContent
                 : CGPoint(x: inContent.x, y: content.bounds.height - inContent.y)
-            // TODO(诊断): 右键漂移排查，定位完拆。
-            rcDebugLog("捕获层报点 (\(Int(point.x)),\(Int(point.y))) · locInWindow=(\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))) · content=\(NSStringFromRect(content.bounds)) flipped=\(content.isFlipped) · 窗口frame=\(NSStringFromRect(window?.frame ?? .zero))")
             onRightClick?(point)
         }
     }

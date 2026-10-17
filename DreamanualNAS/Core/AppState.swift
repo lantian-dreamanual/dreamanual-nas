@@ -287,14 +287,11 @@ final class AppState {
     }
 
     func openSongMenu(_ song: AudioSong, at point: CGPoint, queue: [AudioSong]) {
-        // TODO(诊断): 右键漂移排查，定位完拆。歌名进日志 —— 菜单是谁的一眼可对。
-        rcDebugLog("菜单打开「\(song.artist) - \(song.title)」· 请求点 (\(Int(point.x)),\(Int(point.y)))")
         songMenu = SongMenuRequest(song: song, point: point, queue: queue)
     }
 
     /// 队列表行的右键（同一张菜单卡，根级多「从队列移除」一条）。
     func openQueueSongMenu(_ song: AudioSong, at point: CGPoint, queueIndex: Int) {
-        rcDebugLog("队列菜单打开「\(song.title)」· 队列下标 \(queueIndex)")
         var request = SongMenuRequest(song: song, point: point, queue: playback?.queue ?? [song])
         request.fromQueue = true
         request.queueIndex = queueIndex

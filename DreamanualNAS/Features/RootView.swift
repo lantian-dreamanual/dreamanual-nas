@@ -180,7 +180,6 @@ struct RootView: View {
     private var songMenuLayer: some View {
         GeometryReader { geo in
             if let request = state.songMenu {
-                let _ = rcDebugLog("菜单层 geo=\(NSStringFromSize(geo.size)) · 请求点 (\(Int(request.point.x)),\(Int(request.point.y)))")
                 ZStack(alignment: .topLeading) {
                     Color.black.opacity(0.001)
                         .contentShape(Rectangle())
