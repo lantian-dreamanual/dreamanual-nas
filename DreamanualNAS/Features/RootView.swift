@@ -518,6 +518,9 @@ private struct MainAreaView: View {
 
 private struct SettingsPane: View {
     @Environment(AppState.self) private var state
+    /// 检查更新的状态（版本号 / 结果 / 是否有新版）。`@State` 挂在这一页上：
+    /// 结果只在「关于」组里出现，换模块再回来重查一次也无妨。
+    @State private var updates = UpdateChecker()
 
     var body: some View {
         @Bindable var state = state
@@ -579,9 +582,31 @@ private struct SettingsPane: View {
                             .font(.system(size: DmText.t13))
                             .foregroundColor(Color.dmInk2)
                     }
+                    // 检查更新：状态字贴在按钮左边，查完当场给结果 —— 不弹窗、不占
+                    // 另一块版面（与投资监控设置页同一个做法）。
+                    DmSettingsRow("检查更新") {
+                        HStack(spacing: DmSpace.s8) {
+                            if updates.status != .idle {
+                                Text(updates.status.text)
+                                    .font(.system(size: DmText.t11))
+                                    .foregroundColor(updateStatusColor)
+                            }
+                            Button(updates.status == .newVersion ? "下载更新" : "立即检查") {
+                                if updates.status == .newVersion, let url = updates.downloadURL {
+                                    NSWorkspace.shared.open(url)
+                                } else {
+                                    Task { await updates.check() }
+                                }
+                            }
+                            .buttonStyle(SecondaryButtonStyle(on: .card))
+                            .disabled(updates.isChecking)
+                        }
+                    }
                     DmSettingsRow("主页") {
-                        Button("dreamanual.com") {
-                            if let url = URL(string: "https://dreamanual.com") {
+                        // 应用自己的页面，不甩到主站首页：主站首页是作品集，
+                        // 指着它等于让用户自己再找一遍。
+                        Button("dreamanual.com/works/nas.html") {
+                            if let url = URL(string: "https://dreamanual.com/works/nas.html") {
                                 NSWorkspace.shared.open(url)
                             }
                         }
@@ -589,6 +614,25 @@ private struct SettingsPane: View {
                         .font(.system(size: DmText.t13))
                         .foregroundColor(Color.dmAccent2)
                     }
+                    // 赞赏整行可点：不占标签右格，读上去是「一行入口」而不是「一个设置项」。
+                    Button {
+                        if let url = URL(string: "https://afdian.com/a/wuyifa001") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        HStack(spacing: DmSpace.s6) {
+                            LucideIcon("coffee", size: DmIcon.i14)
+                                .foregroundColor(Color.dmAccent2)
+                            Text("请我喝杯咖啡")
+                                .font(.system(size: DmText.t13))
+                                .foregroundColor(Color.dmAccent2)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, DmSpace.s14)
+                        .padding(.vertical, DmSpace.s12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             // 内容宽与居中：对齐视频下载 / 密码管理的设置页（720 块内左对齐、
@@ -606,6 +650,17 @@ private struct SettingsPane: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short)（\(build)）"
+    }
+
+    /// 检查结果的状态色：成功取 `ok-ink`、发现新版取 `accent-2`、失败取
+    /// `danger-ink` —— 都是浅档，压 `panel-2` 卡面时读得清。
+    private var updateStatusColor: Color {
+        switch updates.status {
+        case .upToDate: return Color.dmOkInk
+        case .newVersion: return Color.dmAccent2
+        case .failed: return Color.dmDangerInk
+        default: return Color.dmInk2
+        }
     }
 
     /// 直连地址解析不了（端口不是数字、段数不对等）—— 重连会退回 QuickConnect。

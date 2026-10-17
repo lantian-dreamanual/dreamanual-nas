@@ -244,6 +244,9 @@ struct LucideIcon: View {
         // `NSImage(systemSymbolName:)` 确实存在（`calendar.day.timeline.left` 也在，
         // 但它画的是时间轴，取的是另一件事的意象）。
         "calendar-clock": "calendar.badge.clock",
+        // 赞赏入口（2026-10-17）。`cup.and.saucer` 问过 `NSImage(systemSymbolName:)`
+        // 存在（`mug` / `cup` 都不存在，别试）。
+        "coffee": "cup.and.saucer",
     ]
 }
 
