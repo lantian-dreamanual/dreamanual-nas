@@ -2629,8 +2629,17 @@ final class AppState {
     /// `RightClickCatcher` 同一条 hitTest 链 —— 之前用 CGEvent 投递进不了视图层，
     /// sendEvent 是从窗口自己派发，捕获层收得到）；`download` 把曲库第一首下到
     /// 临时目录（走界面同一条 `FileDownloader`，落盘报字节数后清掉，别留垃圾）；
-    /// `savepanel` 真开一次系统存盘面板（核对文案本地化，不自动关）。
+    /// `savepanel` 真开一次系统存盘面板（核对文案本地化，不自动关）；
+    /// `module=<music|files|status|settings>` 切模块（截图核对各页形态）；
+    /// `reconnect` 真机走一遍重连链路（清旧会话 → 本机口令 → connect）。
     func smokeUI(_ command: String) async {
+        // 与 `DM_STATUS` 同一条坑：入口在启动瞬间就消费它，自动连却是异步的。
+        // 不先等，整套界面指令在「未连接」上直接丢掉（本批真机踩到）。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager else {
             NSLog("[ui] 未连接，跳过")
             return
@@ -2654,6 +2663,19 @@ final class AppState {
                 smokeSavePanel()
             } else if token == "tagload" {
                 await smokeTagLoad(manager)
+            } else if token == "reconnect" {
+                // 真机走一遍重连链路：清旧会话 → 本机口令 → connect（日志看 [connect]）。
+                NSLog("[ui] 触发重新连接")
+                await reconnect()
+            } else if token.hasPrefix("module=") {
+                // 切模块：截图核对各页形态用（设置页这类没有数据通路的页面只能这样摆）。
+                let name = String(token.dropFirst("module=".count))
+                if let target = Module(rawValue: name) {
+                    select(target)
+                    NSLog("[ui] 切到模块「%@」", target.title)
+                } else {
+                    NSLog("[ui] 认不出模块「%@」", name)
+                }
             } else {
                 NSLog("[ui] 认不出指令「%@」", token)
             }
@@ -2963,6 +2985,41 @@ final class AppState {
             phase = .failed(error.localizedDescription)
             sessionManager = nil
         }
+    }
+
+    /// 设置页的「重新连接」：清掉旧会话，用本机存的口令原样再连一次。
+    ///
+    /// 与 `disconnect()` 的差别只在**不动本机缓存**（封面 / 歌词 / 开关机计划）——
+    /// 连的还是同一台机器，重拉一遍封面纯属浪费。口令按当前端点键取：
+    /// 刚改过直连地址的话键跟着变了、取不到，那就退回连接页让用户重输口令，
+    /// 别拿旧口令硬试（错的凭据会把 DSM 的自动封锁喂起来，见 `接口文档` 登录 400 那条）。
+    func reconnect() async {
+        cancelAutoConnect()
+        playback?.detach()
+        playback = nil
+        showsQueue = false
+        showsImmersive = false
+        status.clear()
+        widgetPushTask?.cancel()
+        widgetPushTask = nil
+        if let manager = sessionManager {
+            await manager.stopKeepAlive()
+            await manager.logoutAll()
+        }
+        sessionManager = nil
+        endpointLabel = ""
+        linkMode = nil
+        phase = .idle
+
+        guard let password = CredentialStore.load(endpointID: endpointKey,
+                                                 username: trimmedUsername),
+              !password.isEmpty
+        else {
+            toast = ToastMessage("连接设置变了，需要重新输入口令", .info)
+            NSLog("[connect] 重连取不到本端点的口令（端点键 %@），退回连接页", endpointKey)
+            return
+        }
+        await connect(password: password)
     }
 
     func disconnect() async {

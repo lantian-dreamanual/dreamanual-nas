@@ -508,6 +508,12 @@ struct SecondaryButtonStyle: ButtonStyle {
 /// 名字不带 `dm` 前缀 —— 那是生成令牌的命名空间，门禁按它对账。
 private struct FormFieldModifier: ViewModifier {
     let surface: DmSurface
+    /// 设置行内嵌档（2026-10-17）：高 32、底色恒 `panel-3`。
+    ///
+    /// 设置分组卡本身就是 `panel-2`，嵌进去的控件不能再跟卡同底 —— 第八节
+    /// 「设置行内嵌控件」那条统一定档：32 / 字 13 / `panel-3` / `line-2` 描边 / `r-8`。
+    /// 与四端的 `DmTextField`（video）/ `FormTextField(rowInline:)`（invest）同一档。
+    let rowInline: Bool
 
     @Environment(\.isFocused) private var envFocused
 
@@ -517,9 +523,10 @@ private struct FormFieldModifier: ViewModifier {
             .font(.system(size: DmText.t13))
             .foregroundStyle(Color.dmInk)
             .padding(.horizontal, DmSpace.s12)
-            .frame(height: DmControl.h38)
+            .frame(height: rowInline ? DmControl.h32 : DmControl.h38)
             .background(
-                RoundedRectangle(cornerRadius: DmRadius.r8).fill(surface.controlFill)
+                RoundedRectangle(cornerRadius: DmRadius.r8)
+                    .fill(rowInline ? Color.dmPanel3 : surface.controlFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DmRadius.r8)
@@ -530,7 +537,12 @@ private struct FormFieldModifier: ViewModifier {
 
 extension View {
     func formField(on surface: DmSurface = .panel) -> some View {
-        modifier(FormFieldModifier(surface: surface))
+        modifier(FormFieldModifier(surface: surface, rowInline: false))
+    }
+
+    /// 设置页行内嵌的输入框：32 档、`panel-3` 底。
+    func formFieldRow() -> some View {
+        modifier(FormFieldModifier(surface: .card, rowInline: true))
     }
 }
 
@@ -546,6 +558,57 @@ struct FormLabel: View {
         Text(text)
             .font(.system(size: DmText.t12, weight: .medium))
             .foregroundColor(Color.dmInk2)
+    }
+}
+
+// ============ 设置页 ============
+
+/// 设置分组：组标题在**卡片外**（11 / 700 / `ink-3` / 0.08em 字距），卡面
+/// `panel-2` 底、`r-8`、**无描边**（`line` 与 `panel-2` 同色，只靠底色与主区
+/// `panel` 分层）—— 第八节「设置分组卡」第三个变体，与 video `SettingsGroupCard`、
+/// vault `.srow` 一组（2026-10-09 定）。主区里那些 `line-2` 描边的列表卡是另一族。
+///
+/// 内容收进 `alignment: .leading` 的零间距 VStack：不给 leading 的话，说明文字
+/// 这类贴内容宽的块会被卡片居中（video 端出图实抓过）。
+struct DmSettingsGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DmSpace.s8) {
+            Text(title)
+                .font(.system(size: DmText.t11, weight: .bold))
+                .kerning(0.8)
+                .foregroundColor(Color.dmInk3)
+            VStack(alignment: .leading, spacing: 0, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: DmRadius.r8).fill(Color.dmPanel2)
+                )
+        }
+    }
+}
+
+/// 设置行：标签左、控件右，内边距 12/14（与密码管理 `.srow` 同档）。
+struct DmSettingsRow<Content: View>: View {
+    let label: String
+    @ViewBuilder let control: () -> Content
+
+    init(_ label: String, @ViewBuilder control: @escaping () -> Content) {
+        self.label = label
+        self.control = control
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s16) {
+            Text(label)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmInk)
+            Spacer(minLength: 0)
+            control()
+        }
+        .padding(.horizontal, DmSpace.s14)
+        .padding(.vertical, DmSpace.s12)
     }
 }
 

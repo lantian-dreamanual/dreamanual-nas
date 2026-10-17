@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 外壳：侧栏（三个模块 + 设置）+ 主区 + 底部常驻播放条。/// 布局与设计原型一致：侧栏 220 固定宽，主区自适应，播放条通栏、切到任何模块都不中断。
@@ -518,27 +519,109 @@ private struct MainAreaView: View {
 private struct SettingsPane: View {
     @Environment(AppState.self) private var state
 
-    @State private var heartbeatText = "刚启动"
-
     var body: some View {
-        VStack(alignment: .leading, spacing: DmSpace.s14) {
-            VStack(alignment: .leading, spacing: DmSpace.s8) {
-                FormLabel("连接")
-                Text(state.endpointLabel)
-                    .font(.system(size: DmText.t12))
-                    .foregroundColor(Color.dmInk2)
-                Text("每 4 分钟一次心跳；会话失效自动重登并重放当前请求。")
-                    .font(.system(size: DmText.t11))
-                    .foregroundColor(Color.dmInk3)
-                Button("断开连接") {
-                    Task { await state.disconnect() }
+        @Bindable var state = state
+        ScrollView {
+            VStack(alignment: .leading, spacing: DmSpace.s24) {
+                // ===== 连接 =====
+                DmSettingsGroup(title: "连接") {
+                    DmSettingsRow("服务器") {
+                        Text(state.endpointLabel.isEmpty ? "—" : state.endpointLabel)
+                            .font(.system(size: DmText.t13))
+                            .foregroundColor(Color.dmInk2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    DmSettingsRow("线路") {
+                        Text(state.linkMode?.label ?? "—")
+                            .font(.system(size: DmText.t13))
+                            .foregroundColor(Color.dmInk2)
+                    }
+                    DmSettingsRow("直连地址") {
+                        TextField("留空走 QuickConnect", text: $state.directAddress)
+                            .formFieldRow()
+                            .frame(width: 240)
+                    }
+                    // 改地址会让端点键跟着变（见 `endpointKey`）—— 本机存的口令
+                    // 是按旧键写的，取不到就退回连接页重输，所以这里明说要点重连。
+                    settingsNote("局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点「重新连接」生效。")
+                    DmSettingsRow("账号") {
+                        Text(state.username.isEmpty ? "—" : state.username)
+                            .font(.system(size: DmText.t13))
+                            .foregroundColor(Color.dmInk2)
+                    }
+                    DmSettingsRow("口令") {
+                        Text("存本机，仅本人可读")
+                            .font(.system(size: DmText.t13))
+                            .foregroundColor(Color.dmInk2)
+                    }
+                    settingsNote("每 4 分钟一次心跳，会话失效自动重登并重放当前请求。")
+                    HStack(spacing: DmSpace.s8) {
+                        // 两颗同档次按钮（与电源卡同一口径）：卡面上不抢层级，
+                        // 真要破坏性操作的语义留给它自己的后果提示。
+                        Button("重新连接") {
+                            Task { await state.reconnect() }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        Button("断开连接") {
+                            Task { await state.disconnect() }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, DmSpace.s14)
+                    .padding(.vertical, DmSpace.s12)
                 }
-                .buttonStyle(SecondaryButtonStyle())
+
+                // ===== 关于 =====
+                DmSettingsGroup(title: "关于") {
+                    DmSettingsRow("版本") {
+                        Text(versionText)
+                            .font(.system(size: DmText.t13))
+                            .monospacedDigit()
+                            .foregroundColor(Color.dmInk2)
+                    }
+                    DmSettingsRow("连接方式") {
+                        Text("DSM Web API 直调")
+                            .font(.system(size: DmText.t13))
+                            .foregroundColor(Color.dmInk2)
+                    }
+                    DmSettingsRow("主页") {
+                        Button("dreamanual.com") {
+                            if let url = URL(string: "https://dreamanual.com") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: DmText.t13))
+                        .foregroundColor(Color.dmAccent2)
+                    }
+                }
             }
-            .padding(DmSpace.s14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .dmCard()
+            // 内容宽与居中：对齐视频下载 / 密码管理的设置页（720 块内左对齐、
+            // 左右 30、顶部 20、底部 40）—— 都是布局值，由窗口结构决定，不进尺度档。
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 30)
+            .padding(.top, DmSpace.s20)
+            .padding(.bottom, 40)
         }
-        .padding(.horizontal, DmSpace.s24)
+    }
+
+    private var versionText: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short)（\(build)）"
+    }
+
+    /// 组内说明行：字号 12 / `ink-2`，与行同内边距（贴左，不缩进）。
+    private func settingsNote(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: DmText.t12))
+            .foregroundColor(Color.dmInk2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DmSpace.s14)
+            .padding(.vertical, DmSpace.s12)
     }
 }
