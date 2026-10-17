@@ -119,7 +119,9 @@ struct ConnectView: View {
         guard !isSubmitDisabled else { return }
         // 用户亲手接方向盘：停掉后台的自动连重试，别跟这一把抢。
         state.cancelAutoConnect()
-        Task { await state.connect(password: password) }
+        // 分段选哪种就按哪种连 —— 直连地址字段残留着不改变这一点。
+        let method: AppState.ConnectMethod = mode == .direct ? .direct : .quickconnect
+        Task { await state.connect(password: password, method: method) }
     }
 
     private var isSubmitDisabled: Bool {

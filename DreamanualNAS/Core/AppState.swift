@@ -66,6 +66,12 @@ final class AppState {
         }
     }
 
+    /// 连接页分段选的方式。判定连什么只认它，与表单里另一个字段是否
+    /// 有值无关 —— 直连地址残留着的时候切去 QuickConnect，也得真走中继。
+    enum ConnectMethod {
+        case quickconnect, direct
+    }
+
     // MARK: - 连接表单（持久化，口令除外）
 
     var qcID: String { didSet { defaults.set(qcID, forKey: Keys.qcID) } }
@@ -132,12 +138,40 @@ final class AppState {
         static let qcID = "nas.qcID"
         static let direct = "nas.directAddress"
         static let username = "nas.username"
+        static let method = "nas.connectMethod"
     }
+
+    /// 上一次成功连接用的方式。凭据的端点键跟着它走，启动自动连也按它
+    /// 恢复 —— 不看 `directAddress` 是否残留（老数据的兜底判定留在
+    /// `endpointKey` 里，存量用户升级后凭据条目不变）。
+    private var lastMethod: ConnectMethod?
 
     init() {
         qcID = defaults.string(forKey: Keys.qcID) ?? ""
         directAddress = defaults.string(forKey: Keys.direct) ?? ""
         username = defaults.string(forKey: Keys.username) ?? ""
+        lastMethod = Self.method(from: defaults.string(forKey: Keys.method))
+    }
+
+    private static func method(from raw: String?) -> ConnectMethod? {
+        switch raw {
+        case "quickconnect": return .quickconnect
+        case "direct": return .direct
+        default: return nil
+        }
+    }
+
+    private static func raw(of method: ConnectMethod) -> String {
+        switch method {
+        case .quickconnect: return "quickconnect"
+        case .direct: return "direct"
+        }
+    }
+
+    /// 自动连 / 重启等待这些「看不见界面」的连接该按哪条路走：
+    /// 上次成功的方式；没有记录（升级前）退回旧判定 —— 直连地址填了就算直连。
+    private var resumeMethod: ConnectMethod {
+        lastMethod ?? (DirectAddress.parse(directAddress) != nil ? .direct : .quickconnect)
     }
     var isConnected: Bool { phase == .connected }
 
@@ -355,7 +389,7 @@ final class AppState {
                     return
                 }
                 NSLog("[connect] 重启等待第 %d 把", attempt)
-                await self.connect(password: password)
+                await self.connect(password: password, method: self.resumeMethod)
                 if self.isConnected {
                     NSLog("[connect] 重启完成，已自动重连")
                     return
@@ -1153,7 +1187,7 @@ final class AppState {
                     if Task.isCancelled { return }
                     if self.isConnected || self.phase.isBusy { return }
                 }
-                await self.connect(password: password)
+                await self.connect(password: password, method: self.resumeMethod)
                 if self.isConnected { return }
             }
             NSLog("[connect] 自动连接五把都没成（%@），等网络恢复或手动连", self.phase.label)
@@ -2908,12 +2942,15 @@ final class AppState {
     }
 
     /// - Parameter password: 口令只在内存里传，落盘只落本机凭据文件（0600）。
-    func connect(password: String) async {
+    /// - Parameter method: 连接页分段选的方式。分支只认它，不认另一个
+    ///   字段有没有值 —— 残留的直连地址不抢 QuickConnect 的路。
+    func connect(password: String, method: ConnectMethod) async {
         guard phase.isBusy == false else { return }
         phase = .resolving
         endpointLabel = ""
         lastConnectError = nil
-        NSLog("[connect] connect 开始")
+        NSLog("[connect] connect 开始（%@）",
+              method == .direct ? "直连" : "QuickConnect")
 
         // 表单里粘进来的值常带首尾空白，账号那一个字符之差就是 Auth 400，
         // 而错误提示看不出是空白 —— 发出去之前先剪掉。
@@ -2922,14 +2959,19 @@ final class AppState {
 
         do {
             let client: SynologyClient
-            if let direct = DirectAddress.parse(directAddress) {
-                // 直连覆盖：局域网或 Tailscale。这条路的证书是 NAS 自签的，要放行。
+            switch method {
+            case .direct:
+                guard let direct = DirectAddress.parse(directAddress) else {
+                    throw QuickConnectError.badResponse(
+                        "直连地址没填对：填主机或主机:端口（局域网 / Tailscale）")
+                }
+                // 这条路的证书是 NAS 自签的，要放行。
                 NSLog("[connect] 直连分支 %@:%d", direct.host, direct.port)
                 client = SynologyClient(host: direct.host, port: direct.port, allowSelfSigned: true)
                 endpointLabel = "直连 \(direct.host):\(direct.port)"
                 linkMode = .direct
-            } else {
-                guard !qc.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID，或填一个直连地址") }
+            case .quickconnect:
+                guard !qc.isEmpty else { throw QuickConnectError.badResponse("先填 QuickConnect ID") }
                 let endpoint = try await resolver.resolve(id: qc)
                 // 中继域名挂的是真证书（按 CNAME 目标签），走默认校验；只有
                 // 服务端退回给 IP 那一种情况要放行自签。
@@ -2975,7 +3017,9 @@ final class AppState {
             startWidgetPush()
 
             // 连上即存：口令落本机文件（0600），下次启动自动重连。写也走后台，
-            // 不占主线程。
+            // 不占主线程。方式一并记下 —— 端点键与自动连都按它走。
+            lastMethod = method
+            defaults.set(Self.raw(of: method), forKey: Keys.method)
             let key = endpointKey
             Task.detached(priority: .utility) {
                 CredentialStore.save(password: password, endpointID: key, username: user)
@@ -3019,7 +3063,7 @@ final class AppState {
             NSLog("[connect] 重连取不到本端点的口令（端点键 %@），退回连接页", endpointKey)
             return
         }
-        await connect(password: password)
+        await connect(password: password, method: resumeMethod)
     }
 
     func disconnect() async {
@@ -3113,9 +3157,19 @@ final class AppState {
 
     /// 凭据条目的键：QuickConnect ID 与直连地址是两个不同的「端点身份」，
     /// 各自记各自的凭据，切换连接方式不会互相覆盖。
+    ///
+    /// 按上一次成功连接的方式取（`lastMethod`）；没有记录（升级前的存量）
+    /// 退回旧判定 —— 直连地址填了就算直连，与旧行为一致、凭据条目不变。
     private var endpointKey: String {
-        if let direct = DirectAddress.parse(directAddress) { return "direct:\(direct.host):\(direct.port)" }
-        return "qc:\(trimmedQCID)"
+        switch lastMethod {
+        case .quickconnect:
+            return "qc:\(trimmedQCID)"
+        case .direct, nil:
+            if let direct = DirectAddress.parse(directAddress) {
+                return "direct:\(direct.host):\(direct.port)"
+            }
+            return "qc:\(trimmedQCID)"
+        }
     }
 
     /// 表单值发出去之前剪掉首尾空白。存储的那份保持原样 —— 一边敲一边被改，
