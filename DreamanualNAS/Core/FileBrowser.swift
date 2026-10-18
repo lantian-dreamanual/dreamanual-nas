@@ -159,6 +159,13 @@ final class FileBrowser {
         guard !path.isEmpty else { return }
         currentPath = path
         clearSelection()
+        // 🔴 导航先清场：树逐级展开 + 列表重拉要好几秒，旧内容留在屏上分毫不动，
+        // 用户以为点了没生效（2026-10-18 用户实抓「歌曲在文件中显示仿佛失效」）。
+        // 清空后 `isLoading && entries.isEmpty` 的「正在载入…」静场立刻顶上来。
+        entries = []
+        fetched = 0
+        total = 0
+        isLoading = true
         await revealAncestors(of: path, on: manager)
         await loadPage(reset: true, on: manager)
     }
