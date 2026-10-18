@@ -739,9 +739,10 @@ struct LibraryView: View {
 
 /// 听歌模块的内容区侧栏（原型 `.msider`）：资料库的四个来源 + 我的歌单。
 ///
-/// 这一列是**列表行（浅底轨）**：选中 `accent-soft` 底 + `accent-2` 字，
-/// 与外壳侧栏的实心主色底 + 白字分轨 —— 侧栏行表达「你在哪个模块」，
-/// 这一列表达「这一屏在看哪份曲目」，一屏里只有一行选中，量级与列表行同族。
+/// 这一列是**二级导航（灰底白字轨）**：选中 `panel-3` 底 + 白字（`RailRowState`），
+/// 与外壳侧栏的实心主色底 + 白字（`SelectState`）分轨 —— 侧栏行表达「你在哪个
+/// 模块」，这一列表达「这一屏在看哪份曲目」。主色底全页只留外壳侧栏一处
+/// （2026-10-18「导航权重方案」四层口径）。
 private struct LibraryRail: View {
     let model: LibraryModel
     let manager: SessionManager?
@@ -845,22 +846,22 @@ private struct LibraryRailRow: View {
     var body: some View {
         HStack(spacing: DmSpace.s8) {
             LucideIcon(icon, size: DmIcon.i14)
-                .foregroundColor(ListRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
+                .foregroundColor(RailRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
             Text(title)
                 .font(.system(size: DmText.t13))
-                .foregroundColor(ListRowState.foreground(isSelected: isSelected, hovered: isHovered))
+                .foregroundColor(RailRowState.foreground(isSelected: isSelected, hovered: isHovered))
                 .lineLimit(1)
             Spacer(minLength: DmSpace.s4)
             if let count {
                 Text("\(count)")
                     .font(.system(size: DmText.t11))
                     .monospacedDigit()
-                    .foregroundColor(ListRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
+                    .foregroundColor(RailRowState.secondaryForeground(isSelected: isSelected, hovered: isHovered))
             }
         }
         .padding(.horizontal, DmSpace.s8)
         .padding(.vertical, DmSpace.s6)
-        .background(ListRowState.background(isSelected: isSelected, hovered: isHovered && !isSelected))
+        .background(RailRowState.background(isSelected: isSelected, hovered: isHovered && !isSelected))
         .clipShape(RoundedRectangle(cornerRadius: DmRadius.r6))
         .contentShape(Rectangle())
         .trackingHover($isHovered)
@@ -1192,10 +1193,10 @@ private struct ColumnWidth: ViewModifier {
     }
 }
 
-/// 一行曲目 —— **列表行（浅底轨）**，且是唯一同时承担「正在播」与「选中」
-/// 两个标记的行：**正在播独占 accent 档**（`accent-soft` 底 + `accent-2` 字、
+/// 一行曲目 —— **列表行（灰底轨）**，且是唯一同时承担「正在播」与「选中」
+/// 两个标记的行：**正在播独占 accent 档**（`panel-2` 底 + `accent-2` 字、
 /// 次要格 `accent`、标题前挂均衡器）；**选中降一档**（2026-10-13 用户拍板）——
-/// 与正在播同档会看着像两首同时在播，选中改成悬停同款底（`panel-2`）、
+/// 与正在播同档会看着像两首同时在播，选中改成悬停同款底（现在是 `panel-3`）、
 /// 字保持默认态。选中本身留着（以后多选拖歌单要用）。悬停只给两态都没有
 /// 的行抬底 —— 选中行本来就停在悬停底上。列与列宽对着原型 `colgroup`。
 struct TrackRow: View {

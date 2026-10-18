@@ -1398,6 +1398,14 @@ final class AppState {
     /// 引擎状态 —— 真机播放验证不必依赖界面点击（AI 环境没有辅助功能权限，
     /// 点不到按钮）。日志走 stderr，从终端直接起进程就能收。
     func smokePlayFirst() async {
+        // 冒烟 token 在启动瞬间就被消费，自动连却是异步的 —— 先等连接落定
+        // （最多 30 秒）再判（与 `smokeLibrary` 同一块；直接判「未连接」会整个
+        // 白跑，2026-10-18 实测踩中）。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager, let engine = playback else {
             NSLog("[smoke] 未连接，跳过（phase=%@)", String(describing: phase))
             return

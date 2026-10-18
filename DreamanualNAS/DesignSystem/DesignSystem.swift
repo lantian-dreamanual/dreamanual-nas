@@ -71,21 +71,27 @@ enum SelectState {
     }
 }
 
-/// 列表行的选中档 —— **浅底轨**（design-system.md 第八节「选中与悬停」的取档表）。
+/// 列表行的选中档 —— **灰底轨**（design-system.md 第八节「选中与悬停」的取档表）。
 ///
-/// 数据表行、目录树行、弹窗结果行走这一档：选中 `accent-soft` 底 + `accent-2` 字，
+/// 数据表行、目录树行、弹窗结果行走这一档：选中 `panel-2` 底 + `accent-2` 字，
 /// 次要格 `accent`。与侧栏行的实心主色底 + 白字（`SelectState`）**分轨** ——
 /// 侧栏总共三四行、选中行表达「你在哪个模块」；列表行一屏几十上百行，
-/// 多选时还会成片连成色带。落点先例是密码管理 `.item.on`。
+/// 多选时还会成片连成色带。
 ///
-/// 这一类行**不做失焦降级**：`accent-soft` 本身就是深字端的失焦目标档，
-/// 选中与失焦是同一个样（取档的已知项，不当漂移处理）。
+/// 2026-10-18 起选中底从 `accent-soft`（深强调底，蓝铺满整行）换成 `panel-2`
+/// （中性灰，主色只留在字上）：审核稿「导航权重方案」定的四层里，列表选中行
+/// 与二级资料库栏都吃灰底，主色底全页只留一级导航一处。**NAS 先行**，其余四端
+/// 的浅底轨（`accent-soft` + `accent-2`）暂时保留，跟进待定。
+///
+/// 悬停抬 `panel-3`：`panel-2` 已被选中占用，悬停再取 `panel-2` 会与选中
+/// 同色、鼠标划过没有反应 —— 悬停比选中亮一档是这条轨道的新次序。
+///
+/// 这一类行**不做失焦降级**：灰底不吃窗口焦点态，选中与失焦同一个样。
 enum ListRowState {
-    /// 底：选中 `accent-soft`；悬停 `panel-2` —— 列表挂在 `panel` 上，
-    /// 悬停抬一档，与侧栏行悬停取 `panel-3` 是同一条「所在面相邻一档」。
+    /// 底：选中 `panel-2`；悬停 `panel-3`（见上 —— 选中占了 `panel-2`，悬停让档）。
     static func background(isSelected: Bool = false, hovered: Bool = false) -> Color {
-        if isSelected { return Color.dmAccentSoft }
-        return hovered ? Color.dmPanel2 : Color.clear
+        if isSelected { return Color.dmPanel2 }
+        return hovered ? Color.dmPanel3 : Color.clear
     }
 
     /// 正文格（艺术家、专辑）。
@@ -99,11 +105,36 @@ enum ListRowState {
         isSelected ? Color.dmAccent2 : Color.dmInk
     }
 
-    /// 次要格（流派、年份、时长、曲序）：常态 `ink-3`；选中时也压在主色底上，
-    /// 取比正文低一档的 `accent`，与 `accent-2` 拉开层次。
+    /// 次要格（流派、年份、时长、曲序）：常态 `ink-3`；选中时也压在灰底上，
+    /// 取比正文低一档的 `accent`（压 `panel-2` 5.59:1），与 `accent-2` 拉开层次。
     static func secondaryForeground(isSelected: Bool = false, hovered: Bool = false) -> Color {
         if isSelected { return Color.dmAccent }
         return hovered ? Color.dmInk : Color.dmInk3
+    }
+}
+
+/// 内容区侧栏行（资料库列）的选中档 —— **灰底白字轨**。
+///
+/// 「导航权重方案」四层里的第二层：这一列是二级导航，选中 `panel-3` 底 + `ink`
+/// 白字，主色完全不进来 —— 与曲库表的列表行（灰底主色字，`ListRowState`）
+/// 靠字色分档，与外壳侧栏（实心主色底 + 白字，`SelectState`）靠底色分轨。
+///
+/// 悬停取 `panel-2`：选中占了 `panel-3`，悬停退一档（比列表行那侧暗，方向相反
+/// 但同一条规矩 —— 悬停取选中让出来的那一档）。
+enum RailRowState {
+    static func background(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        if isSelected { return Color.dmPanel3 }
+        return hovered ? Color.dmPanel2 : Color.clear
+    }
+
+    /// 标题格。
+    static func foreground(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        isSelected || hovered ? Color.dmInk : Color.dmInk2
+    }
+
+    /// 图标与计数：常态 `ink-3`，选中与悬停都提 `ink`（计数在选中行上同白）。
+    static func secondaryForeground(isSelected: Bool = false, hovered: Bool = false) -> Color {
+        isSelected || hovered ? Color.dmInk : Color.dmInk3
     }
 }
 

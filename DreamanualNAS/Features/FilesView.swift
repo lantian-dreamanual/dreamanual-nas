@@ -441,7 +441,7 @@ private struct FileTreeRow: View {
 
     @State private var isHovered = false
 
-    /// 当前目录所在的那一行走**列表行（浅底轨）**：`accent-soft` + `accent-2`。
+    /// 当前目录所在的那一行走**列表行（灰底轨）**：`panel-2` + `accent-2`（2026-10-18）。
     private var isCurrent: Bool { row.kind != .more && model.currentPath == row.path }
 
     var body: some View {

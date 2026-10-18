@@ -118,7 +118,7 @@ struct TransferPickerCard: View {
 
 /// 选目标列表里的一行 —— 树节点与筛选结果共用（原型 `.tree-row` / `.mv-hit`）。
 ///
-/// 选中走**列表行那条轨道**（浅底 `accent-soft` + `accent-2`），与表行、浏览树一致。
+/// 选中走**列表行那条轨道**（灰底 `panel-2` + `accent-2`），与表行、浏览树一致。
 private struct PickerRowView: View {
     let row: DestinationPicker.Row
     let picker: DestinationPicker
