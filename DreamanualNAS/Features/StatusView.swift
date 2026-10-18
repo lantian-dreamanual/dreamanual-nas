@@ -129,6 +129,15 @@ struct StatusView: View {
             async let statusLoad: Void = model.load(on: state.sessionManager)
             async let scheduleLoad: Void = state.powerSchedule.load(on: state.sessionManager)
             _ = await (statusLoad, scheduleLoad)
+            // 页面停留期间 30s 一拍续刷（与状态栏面板同节奏），离开即停
+            //（`.task` 随视图摘除取消）。温度与 CPU/内存是慢变量，这个节奏
+            // 足够「活着」；读写速度已删 —— 瞬时量配快照页只会误导。
+            // 计划表不在续刷里：它是设置，刷它会把改到一半的开关冲掉。
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if Task.isCancelled { break }
+                await model.load(on: state.sessionManager, force: true)
+            }
         }
     }
 
@@ -166,10 +175,8 @@ struct StatusView: View {
                 }
 
                 HStack(alignment: .top, spacing: DmSpace.s12) {
-                    StorageCard(volume: snapshot.storage?.volumes.first,
-                                load: snapshot.load)
-                    DiskCard(disks: snapshot.storage?.disks ?? [],
-                             load: snapshot.load)
+                    StorageCard(volume: snapshot.storage?.volumes.first)
+                    DiskCard(disks: snapshot.storage?.disks ?? [])
                 }
 
                 // 原型下半屏的 grid2：电源 | 开关机计划 并排、由高的那张定高。
@@ -393,13 +400,14 @@ private struct StatusStatCard: View {
     }
 }
 
-/// 存储空间卡（原型硬盘卡的位置）：卡头（名字 + 读写徽章）→ 进度条 → 脚注。
+/// 存储空间卡（原型硬盘卡的位置）：卡头（卷名）→ 进度条 → 脚注。
 ///
 /// 进度条画的是**卷**的已用占比。原型这里是每块盘一条，接口不给单盘已用量，
 /// 所以这一格只能落在存储空间上；单盘信息在右边那张卡。
+/// 🔴 不画读写速度：那是瞬时量，页面是快照形态（进页取一次 + 手动刷），
+/// 屏上的数字离取样可能已隔几分钟，显示出来只会误导（2026-10-18 用户拍板删除）。
 private struct StorageCard: View {
     let volume: StorageVolume?
-    let load: SystemLoad?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -409,9 +417,6 @@ private struct StorageCard: View {
                     .foregroundColor(Color.dmInk)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if let rate = ioBadge {
-                    DmBadge(rate, icon: "gauge", tone: .neutral)
-                }
             }
             .padding(.bottom, DmSpace.s10)
 
@@ -433,14 +438,6 @@ private struct StorageCard: View {
         .dmCard()
     }
 
-    /// 卷的读写合计（`space.volume[]`）。**按 `loadID` 对**，不按 `id`
-    /// —— 两边的卷名一个带下划线一个不带（见 `StorageVolume.loadID`）。
-    private var ioBadge: String? {
-        guard let volume, let row = load?.volume(volume.loadID) else { return nil }
-        let total = row.readBytesPerSec + row.writeBytesPerSec
-        return "读写 " + SystemStatusAPI.rateText(total)
-    }
-
     private var footnote: String {
         guard let volume else { return "没读到容量" }
         let used = FileEntry.byteText(volume.usedBytes)
@@ -451,10 +448,9 @@ private struct StorageCard: View {
     }
 }
 
-/// 硬盘卡（列表卡：卡头 + 一行一块盘）。每行给温度、状态徽章与瞬时读写。
+/// 硬盘卡（列表卡：卡头 + 一行一块盘）。每行给温度明细与状态徽章。
 private struct DiskCard: View {
     let disks: [StorageDisk]
-    let load: SystemLoad?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -486,7 +482,7 @@ private struct DiskCard: View {
                             .fill(Color.dmLine)
                             .frame(height: DmLine.hairline)
                     }
-                    DiskRow(disk: disk, load: load?.load(for: disk.id))
+                    DiskRow(disk: disk)
                 }
             }
 
@@ -499,9 +495,9 @@ private struct DiskCard: View {
 }
 
 /// 一块盘的一行（原型 `.srow`：内边距 12/14，行间发丝）。
+/// 🔴 不画瞬时读写 —— 快照页上的速率只会误导（与存储卡同一理由）。
 private struct DiskRow: View {
     let disk: StorageDisk
-    let load: DiskLoad?
 
     var body: some View {
         HStack(spacing: DmSpace.s12) {
@@ -522,13 +518,6 @@ private struct DiskRow: View {
 
             Spacer(minLength: 0)
 
-            if let rate {
-                Text(rate)
-                    .font(.system(size: DmText.t11))
-                    .monospacedDigit()
-                    .foregroundColor(Color.dmInk3)
-            }
-
             DmBadge(statusText, tone: disk.isHealthy ? .ok : .danger)
         }
         .padding(.horizontal, DmSpace.s14)
@@ -546,12 +535,6 @@ private struct DiskRow: View {
             parts.append("寿命 \(disk.remainLifePercent)%")
         }
         return parts.joined(separator: " · ")
-    }
-
-    private var rate: String? {
-        guard let load else { return nil }
-        return "读 \(SystemStatusAPI.rateText(load.readBytesPerSec))"
-            + " · 写 \(SystemStatusAPI.rateText(load.writeBytesPerSec))"
     }
 
     private var statusText: String {
