@@ -25,7 +25,10 @@ final class LibraryModel {
 
         var title: String {
             switch self {
-            case .all: return "全部曲目"
+            // 分段这一格说的是「按什么粒度看」，不是「看哪一份曲目」—— 后者是
+            // 左侧栏那行「全部曲目」的活。同名两处在同一屏同时高亮，用户要在
+            // 两个同名之间来回确认是不是一个东西（2026-10-18 用户指出、拍板改）。
+            case .all: return "歌曲"
             case .artist: return "艺术家"
             case .album: return "专辑"
             case .genre: return "流派"
