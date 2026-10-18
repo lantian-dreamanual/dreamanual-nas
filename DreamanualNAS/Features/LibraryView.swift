@@ -7,7 +7,7 @@ import SwiftUI
 /// 三组控件的分工（原型「听歌 · 曲库」那一屏）：
 /// · **内容区侧栏**定「这一屏看的是哪一份曲目」—— 全部曲目 / 每日随机 /
 ///   我的歌单 / 评分 ≥ 4 星，四者都落成同一张表，只是数据源不同；
-/// · **分段控件**定「在曲库快照里按哪个维度浏览」—— 全部曲目 / 艺术家 / 专辑 / 流派；
+/// · **文本页签**定「在曲库快照里按哪个维度浏览」—— 歌曲 / 艺术家 / 专辑 / 流派；
 /// · **搜索框**与**行内链接**（点艺术家名、专辑名）压过上面两者。
 ///
 /// 后两者只在数据源是「全部曲目」时说得通：一份 100 首的随机单里没有「艺术家列表」
@@ -661,15 +661,16 @@ struct LibraryView: View {
 
     private var toolbar: some View {
         HStack(spacing: DmSpace.s8) {
-            DmSegmented(
+            // 页面级视图切换走**文本页签**（2026-10-18）：无容器、选中 ink 字 + 主色指示条。
+            // 表单内的紧凑切换（连接方式、计划时间）仍是容器分段 `DmSegmented`。
+            DmTextTabs(
                 LibraryModel.Dimension.allCases,
                 selection: Binding(
                     get: { model.dimension },
                     set: { newValue in
                         Task { await model.select(newValue, on: state.sessionManager) }
                     }
-                ),
-                on: .panel
+                )
             ) { $0.title }
 
             Spacer(minLength: 0)

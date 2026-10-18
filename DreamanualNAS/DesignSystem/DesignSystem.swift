@@ -789,6 +789,67 @@ struct DmSegmented<Item: Hashable>: View {
     }
 }
 
+/// 文本页签：**页面级视图切换**（曲库的浏览维度）—— 2026-10-18 起与容器分段并存的两型之一。
+///
+/// 形态照网易云那套：**无容器**，直接放在任意底上，选中态靠字色 + 一条指示条表达，
+/// 不吃选中底色 —— 页面级切换不再出现色块，主色只剩 20×3 的指示条这一个落点。
+///
+/// 选中 = `ink` 字 + semibold + 20×3 `accent` 指示条（Capsule、距底 `s2`、居中）；
+/// 未选中 `ink-2`，悬停提 `ink`。**失焦不变色**：字色本来就不吃窗口焦点。
+///
+/// 与 `DmSegmented` 的分工（第八节「分段控件」）：页面级视图切换用它；表单与卡片内
+/// 的紧凑互斥切换（连接方式、计划时间）继续用容器分段。同一页面同一层级不混用两型。
+struct DmTextTabs<Item: Hashable>: View {
+    let items: [Item]
+    let label: (Item) -> String
+    @Binding var selection: Item
+    @State private var hovered: Item?
+
+    init(
+        _ items: [Item],
+        selection: Binding<Item>,
+        label: @escaping (Item) -> String
+    ) {
+        self.items = items
+        self._selection = selection
+        self.label = label
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s20) {
+            ForEach(items, id: \.self) { item in
+                let isSelected = item == selection
+                Button {
+                    selection = item
+                } label: {
+                    Text(label(item))
+                        .font(.system(size: DmText.t13, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .foregroundColor(isSelected || hovered == item ? Color.dmInk : Color.dmInk2)
+                        .frame(height: DmControl.h32)
+                        .overlay(alignment: .bottom) {
+                            if isSelected {
+                                Capsule()
+                                    .fill(Color.dmAccent)
+                                    .frame(width: 20, height: DmLine.bold)
+                                    .padding(.bottom, DmSpace.s2)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { isInside in
+                    if isInside {
+                        hovered = item
+                    } else if hovered == item {
+                        hovered = nil
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 通用开关：形态基准 42×24（四端统一，第八节「开关」）。关态轨道 `line-2`、
 /// 开态 `accent-fill`；滑块直径 20、行程 18、**两态都白**。
 ///
