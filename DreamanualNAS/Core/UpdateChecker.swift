@@ -77,8 +77,10 @@ final class UpdateChecker {
         status = .failed
     }
 
-    /// 新版本被发现后，按钮变成「下载更新」—— 走 JSON 里的 `download_url`，
+    /// 新版本被发现后，按钮变成「前往下载」—— 走 JSON 里的 `download_url`，
     /// 没给就回退到官网应用页（宁可多一次点击，也不给一个 404 的直链）。
+    /// 文案与投资监控、密码管理同口径：这三个端的目标可能是直链 DMG、也可能是
+    /// 一个下载页，写「前往下载」两处都成立；写「下载更新」在页面那一路就不准。
     var downloadURL: URL? {
         URL(string: available?.downloadUrl ?? Self.downloadPageURL)
     }

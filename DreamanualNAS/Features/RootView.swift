@@ -733,7 +733,7 @@ private struct SettingsPane: View {
                                     .font(.system(size: DmText.t11))
                                     .foregroundColor(updateStatusColor)
                             }
-                            Button(updates.status == .newVersion ? "下载更新" : "立即检查") {
+                            Button(updates.status == .newVersion ? "前往下载" : "立即检查") {
                                 if updates.status == .newVersion, let url = updates.downloadURL {
                                     NSWorkspace.shared.open(url)
                                 } else {
