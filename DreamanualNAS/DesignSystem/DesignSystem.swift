@@ -214,6 +214,9 @@ struct LucideIcon: View {
         "circle-x": "xmark.circle.fill",
         "info": "info.circle",
         "x": "xmark",
+        // 沉浸模式的收起钮（2026-10-18 用户点名，替掉 `x`）：那一屏是从底部滑上来的
+        // 覆盖层，退出动作是「往下收」，`arrow.down.to.line` 画的正是这个。
+        "arrow-down-to-line": "arrow.down.to.line",
         // 表头排序与字段配置这几枚（2026-10-13 补）。⚠️ `chevron-down` 是**补漏**：
         // 分页那一行早就用了它、表里却一直没有，真机上画的是问号 —— 门禁不管
         // 图标名，只有截图能抓到，所以加图标时顺手扫一遍「用过 vs 表里有」。
@@ -229,6 +232,9 @@ struct LucideIcon: View {
         "key-round": "key",
         "link": "link",
         "refresh-cw": "arrow.clockwise",
+        // 设置页官网行的行尾外链（2026-10-18）。SF 没有 lucide `square-arrow-out-up-right`
+        // 的同构画法，取语义同族的「方块 + 箭头朝右上出去」。
+        "square-arrow-out-up-right": "arrow.up.forward.square",
         // 歌曲右键菜单那几枚（2026-10-13）。`play` / `star` 播放条与评分星早就在用。
         "list-start": "text.insert",
         "download": "arrow.down.circle",
@@ -897,6 +903,9 @@ struct DmToggleStyle: ToggleStyle {
 struct IconButton: View {
     let iconName: String
     var compact: Bool = false
+    /// 图形档位，默认 12（28 钮的常态）。沉浸层的收起钮按原型取 18 ——
+    /// 它是那一屏唯一的常驻控件，比工具条里的次级动作大一号。
+    var iconSize: CGFloat = DmIcon.i12
     let action: () -> Void
 
     @State private var isHovered = false
@@ -904,7 +913,7 @@ struct IconButton: View {
 
     var body: some View {
         Button(action: action) {
-            LucideIcon(iconName, size: DmIcon.i12)
+            LucideIcon(iconName, size: iconSize)
                 .foregroundColor(isHovered && isEnabled ? Color.dmInk : Color.dmInk2)
                 .frame(width: side, height: side)
                 .background(
@@ -2110,6 +2119,9 @@ struct DmCover: View {
     /// 省掉它就等于退回「按专辑名取图」，正是串台那条老路。
     let folder: String
     let size: CGFloat
+    /// 圆角。默认 `r-8`（曲库表 28、队列表 28、播放条 44 都用它）；
+    /// 迷你卡那张 20 的缩略图传 `r-4` —— 20 见方用 r8 会变成半圆。
+    var cornerRadius: CGFloat = DmRadius.r8
 
     @State private var image: NSImage?
 
@@ -2117,7 +2129,7 @@ struct DmCover: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: DmRadius.r8)
+            RoundedRectangle(cornerRadius: cornerRadius)
                 .fill(Color.dmPanel2)
             LucideIcon("music", size: iconSize)
                 .foregroundColor(Color.dmInk3)
@@ -2125,7 +2137,7 @@ struct DmCover: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .clipShape(RoundedRectangle(cornerRadius: DmRadius.r8))
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
                     .transition(.opacity)
             }
         }

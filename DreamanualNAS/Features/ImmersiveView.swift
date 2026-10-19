@@ -33,18 +33,25 @@ struct ImmersiveView: View {
     private var song: AudioSong? { engine?.currentSong }
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 底挂在 background：随内容边界走，不参与布局 —— 底要是当 ZStack 的
-            // 布局子视图（首版），它比提案高出一截就把播放条整个挤出窗外。
-            .background { backdrop }
-            .overlay(alignment: .topTrailing) { closeButton }
-            .clipped()
-            // 歌词跟着歌走。`nil` 的 id 会让 task 立刻结束，正好当「没有歌」处理。
-            .task(id: song?.id) { await loadLyrics() }
-            .task(id: coverTaskKey) { await loadCover() }
-            // Esc 退出（原型只写了右上角的关闭钮，键盘退出是 macOS 上的惯例）。
-            .onExitCommand { state.closeImmersive() }
+        VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 底挂在 background：随内容边界走，不参与布局 —— 底要是当 ZStack 的
+                // 布局子视图（首版），它比提案高出一截就把播放条整个挤出窗外。
+                .background { backdrop }
+                .overlay(alignment: .topTrailing) { closeButton }
+                .clipped()
+
+            // 层内播放条（第 5 稿）：与层同宽、铺满整窗。普通模式那条只占主区宽
+            // （少 220），宽度差用「同一组件的另一个实例」补 —— 播放状态、进度、
+            // 音量同源，悬停与进度气泡各算各的（临时 UI，切过来重置一次无妨）。
+            PlayerBarView(engine: state.playback)
+        }
+        // 歌词跟着歌走。`nil` 的 id 会让 task 立刻结束，正好当「没有歌」处理。
+        .task(id: song?.id) { await loadLyrics() }
+        .task(id: coverTaskKey) { await loadCover() }
+        // Esc 退出（原型只写了右上角的关闭钮，键盘退出是 macOS 上的惯例）。
+        .onExitCommand { state.closeImmersive() }
     }
 
     @ViewBuilder
@@ -162,9 +169,17 @@ struct ImmersiveView: View {
     }
 
     private var closeButton: some View {
-        IconButton(iconName: "x") { state.closeImmersive() }
-            .padding(.top, DmLayout.titlebar + DmSpace.s8)
-            .padding(.trailing, DmSpace.s24)
+        // 收起（2026-10-18 用户点名）：这一屏是「从底下滑上来」的覆盖层，
+        // 退出动作就是往下收 —— `arrow-down-to-line` 说的是那个动作，
+        // `x` 说的是「关掉一个东西」，在整窗覆盖层上语义对不上。
+        //
+        // 落位与照片查看器统一（同日）：按钮中线对齐窗口题头行 —— 28 高的钮
+        // top 6 → 中线 20，与查看器 40 高顶栏的中线一致；右边距 16。图形 18：
+        // 这一屏唯一的常驻控件，比工具条里的次级动作大一号。
+        IconButton(iconName: "arrow-down-to-line", iconSize: DmIcon.i18) { state.closeImmersive() }
+            .help("收起（Esc）")
+            .padding(.top, DmSpace.s6)
+            .padding(.trailing, DmSpace.s16)
     }
 
     // MARK: 歌词

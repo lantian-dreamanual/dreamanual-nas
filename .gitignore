@@ -3,3 +3,6 @@ dist/
 *.app/
 *.xcodeproj/
 .DS_Store
+
+# 原型与规划草稿留在本机，不进仓库（2026-10-19）
+design/

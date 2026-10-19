@@ -148,12 +148,24 @@ final class AppState {
     /// 开关机计划（服务端那一份 + 界面上在编的那一份）。归属同上 —— 换模块再回来，
     /// 改到一半的开关还在，别让人重拨一遍。
     let powerSchedule = PowerScheduleModel()
-    /// 播放队列占主区（原型「队列」屏）—— 从播放条的队列按钮进出，
-    /// 侧栏没有队列这一项。
-    private(set) var showsQueue = false
-    /// 沉浸模式（原型「沉浸模式」屏）：收掉侧栏、播放条保留。从播放条的封面 /
-    /// 歌名进出，Esc 或右上角关闭钮退出。
-    private(set) var showsImmersive = false
+    /// 听歌模块当前停在哪一屏（2026-10-18 定，原型第 5 稿）。
+    ///
+    /// 原来是 `showsQueue` / `showsImmersive` 两个独立 bool：可以同时为真，
+    /// 于是每个切换入口都要手动清两次来维护一个不可能的状态。合成枚举之后
+    /// 「队列 + 沉浸」从类型上不存在，切换入口也只剩一处赋值。
+    enum MusicPresentation: Equatable {
+        case library, queue, immersive
+    }
+
+    private(set) var musicPresentation: MusicPresentation = .library
+
+    /// 进沉浸之前停在哪一屏。退出回那里，不固定回曲库（从队列进就回队列）。
+    private var presentationBeforeImmersive: MusicPresentation = .library
+
+    /// 队列页是否占着主区（播放条的队列按钮、主区、冒烟通路都读它）。
+    var showsQueue: Bool { musicPresentation == .queue }
+    /// 沉浸层是否展开。
+    var showsImmersive: Bool { musicPresentation == .immersive }
     private(set) var lastConnectedAt: Date?
 
     /// 窗口底部那条短提示。放全局是因为触发点不止一处 —— 曲库表与播放条
@@ -217,19 +229,30 @@ final class AppState {
 
     func select(_ module: Module) {
         self.module = module
-        showsQueue = false
-        showsImmersive = false
+        if module == .music {
+            // 侧栏导航 = 「去那个模块的家」：点听歌回曲库首页，不带上次的队列 / 沉浸。
+            musicPresentation = .library
+        } else if musicPresentation == .immersive {
+            // 沉浸层整窗盖住侧栏，正常点不到这里；键盘 / 冒烟仍可能走到，
+            // 切模块时把它收掉，免得覆盖层跟着跑。
+            musicPresentation = .library
+        }
+        // 队列页的状态特意留着：从队列切到文件页、点迷你卡回来还是队列。
+        // 主区按 module 分派，presentation 停在 .queue 不会影响别的模块。
+    }
+
+    /// 迷你卡点正文：回听歌模块，**落在离开时那一屏**（队列还是队列）。
+    /// 与 `select(.music)` 的差别就在这里 —— 侧栏是「回家」，迷你卡是「接着刚才」。
+    func resumeMusic() {
+        guard module != .music else { return }
+        module = .music
+        if musicPresentation == .immersive { musicPresentation = .library }
     }
 
     /// 播放条的队列按钮：主区在曲库 ↔ 队列之间切。
     func toggleQueue() {
-        showsImmersive = false
-        if module != .music {
-            select(.music)
-            showsQueue = true
-            return
-        }
-        showsQueue.toggle()
+        if module != .music { module = .music }
+        musicPresentation = musicPresentation == .queue ? .library : .queue
     }
 
     // MARK: - 沉浸模式
@@ -238,19 +261,25 @@ final class AppState {
     /// 没有正在播的歌，那一屏没有内容可铺。
     func toggleImmersive() {
         guard playback?.hasQueue == true else { return }
-        showsImmersive.toggle()
+        if musicPresentation == .immersive {
+            closeImmersive()
+        } else {
+            presentationBeforeImmersive = musicPresentation
+            musicPresentation = .immersive
+        }
     }
 
     func closeImmersive() {
-        showsImmersive = false
+        guard musicPresentation == .immersive else { return }
+        musicPresentation = presentationBeforeImmersive == .immersive
+            ? .library : presentationBeforeImmersive
     }
 
     /// 沉浸模式里点歌手名：回曲库、代入该歌手的筛选（原型那一屏的说明行）。
     func showSongs(byArtist name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        showsImmersive = false
-        showsQueue = false
+        musicPresentation = .library
         module = .music
         await library.apply(trimmed, in: .artist, on: sessionManager)
     }
@@ -1480,6 +1509,14 @@ final class AppState {
     /// 只能让程序自己走到那一屏，再从终端起进程收日志、抓窗口截图。
     /// 关键词传 `-`（或空）就播曲库第一首。
     func smokeImmersive(keyword: String) async {
+        // 冒烟 token 在启动瞬间就被消费，自动连却是异步的 —— 先等连接落定
+        // （最多 30 秒）再判（与 `smokePlayFirst` 同一块；直接判「未连接」会
+        // 整个白跑，2026-10-18 实抓）。
+        for _ in 0..<60 {
+            if phase == .connected { break }
+            if case .failed = phase { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard isConnected, let manager = sessionManager, let engine = playback else {
             NSLog("[immersive] 未连接，跳过（phase=%@）", String(describing: phase))
             return
@@ -1497,7 +1534,7 @@ final class AppState {
             }
             NSLog("[immersive] 开播「%@」—「%@」id=%@", first.title, first.artist, first.id)
             engine.play(page.songs, at: 0)
-            showsImmersive = true
+            musicPresentation = .immersive
 
             // 取词与取图都是异步的，等它们落地再报。
             try? await Task.sleep(nanoseconds: 8 * 1_000_000_000)
@@ -3018,7 +3055,7 @@ final class AppState {
                 }
                 guard let engine = playback else { NSLog("[ui] 引擎不在"); continue }
                 engine.smokeFillQueue(fake)
-                showsQueue = true
+                musicPresentation = .queue
                 let index = engine.playOrder.indices.contains(engine.position)
                     ? engine.playOrder[engine.position] : 0
                 openQueueSongMenu(engine.queue[index], at: CGPoint(x: 380, y: 240), queueIndex: index)
@@ -3563,8 +3600,7 @@ final class AppState {
         cancelAutoConnect()
         playback?.detach()
         playback = nil
-        showsQueue = false
-        showsImmersive = false
+        musicPresentation = .library
         status.clear()
         widgetPushTask?.cancel()
         widgetPushTask = nil
@@ -3601,8 +3637,7 @@ final class AppState {
         cancelAutoConnect()
         playback?.detach()
         playback = nil
-        showsQueue = false
-        showsImmersive = false
+        musicPresentation = .library
         // 封面与歌词缓存按专辑名 / 歌曲 id 做键、不区分是哪个库，换机器要清掉。
         await CoverStore.shared.clear()
         await LyricsStore.shared.clear()

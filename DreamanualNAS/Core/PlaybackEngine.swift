@@ -40,6 +40,13 @@ final class PlaybackEngine {
         didSet { player.volume = Float(volume) }
     }
     private(set) var isShuffled = false
+    /// 队列已走到头（`pauseAtEnd()` 之后，2026-10-18 定）。
+    ///
+    /// 播放条与迷你卡的主按钮据此画 `list-start`、点它回第一首重播。没有这一态时，
+    /// 队尾按播放键是「播放头在终点 → 立刻又触发一次结束」，界面上等于按了没反应。
+    /// 显式存，不拿 `currentTime == duration` 去推断 —— 拖到末尾再拖回来、
+    /// 缓冲卡住都会误判。
+    private(set) var isAtQueueEnd = false
     /// 取流失败时的提示，挂播放条上。成功开下一首时清掉。
     private(set) var streamErrorMessage: String?
 
@@ -114,6 +121,8 @@ final class PlaybackEngine {
         let base = queue.count
         queue.append(contentsOf: songs)
         playOrder.append(contentsOf: base..<(base + songs.count))
+        // 队尾后又有了曲目，「一轮走完」不成立了。
+        syncQueueEndFlag()
     }
 
     func clearQueue() {
@@ -144,6 +153,7 @@ final class PlaybackEngine {
         if queue.isEmpty {
             clearQueue()
         } else {
+            syncQueueEndFlag()
             publishNowPlaying()
         }
     }
@@ -197,12 +207,19 @@ final class PlaybackEngine {
             position = 0
         }
         isShuffled.toggle()
+        // 随机开 / 关都重排了播放顺序：队尾态要按新的 position 重算。
+        syncQueueEndFlag()
     }
 
     // MARK: - 控制
 
     func togglePlayPause() {
         guard hasQueue else { return }
+        // 队尾：按钮此刻画的是 `list-start`，点它从头重播（2026-10-18 定）。
+        if isAtQueueEnd {
+            restart()
+            return
+        }
         if isPlaying {
             player.pause()
             isPlaying = false
@@ -214,6 +231,14 @@ final class PlaybackEngine {
             return
         }
         publishNowPlaying()
+    }
+
+    /// 队尾重播：回第一首并开始播（随机播放下是打乱后 `playOrder` 的首行）。
+    /// 迷你卡、播放条主按钮、空格与媒体键都走这一条 —— 只在某一处特判会出现
+    /// 「按钮换了图标、键盘按了没反应」。
+    func restart() {
+        guard hasQueue else { return }
+        start(at: 0)
     }
 
     /// 只播（媒体键 / 控制中心的播放）：已经在播就不动 —— 用 `togglePlayPause`
@@ -253,6 +278,8 @@ final class PlaybackEngine {
     func seek(to seconds: Double) {
         guard duration > 0 else { return }
         let clamped = min(max(0, seconds), duration)
+        // 拖离终点就不再是「一轮走完」；停在终点那一帧由 `pauseAtEnd()` 负责置真。
+        isAtQueueEnd = false
         currentTime = clamped
         player.seek(
             to: CMTime(seconds: clamped, preferredTimescale: CMTimeScale(NSEC_PER_SEC)),
@@ -273,6 +300,8 @@ final class PlaybackEngine {
         }
         queue.append(song)
         playOrder.insert(queue.count - 1, at: position + 1)
+        // 「下一首播放」插在队尾之后时，队尾就不再成立了。
+        syncQueueEndFlag()
     }
 
     func setVolume(_ value: Double) {
@@ -293,6 +322,7 @@ final class PlaybackEngine {
         guard playOrder.indices.contains(newPosition) else { return }
         position = newPosition
         streamErrorMessage = nil
+        isAtQueueEnd = false
 
         guard let manager = sessionManager else {
             streamErrorMessage = "会话不在了，重新连接后再播。"
@@ -392,10 +422,23 @@ final class PlaybackEngine {
         )
     }
 
+    /// 队尾：停在最后一首的结尾、队列还在。位置直接钉到时长上，**不走 `seek(to:)`**
+    /// —— 那个方法会把 `isAtQueueEnd` 清掉（它服务的是用户拖动）。
     private func pauseAtEnd() {
         player.pause()
         isPlaying = false
-        seek(to: duration)
+        let end = CMTime(seconds: duration, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        player.seek(to: end, toleranceBefore: .zero, toleranceAfter: .zero)
+        currentTime = duration
+        isAtQueueEnd = true
+        publishNowPlaying()
+    }
+
+    /// 队列结构变过之后重算队尾态：后面还有曲目就不算「一轮走完」。
+    private func syncQueueEndFlag() {
+        if position + 1 < playOrder.count {
+            isAtQueueEnd = false
+        }
     }
 
     private func publishNowPlaying() {
@@ -408,6 +451,7 @@ final class PlaybackEngine {
         removeEndObserver()
         removeStatusObserver()
         isPlaying = false
+        isAtQueueEnd = false
         currentTime = 0
         duration = 0
         tracks = []

@@ -1,7 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// 外壳：侧栏（三个模块 + 设置）+ 主区 + 底部常驻播放条。/// 布局与设计原型一致：侧栏 220 固定宽，主区自适应，播放条通栏、切到任何模块都不中断。
+/// 外壳：侧栏（三个模块 + 设置）+ 主区，播放条挂在主区那一列的底部。
+///
+/// 播放条**只属听歌**（2026-10-18 定）：它原来通栏挂在窗口底，等于把单模块的功能
+/// 当成了全局设施 —— 文件管理与系统状态各让出 70pt，换来的却是自己用不上的音量条。
+/// 挪进主区之后侧栏通高、连接状态落到窗口最底，非听歌模块由侧栏底部的迷你卡接手。
+/// 沉浸模式是整窗覆盖层（从底部滑上来），盖住侧栏与主区，层内自带一条铺满整窗的
+/// 播放条 —— 普通模式那条只有主区宽，宽度差就用「同一组件的另一个实例」补。
 struct RootView: View {
     @Environment(AppState.self) private var state
 
@@ -9,26 +15,25 @@ struct RootView: View {
         @Bindable var state = state
         Group {
             if state.isConnected {
-                VStack(spacing: 0) {
-                    // 沉浸模式收掉侧栏（原型 `.win[data-mode="immersive"] .sider{display:none}`），
-                    // 播放条两态都在 —— 沉浸只是换掉上半屏，播放不中断。
-                    if state.showsImmersive {
+                ZStack(alignment: .bottom) {
+                    shell
+                    // 沉浸层（第 5 稿）：进 280ms 减速收住、退 200ms 加速离开。
+                    // 进比出慢是覆盖层的惯例 —— 展开值得等，退回要立刻。
+                    // 两条曲线写在各自动画上（不等父级 `.animation`），否则进出只能
+                    // 共用一条时长。
+                    if state.musicPresentation == .immersive {
                         ImmersiveView()
-                            .transition(.opacity)
-                    } else {
-                        HStack(spacing: 0) {
-                            SidebarView()
-                            Rectangle()
-                                .fill(Color.dmLine)
-                                .frame(width: DmLine.hairline)
-                            MainAreaView()
-                        }
-                        .frame(maxHeight: .infinity)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom)
+                                    .animation(.timingCurve(0.22, 1, 0.36, 1, duration: DmMotion.slow)),
+                                removal: .move(edge: .bottom)
+                                    .animation(.timingCurve(0.4, 0, 1, 1, duration: DmMotion.base))
+                            ))
+                            // 层压在壳之上：侧栏与主区留在原位被盖住，不做淡出。
+                            .zIndex(1)
                     }
-                    PlayerBarView(engine: state.playback)
                 }
                 .background(Color.dmBg)
-                .animation(.easeOut(duration: DmMotion.base), value: state.showsImmersive)
             } else {
                 ConnectView()
             }
@@ -130,6 +135,23 @@ struct RootView: View {
         }
         // 计划行右键菜单（编辑 / 删除）：与歌曲 / 文件菜单同一归属、同一套摆位。
         .overlay { powerRowMenuLayer }
+    }
+
+    /// 常规壳：侧栏 + 主区 + 主区底部的播放条（只在听歌模块）。
+    private var shell: some View {
+        HStack(spacing: 0) {
+            SidebarView()
+            Rectangle()
+                .fill(Color.dmLine)
+                .frame(width: DmLine.hairline)
+            VStack(spacing: 0) {
+                MainAreaView()
+                if state.module == .music {
+                    PlayerBarView(engine: state.playback)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// 计划表第 `index` 条（弹窗编辑模式预填用）。
@@ -488,6 +510,22 @@ private struct SidebarView: View {
                 .padding(.top, DmSpace.s10)
 
                 Spacer(minLength: 0)
+
+                // 迷你卡（2026-10-18 定）：只在非听歌模块、且有正在播的歌时出现。
+                // **两个热区**：按钮切播放 / 暂停、留在当前页；卡片其余位置回听歌模块。
+                // 暂停时仍显示（按钮变播放），清空队列或断线才消失 —— 它是状态不是通知，
+                // 不设关闭钮（可关闭会让人以为「关掉＝停止播放」）。
+                if state.module != .music,
+                   let engine = state.playback,
+                   engine.currentSong != nil {
+                    MiniPlayerView(engine: engine) {
+                        // 「接着刚才」：上次在队列就回队列，不强制回曲库首页。
+                        state.resumeMusic()
+                    }
+                    .padding(.horizontal, DmSpace.s8)
+                    .padding(.bottom, DmSpace.s6)
+                }
+
                 connectionFooter
             }
             // 整块下移 `DmLayout.titlebar` 给悬浮的红绿灯让位，底色仍铺到窗口最上沿
@@ -618,6 +656,10 @@ private struct SettingsPane: View {
     /// 检查更新的状态（版本号 / 结果 / 是否有新版）。`@State` 挂在这一页上：
     /// 结果只在「关于」组里出现，换模块再回来重查一次也无妨。
     @State private var updates = UpdateChecker()
+    /// 官网行的悬停态：整行单动作，悬停整行抬 panel-3、行尾外链图标提亮。
+    @State private var siteHovered = false
+    /// 赞赏行的悬停态（与官网行同一形态）。
+    @State private var donateHovered = false
 
     var body: some View {
         @Bindable var state = state
@@ -702,19 +744,38 @@ private struct SettingsPane: View {
                             .disabled(updates.isChecking)
                         }
                     }
-                    DmSettingsRow("官网") {
-                        // 指应用自己在官网上的页面，不甩到主站首页：主站首页是作品集，
-                        // 指着它等于让用户自己再找一遍。
-                        Button("dreamanual.com/works/nas.html") {
-                            if let url = URL(string: "https://dreamanual.com/works/nas.html") {
-                                NSWorkspace.shared.open(url)
-                            }
+                    // 官网整行可点（与下面的赞赏行同一形态）：指应用自己在官网上的
+                    // 页面，不甩到主站首页 —— 主站首页是作品集，指着它等于让用户
+                    // 自己再找一遍。完整网址收进悬停提示，行尾外链图标（三端同款）
+                    // 表示「点整行会跳出去」。
+                    Button {
+                        if let url = URL(string: "https://dreamanual.com/works/nas.html") {
+                            NSWorkspace.shared.open(url)
                         }
-                        .buttonStyle(.plain)
-                        .font(.system(size: DmText.t13))
-                        .foregroundColor(Color.dmAccent2)
+                    } label: {
+                        HStack(spacing: DmSpace.s6) {
+                            Text("官网")
+                                .font(.system(size: DmText.t13))
+                                .foregroundColor(Color.dmInk)
+                            Spacer(minLength: 0)
+                            LucideIcon("square-arrow-out-up-right", size: DmIcon.i14)
+                                .foregroundColor(siteHovered ? Color.dmAccent2 : Color.dmInk3)
+                        }
+                        .padding(.horizontal, DmSpace.s14)
+                        .padding(.vertical, DmSpace.s12)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(siteHovered ? Color.dmPanel3 : Color.clear)
+                        )
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .trackingHover($siteHovered)
+                    .help("在浏览器中打开应用页面（dreamanual.com/works/nas.html）")
                     // 赞赏整行可点：不占标签右格，读上去是「一行入口」而不是「一个设置项」。
+                    // 悬停与官网行同一形态：整行抬 panel-3，行内强调元素统一 accent-2
+                    // （sky-400 压 panel-3 = 4.76 过 AA，不必再提 300 档）——
+                    // 一行之内只允许一个悬停档，否则图标与文字深浅不一。
                     Button {
                         if let url = URL(string: "https://afdian.com/a/wuyifa001") {
                             NSWorkspace.shared.open(url)
@@ -727,12 +788,19 @@ private struct SettingsPane: View {
                                 .font(.system(size: DmText.t13))
                                 .foregroundColor(Color.dmAccent2)
                             Spacer(minLength: 0)
+                            LucideIcon("square-arrow-out-up-right", size: DmIcon.i14)
+                                .foregroundColor(donateHovered ? Color.dmAccent2 : Color.dmInk3)
                         }
                         .padding(.horizontal, DmSpace.s14)
                         .padding(.vertical, DmSpace.s12)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(donateHovered ? Color.dmPanel3 : Color.clear)
+                        )
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .trackingHover($donateHovered)
                 }
             }
             // 内容宽与居中：对齐视频下载 / 密码管理的设置页（720 块内左对齐、
