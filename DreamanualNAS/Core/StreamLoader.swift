@@ -7,8 +7,8 @@ enum PlaybackError: LocalizedError {
     case streamStatus(Int)
     /// DSM 业务码（HTTP 200 + JSON 信封里的 `error.code`）。
     case streamRejected(Int)
-    /// 200 回来但内容不是音频（服务端回了 JSON / HTML）。
-    case streamNotAudio
+    /// 200 回来但内容不是媒体（服务端回了 JSON / HTML）。
+    case streamNotMedia
 
     var errorDescription: String? {
         switch self {
@@ -18,8 +18,8 @@ enum PlaybackError: LocalizedError {
             return "取流失败（HTTP \(status)）。"
         case .streamRejected(let code):
             return "取流被拒（Synology 错误码 \(code)）。"
-        case .streamNotAudio:
-            return "取流返回的不是音频。"
+        case .streamNotMedia:
+            return "取流返回的不是音视频。"
         }
     }
 }
@@ -31,15 +31,29 @@ enum PlaybackError: LocalizedError {
 /// 这两条只有自己发请求才办得到。AVFoundation 只看到自定义 scheme，
 /// 真正的字节由这里用 URLSession（带与 `SynologyClient` 同一套证书策略）去拉。
 ///
+/// **音视频共用这一套**（2026-10-20 加照片视频）：差异只在取流地址，视频走
+/// `SYNO.FotoTeam.Streaming`（`/webapi/` 前缀、条目 id + quality），其余探测总长、
+/// 按 Range 裁、喂字节的逻辑逐行相同 —— 复制一份出来只会让两处慢慢走偏。
+///
 /// 实测约束（都写进接口结论了）：
 /// - `contentInformationRequest.contentType` 必须填**正确的 UTI**（mp3 填
-///   `public.mp3`）；填 MIME `audio/mpeg` 得 -11828，填错 UTI 得 -11829。
+///   `public.mp3`；mp4 填 `public.mpeg-4`）；填 MIME `audio/mpeg` 得 -11828，
+///   填错 UTI 得 -11829。
 /// - AVPlayer 判格式还依赖 URL 扩展名，所以 asset URL 的尾部保留真扩展名。
 /// - 服务端支持 Range（回 206 + Content-Range），拖进度条有基础；个别请求
 ///   回 200 全量时把 offset 前的字节丢掉再喂。
 final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDataDelegate, @unchecked Sendable {
     /// 自定义 scheme 必须是系统不认识的，AVFoundation 才会把装载请求交给 delegate。
     static let scheme = "dmnas"
+
+    /// 取什么。地址按这个现拼 —— asset URL 只是给 AVFoundation 看的一个壳，
+    /// 真实地址在 `streamURL` 里按来源生成。
+    enum Source {
+        /// Audio Station 的曲目 id。
+        case audio(songID: String)
+        /// 照片库的视频条目 id（**条目 id，不是 unit_id**）。
+        case photoVideo(itemID: Int)
+    }
 
     /// 三件套提升成了顶层 `StreamEndpoint`（小组件 target 不编本文件，但
     /// SessionManager 的引用照旧）—— 这里留个旧名字。
@@ -91,7 +105,7 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
         }
     }
 
-    private let songID: String
+    private let source: Source
     private let contentType: String
     private let endpoint: Endpoint
     private let workQueue = DispatchQueue(label: "dreamanual.nas.stream", qos: .userInitiated)
@@ -139,12 +153,31 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
 
     private let state = State()
 
-    init(songID: String, contentType: String, endpoint: Endpoint) {
-        self.songID = songID
+    init(source: Source, contentType: String, endpoint: Endpoint) {
+        self.source = source
         self.contentType = contentType
         self.endpoint = endpoint
         self.tlsPolicy = TLSPolicyDelegate(allowSelfSigned: endpoint.allowSelfSigned)
         super.init()
+    }
+
+    /// 曲库那一路的旧写法（调用点保持原样）。
+    convenience init(songID: String, contentType: String, endpoint: Endpoint) {
+        self.init(source: .audio(songID: songID), contentType: contentType, endpoint: endpoint)
+    }
+
+    /// 照片库的视频。UTI 与扩展名都从文件名推（`.MOV` 服务端也标 `video/mp4`，
+    /// AVFoundation 只认容器，`public.mpeg-4` 对两种容器都成立）。
+    convenience init(videoItemID: Int, endpoint: Endpoint) {
+        self.init(source: .photoVideo(itemID: videoItemID),
+                  contentType: UTType.mpeg4Movie.identifier,
+                  endpoint: endpoint)
+    }
+
+    /// 视频的扩展名。AVFoundation 判格式依赖 URL 尾巴上的扩展名，取不到就按 mp4。
+    static func videoExtension(_ filename: String) -> String {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        return ["mov", "mp4", "m4v"].contains(ext) ? ext : "mp4"
     }
 
     /// 把自己挂上 asset 的资源装载器。loader 由调用方（PlaybackEngine）与
@@ -188,21 +221,28 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
 
     // MARK: - 取字节
 
-    /// `stream.cgi` 的请求 URL。`_sid` 走查询串；取流这条 GET 不走 JSON 信封，
-    /// 服务端直接回音频字节。
+    /// 真实取流地址。两条路都是 GET、都直接回字节（不走 JSON 信封）：
+    /// 曲库走 `AudioStation/stream.cgi`，照片视频走 `entry.cgi` 的 Streaming。
+    /// `_sid` 走查询串；`X-SYNO-TOKEN` 在请求头（登录时开了 `enable_syno_token`，
+    /// 缺 token 会被判会话无效）。
     private var streamURL: URL? {
-        var comps = URLComponents(
-            url: endpoint.baseURL.appendingPathComponent("AudioStation/stream.cgi"),
-            resolvingAgainstBaseURL: false
-        )
-        comps?.percentEncodedQuery = SynologyClient.formEncode([
-            "api": "SYNO.AudioStation.Stream",
-            "version": "2",
-            "method": "stream",
-            "id": songID,
-            "_sid": endpoint.credentials.sid,
-        ])
-        return comps?.url
+        switch source {
+        case .audio(let songID):
+            var comps = URLComponents(
+                url: endpoint.baseURL.appendingPathComponent("AudioStation/stream.cgi"),
+                resolvingAgainstBaseURL: false
+            )
+            comps?.percentEncodedQuery = SynologyClient.formEncode([
+                "api": "SYNO.AudioStation.Stream",
+                "version": "2",
+                "method": "stream",
+                "id": songID,
+                "_sid": endpoint.credentials.sid,
+            ])
+            return comps?.url
+        case .photoVideo(let itemID):
+            return PhotosAPI.streamingURL(itemID: itemID, endpoint: endpoint)
+        }
     }
 
     /// 取流的请求：与 `SynologyClient` 同一套 —— `_sid` 在查询串，`X-SYNO-TOKEN`
@@ -247,10 +287,10 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
         let total = Self.totalBytes(from: http) ?? http.expectedContentLength
         Self.smokeLog("探测总长 http=\(http.statusCode) mime=\(mime) total=\(total) 头=\(http.allHeaderFields)")
 
-        guard total > 0, Self.looksLikeAudio(mime) else {
-            // 不是音频：多半是 JSON 错误信封（`{"error":{"code":N}}`），把 code 挖出来。
+        guard total > 0, Self.looksLikeMedia(mime) else {
+            // 不是媒体：多半是 JSON 错误信封（`{"error":{"code":N}}`），把 code 挖出来。
             let snippet = String(data: body.prefix(300), encoding: .utf8) ?? "<非文本>"
-            Self.smokeLog("探测应答不是音频，体=\(snippet)")
+            Self.smokeLog("探测应答不是媒体，体=\(snippet)")
             if let code = Self.errorCode(in: body) { throw PlaybackError.streamRejected(code) }
             throw PlaybackError.streamStatus(http.statusCode)
         }
@@ -258,10 +298,13 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
         return total
     }
 
-    /// MIME 看起来是音频（服务端给 `audio/mpeg` 一类；有的回 `application/octet-stream`）。
-    private static func looksLikeAudio(_ mime: String) -> Bool {
+    /// MIME 看起来是媒体（服务端给 `audio/mpeg` / `video/mp4` 一类；有的回
+    /// `application/octet-stream`）。DSM 的业务错误也是 200，所以这一条断言是
+    /// 「回的不是错误信封」的判据。
+    private static func looksLikeMedia(_ mime: String) -> Bool {
         let lower = mime.lowercased()
-        return lower.hasPrefix("audio/") || lower.contains("octet-stream") || lower.contains("mpegurl")
+        return lower.hasPrefix("audio/") || lower.hasPrefix("video/")
+            || lower.contains("octet-stream") || lower.contains("mpegurl")
     }
 
     /// 从 DSM 的错误信封里挖业务码。
@@ -341,9 +384,9 @@ final class StreamLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDat
         }
         // 2xx 之外还能骗人：DSM 的业务错误是 200 + JSON。MIME 不像音频就当场判失败。
         let mime = http.value(forHTTPHeaderField: "Content-Type") ?? "-"
-        guard Self.looksLikeAudio(mime) else {
-            Self.smokeLog("取字节应答不是音频 mime=\(mime)")
-            state.handler(for: dataTask)?.finish(with: PlaybackError.streamNotAudio)
+        guard Self.looksLikeMedia(mime) else {
+            Self.smokeLog("取字节应答不是媒体 mime=\(mime)")
+            state.handler(for: dataTask)?.finish(with: PlaybackError.streamNotMedia)
             return
         }
         // 服务端没按 Range 裁（回 200 全量）时，把 offset 前的字节丢掉再喂。

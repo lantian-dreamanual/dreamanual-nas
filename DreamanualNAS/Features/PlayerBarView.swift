@@ -216,7 +216,8 @@ struct PlayerBarView: View {
             "star",
             size: DmIcon.i16,
             active: song.rating > 0,
-            filled: song.rating > 0
+            filled: song.rating > 0,
+            label: song.rating > 0 ? "取消评分" : "评 5 星"
         ) {
             Task { await state.rate(song.id, to: song.rating > 0 ? 0 : 5) }
         }
@@ -226,17 +227,19 @@ struct PlayerBarView: View {
 
     private var controls: some View {
         HStack(spacing: DmSpace.s10) {
-            iconButton("shuffle", size: DmIcon.i16, active: engine?.isShuffled == true) {
+            iconButton("shuffle", size: DmIcon.i16, active: engine?.isShuffled == true,
+                       label: engine?.isShuffled == true ? "关闭随机播放" : "开启随机播放") {
                 engine?.toggleShuffle()
             }
-            iconButton("skip-back", size: DmIcon.i18) {
+            iconButton("skip-back", size: DmIcon.i18, filled: true, label: "上一首") {
                 engine?.previous()
             }
             playButton
-            iconButton("skip-forward", size: DmIcon.i18) {
+            iconButton("skip-forward", size: DmIcon.i18, filled: true, label: "下一首") {
                 engine?.next()
             }
-            iconButton("list-music", size: DmIcon.i16, active: state.showsQueue) {
+            iconButton("list-music", size: DmIcon.i16, active: state.showsQueue,
+                       label: state.showsQueue ? "关闭播放队列" : "打开播放队列") {
                 state.toggleQueue()
             }
         }
@@ -250,7 +253,7 @@ struct PlayerBarView: View {
         Button {
             engine?.togglePlayPause()
         } label: {
-            LucideIcon(isPlayingNow ? "pause" : "play", size: DmIcon.i16)
+            LucideIcon(isPlayingNow ? "pause" : "play", size: DmIcon.i16, filled: true)
                 .foregroundColor(Color.dmOnAccent)
                 .frame(width: 36, height: 36)
                 .background(
@@ -258,6 +261,7 @@ struct PlayerBarView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isPlayingNow ? "暂停" : "播放")
         .onHover { isPlayHovered = $0 }
         .animation(.easeInOut(duration: DmMotion.fast), value: isPlayHovered)
     }
@@ -267,6 +271,7 @@ struct PlayerBarView: View {
         size: CGFloat,
         active: Bool = false,
         filled: Bool = false,
+        label: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -275,6 +280,7 @@ struct PlayerBarView: View {
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     // MARK: 音量

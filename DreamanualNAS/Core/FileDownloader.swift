@@ -172,16 +172,19 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
                 errors: (error["errors"] as? [[String: Any]]) ?? []
             )
         }
+        // 原始应答只进日志（HTML 错误页 / JSON 片段对用户没有意义）。
         let text = String(data: body.prefix(200), encoding: .utf8) ?? ""
-        return QuickConnectError.badResponse(text.isEmpty ? "HTTP \(status)" : text)
+        if !text.isEmpty { NSLog("[download] 应答不是预期形状：%@", text) }
+        return QuickConnectError.badResponse("下载没有完成，请重试。")
     }
 
     /// 路径类失败：DSM 回 404 + HTML 错误页，页里没有可用信息，按状态码给人话。
+    /// 🔴 状态码不上界面（判据 9），只留一句「发生了什么 + 下一步」。
     private static func pathError(status: Int) -> Error {
         switch status {
-        case 404: return QuickConnectError.badResponse("这个文件在 NAS 上找不到了（HTTP 404）。")
-        case 403: return QuickConnectError.badResponse("没有下载这个文件的权限（HTTP 403）。")
-        default: return QuickConnectError.network("下载失败（HTTP \(status)）")
+        case 404: return QuickConnectError.badResponse("这个文件在 NAS 上找不到了。")
+        case 403: return QuickConnectError.badResponse("没有下载这个文件的权限。")
+        default: return QuickConnectError.badResponse("下载没有完成，请重试。")
         }
     }
 }

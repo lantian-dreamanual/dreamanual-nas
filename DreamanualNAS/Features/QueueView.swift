@@ -19,7 +19,13 @@ struct QueueView: View {
                 Button {
                     engine.toggleShuffle()
                 } label: {
-                    Label("随机播放", systemImage: "shuffle")
+                    // 图标一律走 `LucideIcon`（bundle 里的 lucide-<name> 图）。
+                    // `Label(_:systemImage:)` 走的是真 SF Symbols、不过 Lucide 那套，
+                    // 混用会让同一排按钮里出现两种笔形（2026-10-20 统一）。
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("shuffle", size: DmIcon.i12)
+                        Text("随机播放")
+                    }
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(!engine.hasQueue)
@@ -27,9 +33,10 @@ struct QueueView: View {
                 Button {
                     engine.clearQueue()
                 } label: {
-                    // ⚠️ 这里给的是 **SF Symbols** 名（`Label` 走系统图标），不是 Lucide ——
-                    // 原来写的 `trash-2` 是 Lucide 的名，SF 里没有，真机画的是空占位。
-                    Label("清空", systemImage: "trash")
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("trash", size: DmIcon.i12)
+                        Text("清空队列")
+                    }
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(!engine.hasQueue)
@@ -46,7 +53,7 @@ struct QueueView: View {
     }
 
     private var subtitle: String {
-        guard engine.hasQueue else { return "队列为空" }
+        guard engine.hasQueue else { return "0 首" }
         let from = engine.isShuffled ? " · 随机中" : ""
         return "\(engine.queue.count) 首\(from)"
     }
@@ -148,7 +155,7 @@ struct QueueView: View {
             Text("队列里还没有歌")
                 .font(.system(size: DmText.t15, weight: .semibold))
                 .foregroundColor(Color.dmInk2)
-            Text("回曲库双击一行，整张表就从这里接着放")
+            Text("双击曲库里的一行，从这里继续播放")
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk3)
         }

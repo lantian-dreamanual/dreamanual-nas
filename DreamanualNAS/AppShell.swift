@@ -134,10 +134,11 @@ final class AppShellController: NSObject {
         }
     }
 
-    /// 右键菜单只留退出（设计稿 v2）。
+    /// 右键菜单只留退出（设计稿 v2）。菜单项文字就两个字 —— 菜单是贴着
+    /// 状态栏图标弹的，上下文已经指明是哪个 app，不必再带应用名。
     private func buildContextMenu() -> NSMenu {
         let menu = NSMenu()
-        let quit = NSMenuItem(title: "退出 Dreamanual NAS 助手",
+        let quit = NSMenuItem(title: "退出",
                               action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = nil
         menu.addItem(quit)

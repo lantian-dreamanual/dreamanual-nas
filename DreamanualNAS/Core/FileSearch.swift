@@ -59,8 +59,8 @@ final class FileSearch {
 
     /// 搜索进度行第二行那句话（原型画的「正在重试」是一等状态，不是错误）。
     var progressNote: String {
-        if attempt <= 1 { return "在「\(folder)」里找「\(query)」" }
-        return "服务端返回了空应答，正在重试（第 \(attempt) 次 / 上限 \(Self.attemptLimit) 次）"
+        if attempt <= 1 { return "正在搜索“\(folder)”…" }
+        return "正在重新搜索…（第 \(attempt) 次，最多 \(Self.attemptLimit) 次）"
     }
 
     /// 结果行的说明行（状态栏那一条）。
@@ -68,7 +68,7 @@ final class FileSearch {
         switch phase {
         case .idle: return ""
         case .running: return "正在搜索…"
-        case .failed: return errorMessage ?? "没能搜成"
+        case .failed: return errorMessage ?? "搜索没有完成，请重试。"
         case .done:
             return total == 0 ? "没有匹配的项" : "找到 \(total) 条"
         }
@@ -150,7 +150,7 @@ final class FileSearch {
             if phase == .done { return }
         }
         phase = .failed
-        errorMessage = "服务端连着 \(Self.attemptLimit) 次返回空应答，这次没搜成。"
+        errorMessage = "搜索没有完成，请重试。"
     }
 
     /// 接着拉下一页。任务还活着，所以直接按偏移取。

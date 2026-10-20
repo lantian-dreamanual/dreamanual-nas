@@ -30,19 +30,38 @@ struct SynologyError: LocalizedError {
 
     var errorDescription: String? {
         if let friendly = Self.friendlyMessage(api: api, code: code) { return friendly }
-        let base = "\(api).\(method) 失败（code \(code)）"
-        guard !errors.isEmpty else { return base }
-        let detail = errors.map { err -> String in
-            let c = (err["code"] as? Int).map(String.init) ?? "?"
-            let path = (err["path"] as? String) ?? ""
-            return path.isEmpty ? c : "\(c) @ \(path)"
-        }.joined(separator: "，")
-        return "\(base)：\(detail)"
+        // 🔴 接口名、方法名、业务码一律不上界面（判据 9）—— 用户要的是「哪一步没成、
+        // 下一步做什么」。原始 api / method / code 在 `diagnostic` 里，只进日志。
+        if let first = errors.first {
+            let c = (first["code"] as? Int) ?? code
+            let path = (first["path"] as? String) ?? ""
+            if let text = Self.fileTaskMessage(code: c, path: path) { return text }
+        }
+        return "操作没有完成，请重试。"
+    }
+
+    /// 原始细节（接口名 + 码 + 路径），只给日志用。
+    var diagnostic: String {
+        let paths = errors.compactMap { ($0["path"] as? String) }.joined(separator: "，")
+        return "\(api).\(method) code \(code)" + (paths.isEmpty ? "" : " @ \(paths)")
+    }
+
+    /// 文件任务错误码 → 人话。**只翻实测过的四个**：408 路径不存在、414 重名、
+    /// 418 名称非法、1003 目标在源内部。翻不出返回 nil，由调用方给通用句。
+    static func fileTaskMessage(code: Int, path: String) -> String? {
+        let name = path.isEmpty ? "" : "“\(path.split(separator: "/").last.map(String.init) ?? path)”"
+        switch code {
+        case 408: return "\(name)找不到了，可能已被移走。"
+        case 414: return "\(name)已有同名的项，请换一个名字。"
+        case 418: return "\(name)这个名字不能用，去掉路径里的斜杠后重试。"
+        case 1003: return "\(name)不能放到它自己所在的文件夹里。"
+        default: return nil
+        }
     }
 
     /// 业务码转人话。**码的语义随 API 变**，所以只翻 `SYNO.API.Auth` 这一组
     /// —— 同一个 `400` 在 FileStation 是「路径不合法」，翻成「账号或密码不对」
-    /// 就是把用户往错方向指。其余一律保留原始码，码本身是查文档的钥匙。
+    /// 就是把用户往错方向指。其余走 `fileTaskMessage`，再翻不出给通用重试句。
     static func friendlyMessage(api: String, code: Int) -> String? {
         guard api == "SYNO.API.Auth" else { return nil }
         switch code {
@@ -51,7 +70,7 @@ struct SynologyError: LocalizedError {
         case 402: return "这个账号没有登录权限。"
         case 403, 406: return "这个账号开了两步验证，需要验证码才能登录，当前版本还不支持。"
         case 404: return "两步验证码不对。"
-        case 407: return "这台设备的 IP 被 NAS 的自动封锁拦住了，去 DSM 的「控制面板 → 安全性 → 自动封锁」解开。"
+        case 407: return "这台设备的 IP 已被 NAS 自动封锁，到 DSM 的“控制面板 → 安全性 → 自动封锁”里解开。"
         case 408, 409: return "这个账号的密码已过期，需要先在 DSM 里改。"
         case 105: return "登录会话权限不够或被顶掉了。"
         case 106: return "登录会话超时了。"

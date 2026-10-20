@@ -94,7 +94,7 @@ final class FileTransfer {
         if sources.contains(where: { $0.isDirectory && (target == $0.path || target.hasPrefix($0.path + "/")) }) {
             return "目标不能是来源自己，也不能在来源里面。"
         }
-        if !picker.targetCanWrite { return "目标目录不可写，换一个位置。" }
+        if !picker.targetCanWrite { return "目标目录没有写入权限，请换一个位置。" }
         return nil
     }
 

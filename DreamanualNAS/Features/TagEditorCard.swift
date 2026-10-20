@@ -86,7 +86,7 @@ struct TagEditorCard: View {
             }
             fieldRow("注释", text: $commentText)
 
-            Text(problem ?? "保存会改写 NAS 上的文件标签，索引随即更新。")
+            Text(problem ?? "保存会改写 NAS 上的文件。")
                 .font(.system(size: DmText.t12))
                 .foregroundColor(problem != nil ? Color.dmDanger : Color.dmInk3)
         }
@@ -108,7 +108,7 @@ struct TagEditorCard: View {
     private func numberRow(_ label: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: DmSpace.s6) {
             FormLabel(label)
-            TextField("—", text: text)
+            TextField("不设置", text: text)
                 .formField(on: .panel)
         }
     }

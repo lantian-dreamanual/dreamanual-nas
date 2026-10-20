@@ -113,6 +113,25 @@ struct SystemLoad: Equatable {
     func volume(_ id: String) -> VolumeLoad? { volumes.first { $0.id == id } }
 }
 
+/// 卷 / 盘的状态值转中文。
+///
+/// 🔴 服务端回的是英文标识（`normal` / `crashed` / `system_partition_failed` …），
+/// DSM 的中文界面是它自己客户端翻的 —— 直接回显会让界面蹦出英文串。
+/// 认不出的值统一按「异常」：这一格只说好坏，具体原因去 DSM 控制面板看。
+func storageStatusText(_ raw: String) -> String {
+    switch raw.lowercased() {
+    case "normal": return "正常"
+    case "crashed": return "已损毁"
+    case "degraded": return "降级"
+    case "repairing": return "正在修复"
+    case "migrating": return "正在迁移"
+    case "background_verification", "checking": return "正在检查"
+    case "not_initialized": return "未初始化"
+    case "system_partition_failed": return "系统分区异常"
+    default: return "异常"
+    }
+}
+
 /// 一块盘「有多大、多热、好不好」：`Storage.CGI.Storage` `load_info` 的 `disks[]`。
 ///
 /// 🔴 这里**没有 `used`** —— 单盘的已用量服务端不给（SHR 之下盘也不是各自独立的
@@ -132,6 +151,9 @@ struct StorageDisk: Identifiable, Equatable {
     let remainLifePercent: Int
 
     var isHealthy: Bool { status.lowercased() == "normal" }
+
+    /// 界面直接显示这个，**不要显示 `status` 原始值**（英文标识）。
+    var statusText: String { storageStatusText(status) }
 }
 
 /// 一卷的容量与状态（`Storage.CGI.Storage` 的 `volumes[]`）。
@@ -164,6 +186,9 @@ struct StorageVolume: Identifiable, Equatable {
 
     var freeBytes: Int64 { max(0, totalBytes - usedBytes) }
     var isHealthy: Bool { status.lowercased() == "normal" }
+
+    /// 同上：界面用这个，不回显英文标识。
+    var statusText: String { storageStatusText(status) }
 }
 
 /// 磁盘与卷那一块：`Storage.CGI.Storage` v1 `load_info`。
@@ -434,7 +459,7 @@ enum SystemStatusAPI {
 
     private static func temperatureStat(_ device: SystemDevice?) -> SystemStat {
         guard let device else {
-            return SystemStat(icon: "thermometer", label: "温度", value: "—", note: "没读到")
+            return SystemStat(icon: "thermometer", label: "温度", value: "—", note: "无法读取")
         }
         return SystemStat(
             icon: "thermometer", label: "温度",
@@ -448,7 +473,7 @@ enum SystemStatusAPI {
     /// 脚注给型号、核数与平均负载。
     private static func cpuStat(_ load: SystemLoad?, device: SystemDevice?) -> SystemStat {
         guard let load else {
-            return SystemStat(icon: "cpu", label: "CPU", value: "—", note: "没读到")
+            return SystemStat(icon: "cpu", label: "CPU", value: "—", note: "无法读取")
         }
         var parts: [String] = []
         if let device {
@@ -468,7 +493,7 @@ enum SystemStatusAPI {
     /// —— 三个数是一套的（总 - 可用 - 缓存 ≈ 主值那份占用），不会互相打架。
     private static func memoryStat(_ load: SystemLoad?) -> SystemStat {
         guard let load else {
-            return SystemStat(icon: "memory-stick", label: "内存", value: "—", note: "没读到")
+            return SystemStat(icon: "memory-stick", label: "内存", value: "—", note: "无法读取")
         }
         let cached = dmByteText(load.memoryCachedBytes)
         let available = dmByteText(load.memoryAvailableBytes)
@@ -481,7 +506,7 @@ enum SystemStatusAPI {
 
     private static func uptimeStat(_ device: SystemDevice?) -> SystemStat {
         guard let device else {
-            return SystemStat(icon: "clock", label: "运行时长", value: "—", note: "没读到")
+            return SystemStat(icon: "clock", label: "运行时长", value: "—", note: "无法读取")
         }
         let hours = device.uptimeSeconds / 3600
         let value: String

@@ -41,6 +41,10 @@ final class FileBrowser {
     private(set) var isLoadingMore = false
     private(set) var errorMessage: String?
 
+    /// 冒烟：`DM_UI=…,fileoverflow` 时让工具条把溢出菜单自己打开。
+    /// AI 点不了 UI（合成鼠标事件进不了 SwiftUI 手势），菜单摆位只能这样截。
+    var overflowSmoke = false
+
     /// 选中的条目（按路径存）。**多选** —— 写操作那一批（2026-10-12 起就是多选框列
     /// 在等它）全靠这一份，删除 / 复制 / 移动都按选中集合生效。
     private(set) var selection: Set<String> = []
@@ -168,6 +172,19 @@ final class FileBrowser {
         isLoading = true
         await revealAncestors(of: path, on: manager)
         await loadPage(reset: true, on: manager)
+    }
+
+    /// 打开某个文件所在的目录并选中它 —— 「在文件夹中显示」（曲库与照片共用）。
+    ///
+    /// 选中**必须在 `open` 之后设**：`open` 会清掉旧选中。列表还没回来时不动
+    /// （先写进 `selection` 也留不住，`entries` 落地时会按交集清掉）。
+    func reveal(file path: String, on manager: SessionManager?) async {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard !folder.isEmpty, folder != "/" else { return }
+        await open(folder, on: manager)
+        guard entries.contains(where: { $0.path == path }) else { return }
+        selection = [path]
+        selectionAnchor = path
     }
 
     /// 重新拉：共享夹清单重来，树缓存清空（展开的层跟着作废），当前目录照旧重开一次。

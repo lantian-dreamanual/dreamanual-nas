@@ -176,7 +176,7 @@ struct ImmersiveView: View {
         // 落位与照片查看器统一（同日）：按钮中线对齐窗口题头行 —— 28 高的钮
         // top 6 → 中线 20，与查看器 40 高顶栏的中线一致；右边距 16。图形 18：
         // 这一屏唯一的常驻控件，比工具条里的次级动作大一号。
-        IconButton(iconName: "arrow-down-to-line", iconSize: DmIcon.i18) { state.closeImmersive() }
+        IconButton(iconName: "arrow-down-to-line", iconSize: DmIcon.i18, label: "收起") { state.closeImmersive() }
             .help("收起（Esc）")
             .padding(.top, DmSpace.s6)
             .padding(.trailing, DmSpace.s16)
@@ -266,11 +266,6 @@ struct ImmersiveView: View {
 
             if let next = engine?.nextSong {
                 nextUpRow(next)
-                    .padding(.top, DmSpace.s10)
-            } else {
-                Text("这一首是队列的最后一首")
-                    .font(.system(size: DmText.t13))
-                    .foregroundColor(Color.dmInk3)
                     .padding(.top, DmSpace.s10)
             }
         }

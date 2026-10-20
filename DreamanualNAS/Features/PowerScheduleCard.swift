@@ -254,15 +254,15 @@ struct PowerScheduleCard: View {
                 }
             }
         } else if case let .failed(reason) = model.phase {
-            note("没能读到开关机计划", detail: reason, actionTitle: "重试") {
+            note("无法读取开关机计划", detail: reason, actionTitle: "重试") {
                 Task { await model.load(on: state.sessionManager, force: true) }
             }
         } else if model.phase == .loading {
             note("正在读取开关机计划…", detail: "读的是 NAS 侧保存的那一份。")
         } else {
             note("这台机器还没设开关机计划",
-                 detail: "计划由 NAS 侧的「硬件和电源」保存，这里只能读与改。",
-                 actionTitle: "新增一条") {
+                 detail: "计划保存在 NAS 上，这里可以查看与修改。",
+                 actionTitle: "新增计划") {
                 state.openPowerAdd()
             }
         }
@@ -309,7 +309,7 @@ struct PowerScheduleCard: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: DmSpace.s12)
-            Button("新增任务") { state.openPowerAdd() }
+            Button("新增计划") { state.openPowerAdd() }
                 .buttonStyle(SecondaryButtonStyle(on: .card))
                 .disabled(model.isWriting)
         }
@@ -499,7 +499,7 @@ struct PowerAddCard: View {
             return .time("时刻要落在 0–23 时 / 0–59 分。")
         }
         if weekdays.isEmpty {
-            return .weekdays("至少选一天，否则这条任务等于没排。")
+            return .weekdays("至少选一天。")
         }
         return nil
     }

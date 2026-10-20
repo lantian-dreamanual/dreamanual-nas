@@ -34,6 +34,16 @@ actor SessionManager {
     /// 最近一次心跳成功的时间，界面上要看「连接还活着吗」。
     private(set) var lastHeartbeat: Date?
     private(set) var heartbeatFailure: String?
+    /// 连续失败计数：连着两拍没探通才判链路死亡（NAS 下电 / 中继端口重分配），
+    /// 单次失败多半是链路抖一下，不劳师动众。
+    private var heartbeatFailures = 0
+    /// 链路判死时调用（在 actor 里触发；AppState 收到后自己切主线程处理）。
+    private var onLinkLost: (@Sendable () -> Void)?
+
+    /// 挂失联回调（actor 存储属性不能从外面改，走这条口子）。
+    func setLinkLostHandler(_ handler: (@Sendable () -> Void)?) {
+        onLinkLost = handler
+    }
 
     init(client: SynologyClient, account: String, password: String) {
         self.client = client
@@ -291,12 +301,24 @@ actor SessionManager {
 
     // MARK: - 保活
 
-    /// 心跳：拿文件会话打一次系统信息。失败不抛 —— 由下一次请求去触发重登。
-    func heartbeat() async {
+    /// 心跳：拿文件会话打一次系统信息。失败不抛 —— 由下一次请求去触发重登；
+    /// 连着两拍失败就判链路死亡，交给 `onLinkLost` 接盘（失联自愈见 AppState）。
+    /// 返回这拍是否探通（保活循环据此挑下一拍的间隔）。
+    @discardableResult
+    func heartbeat() async -> Bool {
         do {
             try await probe()
+            heartbeatFailures = 0
+            return true
         } catch {
             heartbeatFailure = error.localizedDescription
+            heartbeatFailures += 1
+            if heartbeatFailures >= 2 {
+                NSLog("[connect] 心跳连续 %d 次失败（%@），判链路死亡",
+                      heartbeatFailures, heartbeatFailure ?? "")
+                onLinkLost?()
+            }
+            return false
         }
     }
 
@@ -311,10 +333,16 @@ actor SessionManager {
     func startKeepAlive() {
         stopKeepAlive()
         keepAliveTask = Task { [weak self] in
+            var interval = Self.keepAliveInterval
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(Self.keepAliveInterval * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 if Task.isCancelled { return }
-                await self?.heartbeat()
+                guard let self else { return }
+                let beatOK = await self.heartbeat()
+                // 失败后下一拍缩到 20 秒：快点凑齐「连续两次」的判死证据
+                //（NAS 定时关机后 ≈ 4 分半发现，而不是 8 分钟）；探通了回到
+                // 常规节奏。
+                interval = beatOK ? Self.keepAliveInterval : 20
             }
         }
     }

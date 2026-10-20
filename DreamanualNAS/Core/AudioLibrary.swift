@@ -220,7 +220,9 @@ enum TrackField: String, CaseIterable, Identifiable {
     /// 固定列的宽 —— 只对 `width != nil` 的列问。
     var fixedWidth: CGFloat { width ?? 0 }
 
-    /// 右对齐（时长 / 曲序 / 评分是数值列）。表头与行用同一个判据。
+    /// **数据格**贴右：时长 / 曲序是数字，评分是五颗星（`RatingStars`，按规范整格右贴）。
+    /// 表头**不用这条判据** —— 表头文字一律左对齐，跟下面数据是什么形态无关
+    /// （2026-10-19 用户指出「评分不是数值」，表头跟着贴右会与左对齐的表头参差）。
     var isTrailing: Bool {
         switch self {
         case .duration, .track, .rating: return true
@@ -269,12 +271,12 @@ enum RatingError: LocalizedError {
 /// 歌单写入的失败形态。create 的应答只回「成功」不带 id，
 /// 回读对不上名字就只能实说。
 enum PlaylistError: LocalizedError {
-    case createNotConfirmed(String)
+    case createNotConfirmed
 
     var errorDescription: String? {
         switch self {
-        case .createNotConfirmed(let name):
-            return "歌单「\(name)」请求成功，但列表里没找到它 —— 请刷新侧栏确认。"
+        case .createNotConfirmed:
+            return "歌单已创建，侧栏还没有显示，请刷新。"
         }
     }
 }
@@ -699,7 +701,7 @@ enum AudioLibrary {
         )
         let list = try await playlists(manager)
         guard let created = list.first(where: { $0.name == name }) else {
-            throw PlaylistError.createNotConfirmed(name)
+            throw PlaylistError.createNotConfirmed
         }
         return created
     }

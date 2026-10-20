@@ -60,6 +60,19 @@ enum CredentialStore {
         return nil
     }
 
+    /// 凭据键里出现过的 QuickConnect ID（去重）。启动自愈用：连接页输入框
+    /// 被散键写坏过（2026-10-20 一天两次，落盘成 "re" 和 " "），凭据文件的
+    /// 「qc:<ID>|<账号>」键是上次成功连接留下的另一份真相。
+    static func qcEndpointIDs() -> Set<String> {
+        Set(stored().keys.compactMap { key -> String? in
+            guard key.hasPrefix("qc:") else { return nil }
+            let rest = key.dropFirst(3)
+            guard let sep = rest.firstIndex(of: "|") else { return nil }
+            let id = rest[..<sep]
+            return id.isEmpty ? nil : String(id)
+        })
+    }
+
     @discardableResult
     static func save(password: String, endpointID: String, username: String) -> Bool {
         var dict = stored()

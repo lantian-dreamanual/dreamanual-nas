@@ -153,6 +153,27 @@ final class UploadQueue {
         start(manager: manager)
     }
 
+    /// 准备一批**已经摊好**的上传项。照片上传走这条：每张的落点目录是客户端按
+    /// 拍摄时间算的（`PhotoUpload`），不经 `plan` 的「一个 target 铺到底」。
+    ///
+    /// 与 `prepare(urls:target:)` 共用撞名检查与冲突弹窗 —— 队列是全局那一个，
+    /// 同一时刻只跑一批，文件管理与照片共用一个进度行、一个「保留两者 / 替换」。
+    func prepare(items: [Item], manager: SessionManager) async {
+        guard !items.isEmpty else { return }
+        cancel()
+        self.items = items
+        skippedCount = 0
+        appliedChoice = nil
+        nameCache = [:]
+        pendingConflicts = []
+        await scanConflicts(manager: manager)
+        if let first = pendingConflicts.first {
+            present(first)
+            return
+        }
+        start(manager: manager)
+    }
+
     /// 用户拍了冲突怎么处理。`applyToAll` 时后面不再问。
     func resolve(_ choice: ConflictChoice, applyToAll: Bool, manager: SessionManager) async {
         guard let prompt = conflict else { return }
@@ -438,7 +459,7 @@ final class UploadQueue {
             case .notConnectedToInternet, .networkConnectionLost:
                 return "网络断了，已传的部分不会保留"
             case .timedOut:
-                return "服务端没应答（超时）"
+                return "NAS 没有响应，请重试"
             default:
                 return urlError.localizedDescription
             }

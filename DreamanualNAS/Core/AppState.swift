@@ -3,6 +3,7 @@ import CryptoKit
 import Foundation
 import Network
 import Observation
+import UniformTypeIdentifiers
 
 /// 连接表单的本地校验错误：没经过任何服务，错误文案自己就是全文，
 /// 不借 `QuickConnectError`（那会套上「QuickConnect 返回了看不懂的内容」）。
@@ -22,14 +23,15 @@ final class AppState {
     static let appStart = Date()
 
     enum Module: String, CaseIterable, Identifiable {
-        case music, files, status, settings
+        case music, photos, files, status, settings
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .music: return "听歌"
-            case .files: return "文件管理"
-            case .status: return "系统状态"
+            case .music: return "歌曲"
+            case .photos: return "照片"
+            case .files: return "文件"
+            case .status: return "系统"
             case .settings: return "设置"
             }
         }
@@ -37,6 +39,7 @@ final class AppState {
         var icon: String {
             switch self {
             case .music: return "headphones"
+            case .photos: return "image"
             case .files: return "folder"
             case .status: return "gauge"
             case .settings: return "settings"
@@ -103,7 +106,15 @@ final class AppState {
 
     // MARK: - 连接表单（持久化，密码除外）
 
-    var qcID: String { didSet { defaults.set(qcID, forKey: Keys.qcID) } }
+    var qcID: String {
+        didSet {
+            // QuickConnect ID 本身不含空白；落盘值里出现空白只可能是散键
+            // 误入连接页输入框（app 重启抢焦点时打过字的字落进来）。存的那份
+            // 剪掉首尾空白，内存那份不动 —— 一边敲一边改值光标会跳。
+            defaults.set(qcID.trimmingCharacters(in: .whitespacesAndNewlines),
+                         forKey: Keys.qcID)
+        }
+    }
     var directAddress: String { didSet { defaults.set(directAddress, forKey: Keys.direct) } }
     var username: String { didSet { defaults.set(username, forKey: Keys.username) } }
 
@@ -131,6 +142,25 @@ final class AppState {
     /// 换下来，状态跟着视图走的话，进出一次沉浸模式曲库就退回「全部曲目」+
     /// 重新拉一千首。换个模块再回来同理 —— 视图是临时的，这份状态不是。
     let library = LibraryModel()
+    /// 照片页的状态（时间轴骨架 / 按天缓存 / 缩略图）。与曲库同一归属 ——
+    /// 看完照片切去听歌再回来，已经拉过的那几天不重新拉。
+    let photos = PhotoLibrary()
+    /// 照片页的浏览维度（最近添加 / 人物 / 地点 / 标签 / 相册 / 搜索）与各自的
+    /// 列表数据。与 `photos` 分开：那一份是全库一万条的常驻缓存，这一份切屏就换。
+    let photoShelf = PhotoShelf()
+    /// 照片网格的选择模式（多选、组头全选、操作条都读它）。与照片页同一归属：
+    /// 切屏会清空，开关查看器不影响。
+    let photoSelection = PhotoSelection()
+    /// 冒烟口子：查看器一开就自动播（`DM_UI=photovideo`）。平时视频要点海报上的
+    /// 播放键才出声 —— 自动播只在这一条通路上置真，用完由查看器自己复位。
+    var photoAutoStartVideo = false
+    /// 冒烟口子：开播后立刻静音（`DM_UI=photomute`）。静音态换的是另一枚图标
+    /// （`volume-x`），那条分支只有走到才能证明图标资源在包里。
+    var photoSmokeMute = false
+    /// 正拖在照片页上方的这批文件的落点摘要（拖入遮罩上那两句话）。
+    /// 由 `FileDropCatcher.onHover` 算、松手或拖走时清空。放在这里而不是视图的
+    /// `@State`：冒烟通路要能把它摆出来截图（真拖拽 AI 发不出来）。
+    var photoDropSummary: PhotoUpload.Summary?
     /// 文件管理页的状态（共享夹 / 目录树 / 当前目录 / 排序 / 选中 / 分页）。
     /// 与曲库同一归属：换模块、从曲库跳过来都不该把浏览位置丢掉。
     let files = FileBrowser()
@@ -192,6 +222,17 @@ final class AppState {
         directAddress = defaults.string(forKey: Keys.direct) ?? ""
         username = defaults.string(forKey: Keys.username) ?? ""
         lastMethod = Self.method(from: defaults.string(forKey: Keys.method))
+        // 启动自愈：落盘的 qcID 被散键写坏过（2026-10-20 两次，"re" 和 " "）。
+        // 剪完为空而凭据文件里恰有一条 QuickConnect 端点时，拿它恢复 ——
+        // 端点键「qc:<ID>|<账号>」是上次成功连接留下的另一份真相。多于一条
+        // 不猜（可能是两台 NAS），故意清空的场景下次连接会重新覆盖回来。
+        if qcID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let known = CredentialStore.qcEndpointIDs()
+            if known.count == 1, let id = known.first {
+                NSLog("[connect] 落盘的 QuickConnect ID 是空白，按凭据文件恢复为 %@", id)
+                qcID = id
+            }
+        }
     }
 
     private static func method(from raw: String?) -> ConnectMethod? {
@@ -372,7 +413,7 @@ final class AppState {
     func playNext(_ song: AudioSong) {
         guard let engine = playback else { return }
         engine.insertNext(song)
-        showToast("「\(song.title)」已排到下一首", .ok)
+        showToast("“\(song.title)”已排到下一首", .ok)
     }
 
     /// 队列右键「从队列移除」。正在播的那首被移除时播放不中断（见引擎的注）。
@@ -442,14 +483,14 @@ final class AppState {
         guard !trimmed.isEmpty else { return }
         guard let manager = sessionManager else { return }
         if library.playlists.contains(where: { $0.name == trimmed }) {
-            showToast("已经有叫「\(trimmed)」的歌单了", .err)
+            showToast("已经有叫“\(trimmed)”的歌单了", .err)
             return
         }
         do {
             _ = try await AudioLibrary.createPlaylist(manager, name: trimmed)
             await library.loadPlaylists(manager)
             closeLibraryDialog()
-            showToast("已新建「\(trimmed)」", .ok)
+            showToast("已新建“\(trimmed)”", .ok)
         } catch {
             showToast(error.localizedDescription, .err)
         }
@@ -464,11 +505,11 @@ final class AppState {
         do {
             let existing = try await AudioLibrary.playlistSongIDs(manager, playlistID: playlist.id)
             guard !existing.contains(song.id) else {
-                showToast("「\(playlist.name)」里已经有这首了", .info)
+                showToast("“\(playlist.name)”里已经有这首了", .info)
                 return
             }
             try await AudioLibrary.addToPlaylist(manager, songID: song.id, playlistID: playlist.id)
-            showToast("已添加到「\(playlist.name)」", .ok)
+            showToast("已添加到“\(playlist.name)”", .ok)
             if library.isShowing(playlist) {
                 await library.refresh(manager)
             }
@@ -513,7 +554,7 @@ final class AppState {
         } catch {
             NSLog("[power] %@ 指令失败：%@",
                   kind == .shutdown ? "关机" : "重启", String(describing: error))
-            showToast("指令没发出去 —— \(error.localizedDescription)", .err)
+            showToast("指令没有发出，请重试。", .err)
             return
         }
         let endpoint = endpointKey
@@ -531,10 +572,11 @@ final class AppState {
 
     private var rebootReconnectTask: Task<Void, Never>?
 
-    /// 重启后的专用等待重连。NAS 下电到回来约 2 分钟，常规自动连五把
-    /// （0/5/15/30/60 秒）撑不过这个窗口 —— 这条每 20 秒探一把、最多 5 分钟；
-    /// 到点收手留给手动。用户中途自己动手（连 / 断）时随 `cancelAutoConnect`
-    /// 一起取消，不跟人抢方向盘。
+    /// 低频等待重连。两条路走它：app 内点重启 / 重启等待（NAS 下电到回来约
+    /// 2 分钟，常规自动连五把（0/5/15/30/60 秒）撑不过这个窗口）；以及心跳
+    /// 判死链路（`handleLinkLost`）与手动重连失败（NAS 还没起来）—— 同样是
+    /// 「等机器回来」。每 20 秒探一把、最多 5 分钟；到点收手留给手动。用户
+    /// 中途自己动手（连 / 断）时随 `cancelAutoConnect` 一起取消，不跟人抢方向盘。
     func startRebootReconnect(endpoint: String, user: String) {
         rebootReconnectTask?.cancel()
         rebootReconnectTask = Task { [weak self] in
@@ -631,7 +673,7 @@ final class AppState {
             library.applyTags(info, to: editor.song.id)
             playback?.applyTags(info, to: editor.song.id)
             tagEditor = nil
-            showToast("「\(info.title)」标签已写入", .ok)
+            showToast("“\(info.title)”标签已写入", .ok)
         } catch {
             tagEditor?.isSaving = false
             tagEditor?.errorMessage = error.localizedDescription
@@ -648,7 +690,7 @@ final class AppState {
     func download(_ song: AudioSong) async {
         guard let manager = sessionManager else { return }
         guard let destination = Self.askDestination(for: song) else { return }
-        showToast("正在下载「\(song.title)」…", .info)
+        showToast("正在下载“\(song.title)”…", .info)
         do {
             let endpoint = try await manager.fileEndpoint
             try await FileDownloader(
@@ -657,7 +699,7 @@ final class AppState {
                 allowSelfSigned: endpoint.allowSelfSigned,
                 destination: destination
             ).start(path: song.path)
-            showToast("已保存「\(destination.lastPathComponent)」", .ok)
+            showToast("已保存“\(destination.lastPathComponent)”", .ok)
         } catch {
             showToast(error.localizedDescription, .err)
         }
@@ -674,7 +716,7 @@ final class AppState {
     func download(file entry: FileEntry) async {
         guard !entry.isDirectory, let manager = sessionManager else { return }
         guard let destination = Self.askDestination(entry.name) else { return }
-        showToast("正在下载「\(entry.name)」…", .info)
+        showToast("正在下载“\(entry.name)”…", .info)
         do {
             let endpoint = try await manager.fileEndpoint
             try await FileDownloader(
@@ -683,7 +725,7 @@ final class AppState {
                 allowSelfSigned: endpoint.allowSelfSigned,
                 destination: destination
             ).start(path: entry.path)
-            showToast("已保存「\(destination.lastPathComponent)」", .ok)
+            showToast("已保存“\(destination.lastPathComponent)”", .ok)
         } catch {
             showToast(error.localizedDescription, .err)
         }
@@ -783,6 +825,268 @@ final class AppState {
         await files.open(folder, on: sessionManager)
     }
 
+    /// 照片（或视频）右键 / 查看器里的「在文件夹中显示」。
+    ///
+    /// 照片条目上**没有 `path`**（`additional` 给 `path` 回 120），路径要拿
+    /// `folder_id` 问 `Browse.Folder`，它的 `name` 是相对照片库根的完整路径
+    /// （`/2026/10`），前面补 `/photo` 才是文件管理认的绝对路径。
+    func revealInFiles(_ item: PhotosAPI.Item) async {
+        select(.files)
+        guard let folder = await photos.folderPath(of: item, manager: sessionManager) else {
+            showToast("找不到这张照片所在的文件夹", .err)
+            return
+        }
+        let path = PhotosAPI.libraryRoot + folder + "/" + item.filename
+        await files.reveal(file: path, on: sessionManager)
+        NSLog("[photos] 在文件中显示：%@", path)
+    }
+
+    // MARK: - 照片 · 右键菜单
+
+    /// 照片块的右键菜单。与歌曲菜单同一套挂法（浮在整窗之上、按指针坐标摆），
+    /// 请求挂全局是为了冒烟通路能在视图之外把它摆出来。
+    private(set) var photoMenu: PhotoMenuRequest?
+
+    struct PhotoMenuRequest: Identifiable {
+        /// 菜单的两级：「添加到相册」点进去原地换成相册列表（不另开一张卡）。
+        enum Phase { case root, albumPicker }
+
+        /// 右键打在哪一类东西上。照片块与相册卡是两份动作，同一个浮层容器。
+        enum Target {
+            /// 照片 / 视频块。`albumID` 非空表示当前在相册详情里（根级那条换「移出相册」）。
+            case items(item: PhotosAPI.Item, targets: [PhotosAPI.Item], albumID: Int?)
+            /// 相册卡（或相册详情页头的 ⋯）：改名 / 删除相册。
+            case album(PhotosAPI.Album)
+            /// 人物卡（或人物详情页头的 ⋯）：改名 / 归并到…。
+            case person(PhotosAPI.Person)
+        }
+
+        let id = UUID()
+        let target: Target
+        /// 根视图坐标（左上原点）。
+        let point: CGPoint
+        var phase: Phase = .root
+    }
+
+    func openPhotoMenu(_ item: PhotosAPI.Item, at point: CGPoint,
+                       targets: [PhotosAPI.Item], albumID: Int?) {
+        photoMenu = PhotoMenuRequest(target: .items(item: item, targets: targets,
+                                                    albumID: albumID),
+                                     point: point)
+    }
+
+    /// 相册卡的右键 / 详情页头的 ⋯。没有二级面板，摆位按三行算。
+    func openAlbumMenu(_ album: PhotosAPI.Album, at point: CGPoint) {
+        photoMenu = PhotoMenuRequest(target: .album(album), point: point)
+    }
+
+    /// 人物卡的右键 / 人物详情页头的 ⋯（改名 / 归并到…，与相册同一套摆法）。
+    func openPersonMenu(_ person: PhotosAPI.Person, at point: CGPoint) {
+        photoMenu = PhotoMenuRequest(target: .person(person), point: point)
+    }
+
+    func showAlbumPickerInPhotoMenu() {
+        guard var request = photoMenu else { return }
+        request.phase = .albumPicker
+        photoMenu = request
+    }
+
+    func closePhotoMenu() { photoMenu = nil }
+
+    // MARK: - 照片 · 写操作
+
+    /// 照片的写操作弹窗（新建相册 / 相册改名 / 删除照片 / 删除相册 / 选相册 /
+    /// 人物命名改名 / 人物归并）。
+    enum PhotoDialog: Identifiable {
+        case newAlbum
+        case renameAlbum(PhotosAPI.Album)
+        case delete([PhotosAPI.Item])
+        /// 删相册：**只删容器，照片留在库里**。
+        case deleteAlbum(PhotosAPI.Album)
+        /// 选一个相册把照片放进去。`items` 是这一批（可能来自多选）。
+        case addToAlbum([PhotosAPI.Item])
+        /// 人物命名（未确认）与改名（已命名）共用一张。
+        case renamePerson(PhotosAPI.Person)
+        /// 人物归并：先选目标人物（已命名里挑），确认后并进去。
+        case mergePerson(PhotosAPI.Person)
+
+        var id: String {
+            switch self {
+            case .newAlbum: return "newalbum"
+            case .renameAlbum(let album): return "renamealbum:\(album.id)"
+            case .delete(let items): return "deletephotos:\(items.count)"
+            case .deleteAlbum(let album): return "deletealbum:\(album.id)"
+            case .addToAlbum(let items): return "addtoalbum:\(items.count)"
+            case .renamePerson(let person): return "renameperson:\(person.id)"
+            case .mergePerson(let person): return "mergeperson:\(person.id)"
+            }
+        }
+    }
+
+    private(set) var photoDialog: PhotoDialog?
+
+    func openPhotoDialog(_ dialog: PhotoDialog) { photoDialog = dialog }
+    func closePhotoDialog() { photoDialog = nil }
+
+    /// 删除。先发请求、再本地剔除，最后**静默重拉整库校正** —— 这套接口对不存在
+    /// 的 id 也回 `success`，「回了 ok」不算删掉了；真没删掉的会在重拉后回到网格里。
+    func deletePhotos(_ items: [PhotosAPI.Item]) async {
+        guard let manager = sessionManager, !items.isEmpty else { return }
+        let result = await PhotoWriter.delete(items, manager: manager)
+        let ids = Set(items.map(\.id))
+        photos.forget(ids: ids)
+        photoShelf.forget(ids: ids)
+        photoSelection.clear()
+        if result.isFailure {
+            showToast(result.reason ?? "照片没有删掉", .err)
+        } else {
+            showToast(result.summary("删除"), result.failed > 0 ? .info : .ok)
+        }
+        NSLog("[photos] 删除 %d 张：成功 %d / 失败 %d", items.count, result.done, result.failed)
+        await photos.refreshQuietly(manager)
+        // 回读校正：重拉之后还在库里的那几张 = 实际没删掉（接口回 ok 不算数）。
+        // 画面已经由 `forget` + 这次重拉恢复原状，这里只把实情说出来，不静默吞掉。
+        let survivors = items.filter { photos.contains(id: $0.id) }
+        if !survivors.isEmpty {
+            await photoShelf.reload(manager)
+            NSLog("[photos] 回读发现 %d 张没删掉：%@", survivors.count,
+                  survivors.map(\.filename).joined(separator: "、"))
+            showToast("有 \(survivors.count) 张没有删掉", .err)
+        }
+        // 相册详情里删了照片，页头那个张数也要跟着走。
+        if case .album = photoShelf.route { await photoShelf.reload(manager) }
+    }
+
+    /// 存原图 / 原视频。取消保存面板不算失败。
+    func savePhotoOriginal(_ item: PhotosAPI.Item) async {
+        guard let manager = sessionManager else { return }
+        do {
+            let url = try await PhotoWriter.saveOriginal(item, library: photos, manager: manager)
+            showToast("已保存“\(url.lastPathComponent)”", .ok)
+        } catch let error as PhotosAPI.PhotosError {
+            if case .cancelled = error { return }
+            showToast(error.errorDescription ?? "下载失败", .err)
+        } catch {
+            showToast(error.localizedDescription, .err)
+        }
+    }
+
+    /// 加到相册。加完把相册计数补上（相册卡与详情页头都用 `item_count` 报数）。
+    func addPhotos(_ items: [PhotosAPI.Item], to albumID: Int) async {
+        guard let manager = sessionManager, !items.isEmpty else { return }
+        let result = await PhotoWriter.addToAlbum(items, albumID: albumID,
+                                                  manager: manager)
+        if result.failed == 0 {
+            photoShelf.noteAlbumCount(albumID, delta: result.done)
+            showToast("已放进相册 · \(result.done) 张", .ok)
+        } else {
+            photoShelf.noteAlbumCount(albumID, delta: result.done)
+            showToast(result.reason ?? "有照片没放进去", .err)
+        }
+        photoSelection.clear()
+        NSLog("[photos] 加到相册 %d：成功 %d / 失败 %d", albumID, result.done, result.failed)
+    }
+
+    /// 从相册移出（**只移容器、不删图**）。
+    func removePhotos(_ items: [PhotosAPI.Item], from albumID: Int) async {
+        guard let manager = sessionManager, !items.isEmpty else { return }
+        let result = await PhotoWriter.removeFromAlbum(items, albumID: albumID,
+                                                       manager: manager)
+        photoShelf.forget(ids: Set(items.map(\.id)))
+        photoShelf.noteAlbumCount(albumID, delta: -result.done)
+        photoSelection.clear()
+        showToast(result.failed == 0
+                  ? "已从相册移出 \(result.done) 张 · 照片还在照片库里"
+                  : (result.reason ?? "有照片没能移出"),
+                  result.failed == 0 ? .ok : .err)
+        NSLog("[photos] 移出相册 %d：成功 %d / 失败 %d", albumID, result.done, result.failed)
+    }
+
+    /// 新建相册。回 `true` 表示建成了（弹窗据此关闭）。
+    func createPhotoAlbum(_ name: String) async -> Bool {
+        guard let manager = sessionManager else { return false }
+        do {
+            let album = try await PhotoWriter.createAlbum(name: name, manager: manager)
+            await photoShelf.reload(manager)
+            showToast("已建相册“\(album.name)”", .ok)
+            NSLog("[photos] 新建相册 %d %@", album.id, album.name)
+            return true
+        } catch {
+            showToast((error as? LocalizedError)?.errorDescription ?? "相册没有建成", .err)
+            return false
+        }
+    }
+
+    /// 相册改名。回 `true` 表示新名字已落库（写完回读确认过）。
+    func renamePhotoAlbum(_ albumID: Int, to name: String) async -> Bool {
+        guard let manager = sessionManager else { return false }
+        let ok = await PhotoWriter.renameAlbum(albumID, to: name, manager: manager)
+        if ok {
+            await photoShelf.reload(manager)
+            showToast("已改名为“\(name)”", .ok)
+        } else {
+            showToast("改名没有生效", .err)
+        }
+        return ok
+    }
+
+    /// 删相册（**只删容器，照片留在照片库里**）。
+    ///
+    /// 正在看这个相册就退回相册列表 —— 留在详情里会是一屏已经不存在的东西。
+    /// 成败都重拉一次列表：这套接口「回 ok」不构成完成证据，列表才是。
+    func deletePhotoAlbum(_ album: PhotosAPI.Album) async {
+        guard let manager = sessionManager else { return }
+        let ok = await PhotoWriter.deleteAlbum(album.id, manager: manager)
+        if case .album(let current) = photoShelf.route, current == album.id {
+            await photoShelf.select(.albums, manager: manager)
+        } else {
+            await photoShelf.reload(manager)
+        }
+        if ok {
+            showToast("已删除相册“\(album.name)” · 照片还在照片库里", .ok)
+        } else {
+            showToast("相册没有删掉", .err)
+        }
+        NSLog("[photos] 删相册 %d %@：%@", album.id, album.name, ok ? "成功" : "失败")
+    }
+
+    /// 人物命名 / 改名。回 `true` 表示新名字已落库（写完回读确认过）。
+    func renamePerson(_ person: PhotosAPI.Person, to name: String) async -> Bool {
+        guard let manager = sessionManager else { return false }
+        let ok = await PhotoWriter.renamePerson(person.id, to: name, manager: manager)
+        if ok {
+            photoShelf.notePersonRenamed(id: person.id, name: name)
+            showToast(person.isNamed ? "已改名为“\(name)”" : "已命名为“\(name)”", .ok)
+            NSLog("[photos] 人物 %d 命名「%@」", person.id, name)
+        } else {
+            showToast("名字没有保存", .err)
+        }
+        return ok
+    }
+
+    /// 人物归并：`source` 的全部照片归到 `target` 名下。
+    ///
+    /// 正看被并掉的人物详情就退回人物列表；正看目标详情就重拉条目（多出来那批
+    /// 要进网格）。回读在 `PhotoWriter` 里做过，这里只管画面与提示。
+    func mergePerson(_ source: PhotosAPI.Person, into target: PhotosAPI.Person) async {
+        guard let manager = sessionManager else { return }
+        let ok = await PhotoWriter.mergePerson(source.id, into: target.id, manager: manager)
+        if ok {
+            if case .person(let current) = photoShelf.route {
+                if current == source.id {
+                    await photoShelf.select(.people, manager: manager)
+                } else if current == target.id {
+                    await photoShelf.reload(manager)
+                }
+            }
+            photoShelf.notePersonMerged(source: source.id, target: target.id)
+            showToast("已并入“\(target.displayName)”名下", .ok)
+            NSLog("[photos] 人物 %d 并入 %d", source.id, target.id)
+        } else {
+            showToast("归并没有生效", .err)
+        }
+    }
+
     // MARK: - 文件管理 · 写操作
 
     /// 文件管理的弹窗请求。挂全局而不是 `FilesView` 的 `@State`：弹窗要盖住整个窗口
@@ -824,7 +1128,7 @@ final class AppState {
             return "不能包含 \\ / : * ? \" < > | 这些字符。"
         }
         if entries.contains(where: { $0.name == trimmed && $0.path != excluding?.path }) {
-            return "这个目录里已经有叫「\(trimmed)」的项了。"
+            return "这个目录里已经有叫“\(trimmed)”的项了。"
         }
         return nil
     }
@@ -843,12 +1147,12 @@ final class AppState {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if try await FileStation.exists(manager, in: directory, name: trimmed) {
-                showToast("这个目录里已经有叫「\(trimmed)」的项了", .err)
+                showToast("这个目录里已经有叫“\(trimmed)”的项了", .err)
                 return
             }
             try await FileStation.createFolder(manager, path: directory, name: trimmed)
             closeFileDialog()
-            showToast("已新建「\(trimmed)」", .ok)
+            showToast("已新建“\(trimmed)”", .ok)
             if directory == files.currentPath {
                 await files.refresh(manager, username: username)
             } else {
@@ -874,7 +1178,7 @@ final class AppState {
         do {
             try await FileStation.rename(manager, path: entry.path, to: trimmed)
             closeFileDialog()
-            showToast("已改名为「\(trimmed)」", .ok)
+            showToast("已重命名为“\(trimmed)”", .ok)
             await files.refresh(manager, username: username)
         } catch {
             showToast(Self.renameFailure(error, name: trimmed), .err)
@@ -885,7 +1189,7 @@ final class AppState {
     private static func renameFailure(_ error: Error, name: String) -> String {
         if let synology = error as? SynologyError,
            synology.errors.contains(where: { ($0["code"] as? NSNumber)?.intValue == 414 }) {
-            return "这个目录里已经有叫「\(name)」的项了"
+            return "这个目录里已经有叫“\(name)”的项了"
         }
         return error.localizedDescription
     }
@@ -901,7 +1205,7 @@ final class AppState {
             if task.failed {
                 showToast(task.failureText, .err)
             } else if entries.count == 1 {
-                showToast("已删除「\(entries[0].name)」", .ok)
+                showToast("已删除“\(entries[0].name)”", .ok)
             } else {
                 showToast("已删除 \(entries.count) 项", .ok)
             }
@@ -924,7 +1228,7 @@ final class AppState {
     func pickAndUpload() {
         guard sessionManager != nil else { return }
         guard files.currentCanWrite else {
-            showToast("这个目录不可写，换个位置再传", .err)
+            showToast("这个目录没有写入权限，请换一个目录后重试", .err)
             return
         }
         let panel = NSOpenPanel()
@@ -932,7 +1236,7 @@ final class AppState {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.prompt = "上传"
-        panel.message = "选文件或文件夹，传到「\(files.currentPath)」"
+        panel.message = "选文件或文件夹，传到“\(files.currentPath)”"
         guard panel.runModal() == .OK else { return }
         upload(urls: panel.urls)
     }
@@ -946,7 +1250,7 @@ final class AppState {
     func upload(urls: [URL]) {
         guard let manager = sessionManager, !urls.isEmpty else { return }
         guard files.currentCanWrite else {
-            showToast("这个目录不可写，换个位置再传", .err)
+            showToast("这个目录没有写入权限，请换一个目录后重试", .err)
             return
         }
         uploads.onBatchEnd = { [weak self] in await self?.finishUploadBatch() }
@@ -986,6 +1290,84 @@ final class AppState {
         }
     }
 
+    // MARK: - 照片 · 上传
+
+    /// 拖入 / 选完文件之后：按拍摄时间算落点，交给同一个上传队列。
+    ///
+    /// 落点由客户端定 —— `FileStation.Upload` 只认一个 `path`，服务端不会按拍摄日期
+    /// 分目录（那是 Photos 自己那条上传通道的行为，参数形态没探通）。规则与「同月 /
+    /// 跨月」两种文案见 `PhotoUpload`。
+    func uploadPhotos(urls: [URL]) {
+        guard let manager = sessionManager, !urls.isEmpty else { return }
+        let planned = PhotoUpload.plan(urls: urls)
+        guard !planned.isEmpty else {
+            showToast("拖进来的是文件夹，照片要按文件传", .err)
+            return
+        }
+        let summary = PhotoUpload.summary(urls: urls)
+        NSLog("[photos] 准备上传 %d 张 · %@", planned.count, summary.detail)
+        // 本机小图先备好：服务端缩略图要等文件落地、索引、再生成，这几步之间网格
+        // 只有灰块。这里在后台降采样（上传本身要几十秒，够它跑完），条目一出现就能画。
+        let previewURLs = planned.map(\.localURL)
+        Task.detached(priority: .utility) { [weak self] in
+            let previews = PhotoUpload.previews(urls: previewURLs)
+            guard !previews.isEmpty, let self else { return }
+            // `photos` 在 MainActor 上，跨过去登记（`await` 即换线程，不阻塞上传）。
+            await self.photos.adoptPreviews(previews)
+        }
+        uploads.onBatchEnd = { [weak self] in await self?.finishPhotoUploadBatch() }
+        Task { await uploads.prepare(items: planned, manager: manager) }
+    }
+
+    /// 空态的「上传照片」：挑完按同一套落点规则传。
+    func pickAndUploadPhotos() {
+        guard sessionManager != nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .movie]
+        panel.prompt = "上传"
+        panel.message = "选照片或视频，按拍摄时间归到照片库的年月目录"
+        guard panel.runModal() == .OK else { return }
+        uploadPhotos(urls: panel.urls)
+    }
+
+    /// 一批照片传完（或停下）之后：收尾提示 + 增量并入新条目。
+    ///
+    /// **不做全量重拉。** 索引是异步的，先并一次最新一页（一条请求、界面不闪），之后
+    /// 隔几次再看：每拍只取最新一页并进现有分组，同时试着把本机预览换成服务端缩略图。
+    /// 补传的老照片按拍摄时间排到时间轴中段、不在最新一页里，只有「本机预览还有对不上
+    /// 号的名字」时才跑一次静默全量（`refreshQuietly` 不换网格）。
+    func finishPhotoUploadBatch() async {
+        guard let manager = sessionManager else { return }
+        let done = uploads.items.filter { $0.state == .done }.count
+        let failed = uploads.items.contains {
+            if case .failed = $0.state { return true } else { return false }
+        }
+        uploads.dismissFinished()
+        guard done > 0 else { return }
+        if !failed {
+            showToast("已上传 \(done) 张", .ok)
+        }
+        await photos.mergeRecent(manager)
+        await photoShelf.reload(manager)
+        // 累计 10 / 30 / 60 / 120 秒各看一次。密集轮询没有意义 —— 索引与缩略图
+        // 都是服务端异步做的，问早了只是白跑请求。
+        for delay in [10, 20, 30, 60] {
+            try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+            // 这中间可能又开了一批：那一批自己有收尾，别抢它的活。
+            guard !uploads.items.contains(where: { $0.state == .uploading || $0.state == .waiting })
+            else { return }
+            await photos.mergeRecent(manager)
+            if delay == 30, photos.hasOrphanPreviews {
+                await photos.refreshQuietly(manager)
+                await photoShelf.reload(manager)
+            }
+            await photos.sweepPendingThumbs(manager)
+        }
+    }
+
     // MARK: - 文件管理 · 复制 / 移动
 
     /// 工具条上的「复制到…」「移动到…」：带上当前选中项，开选目标弹窗。
@@ -996,7 +1378,7 @@ final class AppState {
         let picked = files.selectedEntries
         guard !picked.isEmpty else { return }
         if mode == .move, !files.currentCanWrite {
-            showToast("这个目录不可写，移不动里面的东西", .err)
+            showToast("这个目录没有写入权限，无法移动里面的内容", .err)
             return
         }
         transfers.begin(mode, sources: picked, currentPath: files.currentPath)
@@ -1098,9 +1480,9 @@ final class AppState {
         mode: FileTransfer.Mode, done: Int, skipped: Int, destination: String
     ) -> String {
         let place = DestinationPicker.shortPath(destination)
-        if skipped == 0 { return "已\(mode.verb) \(done) 项到「\(place)」" }
+        if skipped == 0 { return "已\(mode.verb) \(done) 项到“\(place)”" }
         if done == 0 { return "\(skipped) 项同名，已跳过" }
-        return "已\(mode.verb) \(done) 项到「\(place)」，跳过 \(skipped) 项同名"
+        return "已\(mode.verb) \(done) 项到“\(place)”，跳过 \(skipped) 项同名"
     }
 
     // MARK: - 文件右键菜单
@@ -1160,6 +1542,10 @@ final class AppState {
         if code == 53 {
             if songMenu != nil { closeSongMenu(); return true }
             if fileMenu != nil { closeFileMenu(); return true }
+            if photoMenu != nil { closePhotoMenu(); return true }
+            if photoDialog != nil { closePhotoDialog(); return true }
+            // 照片多选中：Esc 先退出选择模式（比退出搜索更近一层）。
+            if photoSelection.isActive { photoSelection.clear(); return true }
             // 冲突弹窗也是模态的，Esc 一样要能收 —— 收掉等于取消这一批上传。
             if uploads.conflict != nil { cancelUploads(); return true }
             // 复制 / 移动的撞名弹窗 Esc 退回选目标（换个目录再试）；选目标弹窗 Esc 整个收掉。
@@ -1178,6 +1564,11 @@ final class AppState {
         // 时照样让路（输入框里的 Cmd+A 是「全选文字」）。
         if code == 0, modifiers.contains(.command), module == .files, !isEditingText {
             files.selectAll()
+            return true
+        }
+        // ⌘A：照片网格全选当前这一屏（与上面同一条理由，放在「⌘ 一律放行」之前）。
+        if code == 0, modifiers.contains(.command), module == .photos, !isEditingText {
+            photoSelection.selectAll()
             return true
         }
         // ⌘ / ⌥ / ⌃ 的组合一律放行 —— 系统与菜单的快捷键优先。
@@ -3075,6 +3466,54 @@ final class AppState {
                 // 真机走一遍重连链路：清旧会话 → 本机密码 → connect（日志看 [connect]）。
                 NSLog("[ui] 触发重新连接")
                 await reconnect()
+            } else if token == "photoviewer" {
+                // 照片查看器：载入时间轴 → 取第一天 → 打开第一张（截图核对顶栏、
+                // 大图、信息栏三段）。`photonext` 再多翻一张，验 `←` `→` 的取图链路。
+                await smokePhotoViewer(manager, advance: false)
+            } else if token == "photonext" {
+                await smokePhotoViewer(manager, advance: true)
+            } else if token == "photovideo" {
+                // 视频播放：挑全库第一条视频、开查看器并自动开播 —— 截图核对画面、
+                // 控制条与时长；日志里的「视频开播」证明取流链路真跑通了。
+                await smokePhotoViewer(manager, advance: false, video: true)
+            } else if token == "photomute" {
+                // 同上，外加开播即静音 —— 核 `volume-x` 那枚图标与控制条的静音态。
+                await smokePhotoViewer(manager, advance: false, video: true, mute: true)
+            } else if token == "photodrop" {
+                // 拖入遮罩：真拖拽 AI 发不出来，把高亮态与一份跨月摘要摆出来核形态
+                // （摘要两态：同月给路径、跨月给分月计数，这里挑跨月那份）。
+                await smokePhotoScreen("timeline", manager: manager)
+                uploads.dropTargeted = true
+                photoDropSummary = PhotoUpload.Summary(
+                    count: 4,
+                    months: [.init(path: "/photo/2026/10", count: 3),
+                             .init(path: "/photo/2026/09", count: 1)]
+                )
+                NSLog("[photos] 拖入遮罩已摆出 · %@", photoDropSummary?.detail ?? "")
+            } else if token == "photoplan" {
+                // 落点自检：对 /tmp/photoupload-samples 下的样例跑一遍规则并打日志。
+                // 只算路径、不传任何东西 —— 上传链路不该为了验收往真照片库里塞文件。
+                let dir = URL(fileURLWithPath: "/tmp/photoupload-samples")
+                let files = (try? FileManager.default.contentsOfDirectory(
+                    at: dir, includingPropertiesForKeys: nil)) ?? []
+                let planned = PhotoUpload.plan(urls: files)
+                let summary = PhotoUpload.summary(urls: files)
+                NSLog("[photos] 落点自检 %d 张 · %@", planned.count, summary.detail)
+                for item in planned.sorted(by: { $0.directory < $1.directory }) {
+                    NSLog("[photos]   %@ → %@", item.name, item.directory)
+                }
+            } else if token.hasPrefix("photoscreen=") {
+                // 照片的浏览维度：切到某一屏并等它取完，截图核对侧栏高亮、页头副行、
+                // 卡片 / 列表形态。`search=<词>` 走提交式搜索。
+                await smokePhotoScreen(String(token.dropFirst("photoscreen=".count)),
+                                       manager: manager)
+            } else if token == "fileoverflow" {
+                // 工具条溢出菜单：切到文件页，再让 FilesView 在候选档落定后自己开
+                // 菜单 —— 只有它知道这一档收起了哪几项。菜单摆放位置只能真机看。
+                select(.files)
+                files.overflowSmoke = true
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                NSLog("[ui] 文件工具条溢出菜单已请求")
             } else if token.hasPrefix("module=") {
                 // 切模块：截图核对各页形态用（设置页这类没有数据通路的页面只能这样摆）。
                 let name = String(token.dropFirst("module=".count))
@@ -3088,6 +3527,196 @@ final class AppState {
                 NSLog("[ui] 认不出指令「%@」", token)
             }
         }
+    }
+
+    /// 冒烟：开照片查看器。`advance` 为真时再往右翻一张 —— 翻页要真跑一遍
+    /// `neighbor`，光看第一张证明不了取图链路。`video` 为真时挑全库第一条视频，
+    /// 并让查看器**自动开播**（平时要点海报上的播放键）。自动播是冒烟口子：
+    /// 真机上没人点，取流链路就只证明到「海报出来了」这一步。
+    private func smokePhotoViewer(_ manager: SessionManager, advance: Bool,
+                                 video: Bool = false, mute: Bool = false) async {
+        if !photos.isReady { await photos.load(manager, force: true) }
+        if video {
+            guard let clip = photos.loadedItems.first(where: { $0.isVideo }) else {
+                NSLog("[photos] 库里没有视频，跳过")
+                return
+            }
+            photoAutoStartVideo = true
+            photoSmokeMute = mute
+            photos.openViewer(clip, in: photos.loadedItems)
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            NSLog("[photos] 视频查看器已开：%@（%d 字节）",
+                  clip.filename, clip.filesize)
+            return
+        }
+        guard let day = photos.days.first, let item = photos.items[day.id]?.first else {
+            NSLog("[photos] 分组为空，跳过")
+            return
+        }
+        photos.openViewer(item)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        NSLog("[photos] 查看器已开：%@（当天 %d 张，全库 %d 条）",
+              item.filename, photos.items[day.id]?.count ?? 0, photos.loadedItems.count)
+        guard advance else { return }
+        if let next = photos.neighbor(of: item, step: 1) {
+            photos.viewingID = next.id
+            NSLog("[photos] 翻到下一张：%@", next.filename)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        } else {
+            NSLog("[photos] 没有下一张")
+        }
+    }
+
+    /// 冒烟：切到照片的某一屏。
+    ///
+    /// `DM_UI=photoscreen=recent|people|person|places|place|tags|tag|albums|album`
+    /// 或 `photoscreen=search=<词>`；`timeline` 是回时间轴。角色没取到时留在列表屏
+    /// 并打一条日志 —— 截图核对的是形态，没数据时看得出来是数据的问题。
+    private func smokePhotoScreen(_ spec: String, manager: SessionManager) async {
+        select(.photos)
+        if !photos.isReady { await photos.load(manager, force: true) }
+        if photoShelf.listsPhase != .ready { await photoShelf.bootstrap(manager) }
+
+        // `photoscreen=<屏>+<动作>[+<动作>…]`：屏是下面那个 switch，动作是选择模式 /
+        // 右键菜单 / 弹窗这类要看一眼的东西。（🔴 不能用逗号 —— DM_UI 解析器把
+        // 逗号当**指令**分隔符，会把后半段拆成独立指令。）
+        let parts = spec.split(separator: "+").map(String.init)
+        let screen = parts.first ?? "timeline"
+        let actions = Array(parts.dropFirst())
+
+        if screen.hasPrefix("search=") {
+            let word = String(screen.dropFirst("search=".count))
+            await photoShelf.submitSearch(word, in: photos.loadedItems, manager: manager)
+            NSLog("[photos] 搜索「%@」→ %d 条", photoShelf.keyword,
+                  photoShelf.searchItems.count)
+        } else {
+            var target: PhotoShelf.Route = .timeline
+            switch screen {
+            case "recent":
+                target = .recent
+            case "people":
+                target = .people
+            case "person":
+                if let p = photoShelf.people.first(where: { $0.isNamed }) {
+                    target = .person(p.id)
+                } else {
+                    NSLog("[photos] 没有已命名人物，停在人物列表")
+                }
+            case "places":
+                target = .places
+            case "place":
+                if let p = photoShelf.places.first { target = .place(p.id) }
+            case "tags":
+                target = .tags
+            case "tag":
+                if let t = photoShelf.tags.first { target = .tag(t.id) }
+            case "albums":
+                target = .albums
+            case "album":
+                if let a = photoShelf.albums.first { target = .album(a.id) }
+            default:
+                target = .timeline
+            }
+            await photoShelf.select(target, manager: manager)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            NSLog("[photos] 屏 %@：条目 %d（人物 %d / 地点 %d / 标签 %d / 相册 %d）",
+                  screen, photoShelf.items.count, photoShelf.people.count,
+                  photoShelf.places.count, photoShelf.tags.count, photoShelf.albums.count)
+        }
+
+        guard !actions.isEmpty else { return }
+        // 弹窗类动作不依赖条目（新建相册在空相册屏也要能开）；只有对照片动手的
+        // 那几个需要先有一条样本。
+        let needsItem = actions.contains { ["select", "menu", "delete", "picker"].contains($0) }
+        let scope = currentPhotoScope()
+        if needsItem, scope.isEmpty {
+            NSLog("[photos] 这一屏没有条目，动作跳过")
+            return
+        }
+        let first = scope.first ?? PhotosAPI.Item(
+            id: -1, filename: "", filesize: 0, time: .now, indexedTime: .now,
+            folderID: 0, type: "photo", unitID: 0, cacheKey: "",
+            width: 0, height: 0,
+            exif: .init(camera: nil, lens: nil, aperture: nil,
+                        exposure: nil, iso: nil, focal: nil),
+            rating: 0, note: nil)
+        for action in actions {
+            switch action {
+            case "select":
+                photoSelection.scope = scope
+                photoSelection.select(Array(scope.prefix(3)))
+                NSLog("[photos] 选择模式：选中 %d 张（共 %d）",
+                      photoSelection.count, scope.count)
+            case "menu":
+                let targets = photoSelection.isActive
+                    ? scope.filter { photoSelection.contains($0.id) } : [first]
+                openPhotoMenu(first, at: CGPoint(x: 420, y: 300),
+                              targets: targets, albumID: currentPhotoAlbumID())
+                NSLog("[photos] 右键菜单已开：%d 张", targets.count)
+            case "newalbum":
+                openPhotoDialog(.newAlbum)
+            case "rename":
+                if let album = photoShelf.album { openPhotoDialog(.renameAlbum(album)) }
+            case "delete":
+                openPhotoDialog(.delete(photoSelection.isActive
+                                        ? scope.filter { photoSelection.contains($0.id) }
+                                        : [first]))
+            case "picker":
+                openPhotoDialog(.addToAlbum([first]))
+            case "albummenu":
+                // 相册卡右键 / 详情页头 ⋯ 的那张两行菜单。
+                if let album = photoShelf.album ?? photoShelf.albums.first {
+                    openAlbumMenu(album, at: CGPoint(x: 420, y: 300))
+                    NSLog("[photos] 相册菜单已开：%@", album.name)
+                } else {
+                    NSLog("[photos] 没有相册，相册菜单跳过")
+                }
+            case "deletealbum":
+                if let album = photoShelf.album ?? photoShelf.albums.first {
+                    openPhotoDialog(.deleteAlbum(album))
+                    NSLog("[photos] 删相册弹窗：%@", album.name)
+                } else {
+                    NSLog("[photos] 没有相册，删相册弹窗跳过")
+                }
+            case "personmenu":
+                // 人物卡右键 / 详情页头 ⋯ 的那张两行菜单（改名 / 归并到…）。
+                if let person = photoShelf.person ?? photoShelf.people.first(where: { !$0.isNamed }) {
+                    openPersonMenu(person, at: CGPoint(x: 420, y: 300))
+                    NSLog("[photos] 人物菜单已开：%@", person.displayName)
+                } else {
+                    NSLog("[photos] 没有人物，人物菜单跳过")
+                }
+            case "renameperson", "mergeperson":
+                if let person = photoShelf.person ?? photoShelf.people.first(where: { !$0.isNamed }) {
+                    let dialog: PhotoDialog = action == "renameperson"
+                        ? .renamePerson(person) : .mergePerson(person)
+                    openPhotoDialog(dialog)
+                    NSLog("[photos] 人物%@弹窗：%@（id %d）",
+                          action == "renameperson" ? "命名" : "归并",
+                          person.displayName, person.id)
+                } else {
+                    NSLog("[photos] 没有人物，人物弹窗跳过")
+                }
+            default:
+                NSLog("[photos] 认不出的动作「%@」", action)
+            }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+        }
+    }
+
+    /// 冒烟用：当前这一屏的条目（与 `PhotosView.currentItems` 同一口径）。
+    private func currentPhotoScope() -> [PhotosAPI.Item] {
+        if photoShelf.isSearching { return photoShelf.searchItems }
+        switch photoShelf.route {
+        case .timeline: return photos.loadedItems
+        case .recent, .person, .place, .tag, .album: return photoShelf.items
+        default: return []
+        }
+    }
+
+    private func currentPhotoAlbumID() -> Int? {
+        if case .album(let id) = photoShelf.route { return id }
+        return nil
     }
 
     /// 主窗摆到指定内容尺寸。窗口是启动后长出来的，等它出现再摆。
@@ -3543,6 +4172,11 @@ final class AppState {
             nowPlaying.attach(to: engine)
 
             await manager.startKeepAlive()
+            // 心跳判死链路 → 失联自愈（见 `handleLinkLost`）。回调在 actor 里
+            // 触发，这里切回主线程处理。
+            await manager.setLinkLostHandler { [weak self] in
+                Task { @MainActor in await self?.handleLinkLost() }
+            }
             lastConnectedAt = Date()
             phase = .connected
 
@@ -3628,9 +4262,41 @@ final class AppState {
             NSLog("[connect] 重连没成（%@）：%@",
                   method == .direct ? "直连" : "QuickConnect", phase.label)
             toast = ToastMessage(method == .direct
-                ? "直连没连上（\(phase.label)）—— 检查地址，或清空直连地址改走 QuickConnect"
+                ? "直连没连上（\(phase.label)）。检查地址，或清空直连地址改用 QuickConnect"
                 : "QuickConnect 没连上（\(phase.label)）", .err)
+            // NAS 多半还没起来：挂上低频等待（20 秒一把探 5 分钟），起来自动
+            // 补连 —— 与重启等待同一条路。用户接方向盘（手动连 / 断）时随
+            // `cancelAutoConnect` 一起收。
+            startRebootReconnect(endpoint: endpointKey, user: trimmedUsername)
         }
+    }
+
+    /// 链路失联自愈：NAS 下电（定时关机落在 app 开着的时候就是这条路）或
+    /// 中继端口重分配后，旧会话发的每个请求都打在死端点上 —— 网络错误触发
+    /// 不了会话重登（那只认业务层的会话失效），链路监控也只认本机网络的
+    /// 断→通跳变。唯一出路是重新解析端点，心跳连败判死后走到这里：
+    /// 本地断干净（不清封面 / 歌词 / 计划表 —— 连的还是同一台机器），转
+    /// 「等待 NAS 回来」的低频补连，NAS 起来 20 秒内自动回来，用户不用点
+    /// 任何东西（2026-10-21 实测踩中：定时关机后重试永远失败，重启 app 才能救）。
+    func handleLinkLost() async {
+        guard phase == .connected, sessionManager != nil else { return }
+        NSLog("[connect] 链路失联（心跳判死），转等待 NAS 回来")
+        playback?.detach()
+        playback = nil
+        musicPresentation = .library
+        status.clear()
+        widgetPushTask?.cancel()
+        widgetPushTask = nil
+        if let manager = sessionManager {
+            await manager.stopKeepAlive()
+            // 不 logout：NAS 多半已下电，logout 只会白等一个超时
+        }
+        sessionManager = nil
+        endpointLabel = ""
+        linkMode = nil
+        phase = .retrying
+        showToast("与 NAS 的连接断了，正在等它回来", .info)
+        startRebootReconnect(endpoint: endpointKey, user: trimmedUsername)
     }
 
     func disconnect() async {

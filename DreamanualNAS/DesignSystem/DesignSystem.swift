@@ -140,16 +140,20 @@ enum RailRowState {
 
 // ============ 图标 ============
 
-/// Lucide 图标（全产品线统一）。SVG 由 `design/spike/icons.mjs` 栅格化后放进
-/// Assets，命名 `lucide-<name>`。
+/// Lucide 图标（全产品线统一）。SVG 从 `lucide-static` 取、经
+/// `tools/fetch-lucide-icons.py` 落成 `Assets.xcassets/lucide-<name>.imageset`
+/// （模板渲染 + 保留矢量，任意尺码不糊）。
 ///
-/// 骨架阶段还没有资产目录，所以落到 SF Symbols 兜底 —— 名字对不上时**不崩、
-/// 不空白**，界面上少一个图形而已。图标资产在后一批补齐，届时这张兜底表
-/// 只服务「某枚图标漏收」这一种情况。
+/// **线性是默认**：Lucide 全套只有描边形态。四个运送键（播放 / 暂停 / 上一首 /
+/// 下一首）按用户口径要面性，资产里另有 `lucide-<name>-fill` 变体，调用时传
+/// `filled: true`（2026-10-20 拍板：除这四个以外一律线性）。
+///
+/// SF Symbols 只是兜底：某枚资产漏收时**不崩、不空白**，界面上换个近似形态。
+/// 兜底表的值也得是真 SF 名，挑之前用 `NSImage(systemSymbolName:)` 问一遍。
 struct LucideIcon: View {
     let name: String
     let size: CGFloat
-    /// 实心态（原型 `data-fill="1"`）：评分星用得到，空星描边、实心星充满。
+    /// 实心态：评分星（空星描边 / 实心星充满）与四个运送键用得到。
     var filled: Bool = false
 
     init(_ name: String, size: CGFloat, filled: Bool = false) {
@@ -210,8 +214,8 @@ struct LucideIcon: View {
         "volume-2": "speaker.wave.2",
         "list-music": "list.bullet",
         "loader": "arrow.triangle.2.circlepath",
-        "circle-check": "checkmark.circle.fill",
-        "circle-x": "xmark.circle.fill",
+        "circle-check": "checkmark.circle",
+        "circle-x": "xmark.circle",
         "info": "info.circle",
         "x": "xmark",
         // 沉浸模式的收起钮（2026-10-18 用户点名，替掉 `x`）：那一屏是从底部滑上来的
@@ -226,14 +230,22 @@ struct LucideIcon: View {
         // ⚠️ `more-vertical` 兜底取 `ellipsis` 再转 90°（见 body）—— SF 没有
         // `ellipsis.vertical`，写那个名字真机上就是空气。
         "more-vertical": "ellipsis",
+        // 工具条溢出钮（2026-10-20）。横三点在横排工具条上读作「还有几个动作」，
+        // 与表头那枚竖三点分工不同：竖三点挂在行/表尾，表示「这一项还有别的动作」。
+        "ellipsis": "ellipsis",
         "rotate-ccw": "arrow.counterclockwise",
         "triangle-alert": "exclamationmark.triangle",
         "wifi": "wifi",
         "key-round": "key",
         "link": "link",
         "refresh-cw": "arrow.clockwise",
-        // 设置页官网行的行尾外链（2026-10-18）。SF 没有 lucide `square-arrow-out-up-right`
-        // 的同构画法，取语义同族的「方块 + 箭头朝右上出去」。
+        // 筛选为空时的空态图标（2026-10-20，类型页签那一批）。资产 `lucide-filter` 在，
+        // 兜底只是不让它在漏收时画成问号。
+        "filter": "line.3.horizontal.decrease",
+        // 设置页官网 / 赞赏行的行尾外链（2026-10-18 落 SF 兜底，2026-10-19 补资产）。
+        // 资产 `lucide-square-arrow-out-up-right` 与投资监控、vault 同一条 lucide 描线；
+        // 兜底仍留 SF 的 `arrow.up.forward.square`（方块 + 箭头，语义同族），
+        // 只在资产漏收时才上场 —— 它和 lucide 的形态不同，真用上就是「与其他 app 不统一」。
         "square-arrow-out-up-right": "arrow.up.forward.square",
         // 歌曲右键菜单那几枚（2026-10-13）。`play` / `star` 播放条与评分星早就在用。
         "list-start": "text.insert",
@@ -289,6 +301,23 @@ struct LucideIcon: View {
         // `text.badge.plus`，与 `list-start` 取 `text.insert` 同族。
         "plus": "plus",
         "list-plus": "text.badge.plus",
+        // 照片模块（2026-10-20）。`photo` 是 SF 原生名；`image-off` 取「图不可用」
+        // 的 SF 名；侧栏开关取「右栏」意象 `sidebar.right`（SF 原生名）。
+        "image": "photo",
+        "image-off": "photo.badge.exclamationmark",
+        "panel-right": "sidebar.right",
+        // 照片浏览维度（2026-10-20）。侧栏六行 + 详情页返回 + 人物卡占位。SF 名逐个
+        // 问过：`calendar` / `clock.arrow.circlepath` / `photo.on.rectangle` /
+        // `person.2` / `person` / `mappin` / `tag` / `chevron.left` 都在
+        // （`calendar.days` 不存在，取 `calendar`）。
+        "calendar-days": "calendar",
+        "history": "clock.arrow.circlepath",
+        "images": "photo.on.rectangle",
+        "users": "person.2",
+        "user": "person",
+        "map-pin": "mappin",
+        "tag": "tag",
+        "chevron-left": "chevron.left",
     ]
 }
 
@@ -795,6 +824,84 @@ struct DmSegmented<Item: Hashable>: View {
     }
 }
 
+/// 图标分段：与 `DmSegmented` 同一个容器（`panel-2` 底 + `r-8` + 发丝描边 + 内边距 `s2`，
+/// 段 `r-6`），段里只有图形、没有字。**它不是另一种分段**，是同一种控件的内容为图标时
+/// 的形态 —— 工具条上的密度三档（7 / 5 / 4 列）用它：这是控件不是页面切换，
+/// 所以留在容器分段，不借 `DmTextTabs`。
+struct DmIconSegmented<Item: Hashable>: View {
+    let items: [Item]
+    let icon: (Item) -> String
+    /// 读屏名称与悬停提示共用的那句话（`小格 · 7 列`）。
+    let label: (Item) -> String
+    @Binding var selection: Item
+    let surface: DmSurface
+    @State private var hovered: Item?
+    @State private var windowActive = true
+
+    init(
+        _ items: [Item],
+        selection: Binding<Item>,
+        on surface: DmSurface = .panel,
+        icon: @escaping (Item) -> String,
+        label: @escaping (Item) -> String
+    ) {
+        self.items = items
+        self._selection = selection
+        self.surface = surface
+        self.icon = icon
+        self.label = label
+    }
+
+    var body: some View {
+        HStack(spacing: DmSpace.s2) {
+            ForEach(items, id: \.self) { item in
+                let isSelected = item == selection
+                Button {
+                    selection = item
+                } label: {
+                    LucideIcon(icon(item), size: DmIcon.i12)
+                        .foregroundColor(
+                            isSelected ? (windowActive ? Color.dmOnAccent : Color.dmAccent2)
+                                       : (hovered == item ? Color.dmInk : Color.dmInk2)
+                        )
+                        .frame(width: DmControl.h28, height: DmControl.h28)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(windowActive ? Color.dmAccentFill : Color.dmAccentSoft)
+                                .opacity(isSelected ? 1 : 0)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(label(item))
+                .accessibilityLabel(label(item))
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                .onHover { isInside in
+                    if isInside {
+                        hovered = item
+                    } else if hovered == item {
+                        hovered = nil
+                    }
+                }
+            }
+        }
+        .padding(DmSpace.s2)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r8).fill(surface.controlFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r8)
+                .strokeBorder(Color.dmLine2, lineWidth: DmLine.hairline)
+        )
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            windowActive = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            windowActive = false
+        }
+    }
+}
+
 /// 文本页签：**页面级视图切换**（曲库的浏览维度）—— 2026-10-18 起与容器分段并存的两型之一。
 ///
 /// 形态照网易云那套：**无容器**，直接放在任意底上，选中态靠字色 + 一条指示条表达，
@@ -906,6 +1013,8 @@ struct IconButton: View {
     /// 图形档位，默认 12（28 钮的常态）。沉浸层的收起钮按原型取 18 ——
     /// 它是那一屏唯一的常驻控件，比工具条里的次级动作大一号。
     var iconSize: CGFloat = DmIcon.i12
+    /// 读屏名称。**必传**：按钮里只有图形，不挂 label 时 VoiceOver 只报 “button”。
+    let label: String
     let action: () -> Void
 
     @State private var isHovered = false
@@ -922,6 +1031,7 @@ struct IconButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { isHovered = $0 }
     }
@@ -1069,7 +1179,7 @@ struct DmModalCard<Content: View, Foot: View>: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
-            IconButton(iconName: "x", action: onClose)
+            IconButton(iconName: "x", label: "关闭", action: onClose)
         }
         .padding(.vertical, DmSpace.s16)
         .padding(.horizontal, DmSpace.s20)
@@ -1131,6 +1241,10 @@ private struct ModalBodyHeightKey: PreferenceKey {
 ///
 /// 不用系统的 `role: .destructive`：那套走系统配色，与第八节的按钮规格对不上。
 struct DangerButtonStyle: ButtonStyle {
+    /// 紧凑档（高 28、内边距 12）：多选操作条上那一排动作都是这一档，删除混在
+    /// 里面不能比邻居高一头。
+    var compact: Bool = false
+
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
@@ -1139,8 +1253,8 @@ struct DangerButtonStyle: ButtonStyle {
             .font(.system(size: DmText.t13, weight: .medium))
             .lineLimit(1)
             .foregroundColor(Color.dmDangerInk)
-            .padding(.horizontal, DmSpace.s16)
-            .frame(height: DmControl.h38)
+            .padding(.horizontal, compact ? DmSpace.s12 : DmSpace.s16)
+            .frame(height: compact ? DmControl.h28 : DmControl.h38)
             .background(
                 RoundedRectangle(cornerRadius: DmRadius.r8)
                     .fill(isEnabled && isHovered ? Color.dmDangerHover : Color.dmDangerSoft)
@@ -1543,12 +1657,16 @@ struct DmMenuTitle: View {
 /// 悬停 `panel-3` 底 + 字转 `ink`；可选前置图标（`ink-3`，悬停转 `ink-2`）。
 ///
 /// `trailing` 贴右（原型 `.mi .cb{margin-left:auto}`）—— 字段配置的勾选框走这里。
+///
+/// 禁用态（2026-10-20）：工具条溢出菜单里的动作大多要选中才可用，整行压到 `ink-3`、
+/// 不给悬停底 —— 与次级按钮的 0.5 透明同一个意思：读得出「现在不能点」。
 struct DmMenuRow<Trailing: View>: View {
     let title: String
     var icon: String?
     let action: () -> Void
     @ViewBuilder let trailing: () -> Trailing
 
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
     var body: some View {
@@ -1556,11 +1674,11 @@ struct DmMenuRow<Trailing: View>: View {
             HStack(spacing: DmSpace.s8) {
                 if let icon {
                     LucideIcon(icon, size: DmIcon.i12)
-                        .foregroundColor(isHovered ? Color.dmInk2 : Color.dmInk3)
+                        .foregroundColor(isEnabled && isHovered ? Color.dmInk2 : Color.dmInk3)
                 }
                 Text(title)
                     .font(.system(size: DmText.t13))
-                    .foregroundColor(isHovered ? Color.dmInk : Color.dmInk2)
+                    .foregroundColor(textColor)
                 Spacer(minLength: DmSpace.s8)
                 trailing()
             }
@@ -1569,12 +1687,17 @@ struct DmMenuRow<Trailing: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: DmRadius.r6)
-                    .fill(isHovered ? Color.dmPanel3 : Color.clear)
+                    .fill(isEnabled && isHovered ? Color.dmPanel3 : Color.clear)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .onHover { isHovered = $0 && isEnabled }
+    }
+
+    private var textColor: Color {
+        guard isEnabled else { return Color.dmInk3 }
+        return isHovered ? Color.dmInk : Color.dmInk2
     }
 }
 
@@ -1665,23 +1788,32 @@ struct RightClickCatcher: NSViewRepresentable {
 /// 不再过 `hitTest`；而且它注册的粘贴板类型只有 `.fileURL`，内部拖动根本不是候选。
 struct FileDropCatcher: NSViewRepresentable {
     @Binding var isTargeted: Bool
+    /// 拖着东西悬在上面时把文件列表报出去 —— 照片页靠它算落点摘要画在遮罩上。
+    /// `draggingUpdated` 每秒来几十次，只在内容变化时回调一次；拖走时回调空数组。
+    var onHover: (([URL]) -> Void)? = nil
     let onDrop: ([URL]) -> Void
 
     func makeNSView(context: Context) -> DropView {
         let view = DropView()
         view.onDrop = onDrop
+        view.onHover = onHover
         view.onTargetedChange = { isTargeted = $0 }
         return view
     }
 
     func updateNSView(_ view: DropView, context: Context) {
         view.onDrop = onDrop
+        view.onHover = onHover
         view.onTargetedChange = { isTargeted = $0 }
     }
 
     final class DropView: NSView {
         var onDrop: (([URL]) -> Void)?
+        var onHover: (([URL]) -> Void)?
         var onTargetedChange: ((Bool) -> Void)?
+        /// 上一次报出去的文件清单（拼成串比）。拖动中 `draggingUpdated` 极密，
+        /// 每次读粘贴板、读 EXIF 是白烧。
+        private var hoverKey = ""
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -1698,15 +1830,30 @@ struct FileDropCatcher: NSViewRepresentable {
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
             guard canAccept(sender) else { return [] }
             onTargetedChange?(true)
+            reportHover(sender)
             return .copy
         }
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            canAccept(sender) ? .copy : []
+            guard canAccept(sender) else { return [] }
+            reportHover(sender)
+            return .copy
         }
 
         override func draggingExited(_ sender: NSDraggingInfo?) {
+            hoverKey = ""
+            onHover?([])
             onTargetedChange?(false)
+        }
+
+        /// 把这一次拖进来的文件报给上层（内容没变就不报）。
+        private func reportHover(_ sender: NSDraggingInfo) {
+            guard onHover != nil else { return }
+            let urls = Self.fileURLs(from: sender.draggingPasteboard)
+            let key = urls.map(\.path).joined(separator: "|")
+            guard key != hoverKey else { return }
+            hoverKey = key
+            onHover?(urls)
         }
 
         override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -1714,6 +1861,8 @@ struct FileDropCatcher: NSViewRepresentable {
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            hoverKey = ""
+            onHover?([])
             onTargetedChange?(false)
             let urls = Self.fileURLs(from: sender.draggingPasteboard)
             guard !urls.isEmpty else { return false }
@@ -1969,6 +2118,7 @@ struct DmSearchField: View {
                         .foregroundColor(Color.dmInk3)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("清空")
             }
         }
         .padding(.horizontal, DmSpace.s12)
@@ -2010,34 +2160,55 @@ struct DmPageHead<Trailing: View>: View {
     private let title: String
     private let subtitle: String?
     private let crumbs: [DmCrumb]
+    /// 详情页的返回钮（有父级的那一屏才有）。标题左侧一枚 `chevron-left`。
+    private let onBack: (() -> Void)?
+    /// 详情页的圆形头像（人物详情用；相册 / 标签 / 地点没有）。
+    private let avatar: NSImage?
     private let trailing: Trailing
 
     init(
         _ title: String,
         subtitle: String? = nil,
         crumbs: [DmCrumb] = [],
+        onBack: (() -> Void)? = nil,
+        avatar: NSImage? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
         self.subtitle = subtitle
         self.crumbs = crumbs
+        self.onBack = onBack
+        self.avatar = avatar
         self.trailing = trailing()
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: DmSpace.s16) {
-            VStack(alignment: .leading, spacing: DmSpace.s4) {
-                Text(title)
-                    .font(.system(size: DmText.t17, weight: .semibold))
-                    .kerning(-0.17)
-                    .foregroundColor(Color.dmInk)
-                // 有面包屑时它占第二行（两者不会同时出现）。
-                if !crumbs.isEmpty {
-                    crumbRow
-                } else if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: DmText.t12))
-                        .foregroundColor(Color.dmInk3)
+            HStack(alignment: .top, spacing: DmSpace.s10) {
+                if let onBack {
+                    IconButton(iconName: "chevron-left", iconSize: DmIcon.i14,
+                               label: "返回", action: onBack)
+                }
+                if let avatar {
+                    Image(nsImage: avatar)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                }
+                VStack(alignment: .leading, spacing: DmSpace.s4) {
+                    Text(title)
+                        .font(.system(size: DmText.t17, weight: .semibold))
+                        .kerning(-0.17)
+                        .foregroundColor(Color.dmInk)
+                    // 有面包屑时它占第二行（两者不会同时出现）。
+                    if !crumbs.isEmpty {
+                        crumbRow
+                    } else if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: DmText.t12))
+                            .foregroundColor(Color.dmInk3)
+                    }
                 }
             }
             Spacer(minLength: 0)

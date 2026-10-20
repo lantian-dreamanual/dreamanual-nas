@@ -63,7 +63,7 @@ struct ConnectView: View {
             }
 
             field("账号") {
-                TextField("DSM 账号", text: $state.username)
+                TextField("", text: $state.username)
                     .formField(on: .card)
                     .focused($focused, equals: .account)
                     .onSubmit { submit() }
@@ -74,7 +74,7 @@ struct ConnectView: View {
                     SecureField(
                         // 有存凭据时空着也行：连接时会取本机存的那条。
                         password.isEmpty && state.hasSavedPassword(for: selectedMethod)
-                            ? "留空则用已保存的密码" : "DSM 密码",
+                            ? "留空则用已保存的密码" : "",
                         text: passwordBinding)
                         .formField(on: .card)
                         .focused($focused, equals: .password)

@@ -116,6 +116,7 @@ enum DmControl {
 enum DmLine {
     static let hairline: CGFloat = 0.5
     static let base: CGFloat = 1
+    static let sel: CGFloat = 2
     static let bold: CGFloat = 3
 }
 

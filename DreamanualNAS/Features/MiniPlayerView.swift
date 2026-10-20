@@ -38,6 +38,10 @@ struct MiniPlayerView: View {
         return engine.isPlaying ? "pause" : "play"
     }
 
+    /// 播放 / 暂停是**面性**键（与播放条、状态栏面板同一口径）；队尾那颗换成了
+    /// `list-start`，它是普通线性图标，不跟着面性走。
+    private var buttonFilled: Bool { !engine.isAtQueueEnd }
+
     private var buttonHelp: String {
         if engine.isAtQueueEnd { return "从头播放" }
         return engine.isPlaying ? "暂停" : "播放"
@@ -96,12 +100,13 @@ struct MiniPlayerView: View {
             // 队尾那一态由引擎内部转成「回第一首重播」—— 这里不重复判断。
             engine.togglePlayPause()
         } label: {
-            LucideIcon(buttonIcon, size: DmIcon.i12)
+            LucideIcon(buttonIcon, size: DmIcon.i12, filled: buttonFilled)
                 .foregroundColor(Color.dmInk2)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(buttonHelp)
         .padding(.trailing, DmSpace.s4)
         .help(buttonHelp)
     }

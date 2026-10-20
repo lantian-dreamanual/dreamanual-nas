@@ -73,9 +73,9 @@ struct PanelContent: View {
             }
             Spacer(minLength: DmSpace.s8)
             HStack(spacing: DmSpace.s10) {
-                iconButton("skip-back", size: DmIcon.i18) { engine.previous() }
+                iconButton("skip-back", size: DmIcon.i18, filled: true, label: "上一首") { engine.previous() }
                 playButton(engine)
-                iconButton("skip-forward", size: DmIcon.i18) { engine.next() }
+                iconButton("skip-forward", size: DmIcon.i18, filled: true, label: "下一首") { engine.next() }
             }
         }
         .padding(DmSpace.s8)
@@ -88,7 +88,7 @@ struct PanelContent: View {
         Button {
             engine.togglePlayPause()
         } label: {
-            LucideIcon(engine.isPlaying ? "pause" : "play", size: DmIcon.i14)
+            LucideIcon(engine.isPlaying ? "pause" : "play", size: DmIcon.i14, filled: true)
                 .foregroundColor(Color.dmOnAccent)
                 .frame(width: DmControl.h32, height: DmControl.h32)
                 .background(
@@ -96,19 +96,22 @@ struct PanelContent: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(engine.isPlaying ? "暂停" : "播放")
         .onHover { isPlayHovered = $0 }
         .animation(.easeInOut(duration: DmMotion.fast), value: isPlayHovered)
     }
 
     private func iconButton(
-        _ name: String, size: CGFloat, action: @escaping () -> Void
+        _ name: String, size: CGFloat, filled: Bool = false, label: String,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            LucideIcon(name, size: size)
+            LucideIcon(name, size: size, filled: filled)
                 .foregroundColor(Color.dmInk2)
                 .frame(width: DmControl.h28, height: DmControl.h28)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     // MARK: 操作行

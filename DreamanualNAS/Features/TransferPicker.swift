@@ -29,7 +29,7 @@ struct TransferPickerCard: View {
         VStack(alignment: .leading, spacing: 0) {
             DmSearchField(
                 text: Binding(get: { picker.query }, set: { picker.query = $0 }),
-                placeholder: "搜索目标文件夹名，如「2024」"
+                placeholder: "文件夹名，如 2024"
             )
             .padding(.bottom, DmSpace.s12)
 
@@ -94,7 +94,7 @@ struct TransferPickerCard: View {
             }
             Button("取消") { state.cancelTransfer() }
                 .buttonStyle(SecondaryButtonStyle())
-            Button(transfer.mode?.confirmTitle ?? "确定") {
+            Button(transfer.mode?.confirmTitle ?? "继续") {
                 Task { await state.confirmTransfer() }
             }
             .buttonStyle(PrimaryButtonStyle())
@@ -181,6 +181,7 @@ private struct PickerRowView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(row.isExpanded ? "收起" : "展开")
     }
 }
 
@@ -212,14 +213,14 @@ struct TransferConflictCard: View {
             if let conflict {
                 DmCompare(
                     left: DmCompareColumn(title: "要\(conflict.mode.verb)", lines: names(conflict.clashes)),
-                    right: DmCompareColumn(title: "目标「\(DestinationPicker.shortPath(conflict.destination))」已有",
+                    right: DmCompareColumn(title: "目标“\(DestinationPicker.shortPath(conflict.destination))”已有",
                                            lines: names(conflict.clashes))
                 )
                 DmOptionRow(
                     title: "替换",
                     note: conflict.clashes.contains(where: \.isDirectory)
-                        ? "文件会被覆盖；目录是同名合并（服务端行为，两个选择都一样）。"
-                        : "目标处那一份被这次的内容盖掉。",
+                        ? "文件会被覆盖；同名的文件夹会合并，选哪个都一样。"
+                        : "目标位置的文件会被覆盖。",
                     isOn: choice == .replace
                 ) { choice = .replace }
                 DmOptionRow(
@@ -229,7 +230,7 @@ struct TransferConflictCard: View {
                         : "这 \(conflict.clashes.count) 项不动，其余 \(conflict.clean.count) 项照常\(conflict.mode.verb)。",
                     isOn: choice == .skip
                 ) { choice = .skip }
-                DmDangerNote(text: "接口不支持给新来的那一份改名，所以这里没有「保留两者」。要两份都留，先在目标里改个名再来。")
+                DmDangerNote(text: "要两份都保留，先给目标位置的那一份重命名，再来一次。")
             }
         }
     }

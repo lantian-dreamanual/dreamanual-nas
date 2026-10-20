@@ -43,7 +43,7 @@ final class SystemStatusModel {
     /// 没取回来的那几块，拼成一句给提示条。
     var failureNote: String? {
         guard let snapshot, !snapshot.failures.isEmpty else { return nil }
-        return "这次没读到 —— " + snapshot.failures.joined(separator: "；")
+        return "部分数据没有读取到：" + snapshot.failures.joined(separator: "；")
     }
 
     /// 断开时清掉 —— 换了机器或换了一条链路，旧快照里的温度与容量都不作数了。
@@ -100,7 +100,7 @@ struct StatusView: View {
                 if let link = state.linkMode {
                     DmBadge(link.label, icon: "wifi", tone: .accent)
                 }
-                IconButton(iconName: "refresh-cw") {
+                IconButton(iconName: "refresh-cw", label: "刷新系统状态") {
                     Task { await model.load(on: state.sessionManager, force: true) }
                 }
             }
@@ -153,13 +153,12 @@ struct StatusView: View {
         if let snapshot = model.snapshot, !snapshot.isEmpty {
             cards(snapshot)
         } else if case .failed(let reason) = model.phase {
-            StatusNotice(icon: "circle-x", title: "没能读到系统状态", note: reason,
+            StatusNotice(icon: "circle-x", title: "无法读取系统状态", note: reason,
                          actionTitle: "重试") {
                 Task { await model.load(on: state.sessionManager, force: true) }
             }
         } else {
-            StatusNotice(icon: "loader", title: "正在读取系统状态…",
-                         note: "四条接口并发发出：机器信息、负载、容量、系统状态。")
+            StatusNotice(icon: "loader", title: "正在读取系统状态…", note: nil)
         }
     }
 
@@ -207,7 +206,7 @@ private struct PowerCard: View {
                 Text("电源")
                     .font(.system(size: DmText.t13, weight: .semibold))
                     .foregroundColor(Color.dmInk)
-                Text("关机后无法远程唤醒：要它自己开机，先设好右边的开机计划。")
+                Text("关机后无法远程唤醒。需要自动开机，请先在右侧设置开机计划。")
                     .font(.system(size: DmText.t11))
                     .foregroundColor(Color.dmInk3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -216,11 +215,11 @@ private struct PowerCard: View {
             .padding(.top, DmSpace.s14)
             .padding(.bottom, DmSpace.s10)
 
-            PowerActionRow(icon: "power", title: "立刻关机", note: nil,
+            PowerActionRow(icon: "power", title: "关机", note: nil,
                            button: "关机…") {
                 state.openPowerConfirm(.shutdown)
             }
-            PowerActionRow(icon: "refresh-cw", title: "重新启动",
+            PowerActionRow(icon: "refresh-cw", title: "重启",
                            note: "约 2 分钟后恢复在线",
                            button: "重启…") {
                 state.openPowerConfirm(.reboot)
@@ -258,6 +257,9 @@ private struct PowerActionRow: View {
                         .foregroundColor(Color.dmInk3)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
             Spacer(minLength: 0)
             // 两颗入口同构（次按钮描边）—— 危险语义全留给确认弹窗里的执行钮，
             // 卡面上红实心与描边并排是对撞不是层级。卡面档（`panel-3` 底）：
@@ -267,6 +269,10 @@ private struct PowerActionRow: View {
         }
         .padding(.horizontal, DmSpace.s14)
         .padding(.vertical, DmSpace.s10)
+        // 整行可点：标题文字看着像入口，只让右端按钮有命中区会白点。
+        // 行内按钮在，点击它由 Button 先吃，不会重复触发。
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.dmLine)
@@ -289,16 +295,14 @@ struct PowerConfirmCard: View {
     private var isShutdown: Bool { kind == .shutdown }
 
     var body: some View {
-        DmModalCard(title: isShutdown ? "立刻关机" : "重新启动",
+        DmModalCard(title: isShutdown ? "关机" : "重启",
                     onClose: { state.closePowerConfirm() }) {
             VStack(alignment: .leading, spacing: DmSpace.s10) {
                 if isShutdown {
                     DmDangerNote(text: dangerNote)
                 }
                 impact("arrow-down-up", "正在进行的播放与文件传输会中断。")
-                if isShutdown {
-                    impact("power", "关机后无法远程唤醒 —— 要它自己开机，先在计划卡里排好开机时间。")
-                } else {
+                if !isShutdown {
                     impact("clock", "NAS 约 2 分钟后恢复在线，客户端会自动重连。")
                 }
             }
@@ -439,12 +443,12 @@ private struct StorageCard: View {
     }
 
     private var footnote: String {
-        guard let volume else { return "没读到容量" }
+        guard let volume else { return "无法读取容量" }
         let used = FileEntry.byteText(volume.usedBytes)
         let total = FileEntry.byteText(volume.totalBytes)
         let percent = String(format: "%.1f%%", volume.usedPercent * 100)
         return "已用 \(used) / \(total)（\(percent)）· 可用 \(FileEntry.byteText(volume.freeBytes))"
-            + (volume.isHealthy ? "" : " · \(volume.status)")
+            + (volume.isHealthy ? "" : " · \(volume.statusText)")
     }
 }
 
@@ -470,7 +474,7 @@ private struct DiskCard: View {
             .padding(.bottom, DmSpace.s10)
 
             if disks.isEmpty {
-                Text("没读到硬盘清单")
+                Text("无法读取硬盘清单")
                     .font(.system(size: DmText.t11))
                     .foregroundColor(Color.dmInk3)
                     .padding(.horizontal, DmSpace.s14)
@@ -539,7 +543,7 @@ private struct DiskRow: View {
 
     private var statusText: String {
         if disk.isHealthy { return "正常" }
-        return disk.status.isEmpty ? "异常" : disk.status
+        return disk.statusText
     }
 }
 
@@ -547,7 +551,8 @@ private struct DiskRow: View {
 private struct StatusNotice: View {
     let icon: String
     let title: String
-    let note: String
+    /// 读不出来时才给原因；加载中不需要第二行（标题已经说明了正在做什么）。
+    var note: String?
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -558,10 +563,12 @@ private struct StatusNotice: View {
             Text(title)
                 .font(.system(size: DmText.t15, weight: .semibold))
                 .foregroundColor(Color.dmInk2)
-            Text(note)
-                .font(.system(size: DmText.t12))
-                .foregroundColor(Color.dmInk3)
-                .multilineTextAlignment(.center)
+            if let note {
+                Text(note)
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk3)
+                    .multilineTextAlignment(.center)
+            }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(SecondaryButtonStyle())

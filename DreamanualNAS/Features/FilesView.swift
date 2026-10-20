@@ -18,6 +18,15 @@ struct FilesView: View {
     private var uploads: UploadQueue { state.uploads }
     private var search: FileSearch { state.search }
 
+    /// 工具条溢出菜单：开关、被收起的动作、`…` 钮在主区坐标系里的位置。
+    /// 菜单位置不能写死 —— 候选布局换一档它就换地方。
+    @State private var overflowOpen = false
+    @State private var overflowHidden: [FileToolbarAction] = []
+    @State private var overflowAnchor: CGRect = .zero
+
+    /// 主区坐标系名：`…` 钮在这里报名，菜单卡在同一套坐标里定位。
+    static let toolbarSpace = "file-main"
+
     /// 拖入高亮的开关。状态落在 `uploads` 上而不是本视图 —— 冒烟通路要能把它摆出来，
     /// 视图自己的 `@State` 外面够不着。
     private var dropTarget: Binding<Bool> {
@@ -36,26 +45,39 @@ struct FilesView: View {
     }
 
     private var main: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            DmPageHead("文件管理", crumbs: crumbs) {
-                IconButton(iconName: "refresh-cw") {
-                    Task { await model.refresh(state.sessionManager, username: state.username) }
+        GeometryReader { geo in
+            // ZStack 只为一件事：工具条溢出菜单要浮在内容之上。遮罩铺满主区
+            // （含页头与工具条），点哪儿都先收菜单 —— 与曲库字段菜单同一条做法。
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    DmPageHead("文件管理", crumbs: crumbs) {
+                        IconButton(iconName: "refresh-cw", label: "刷新文件列表") {
+                            Task { await model.refresh(state.sessionManager, username: state.username) }
+                        }
+                    }
+
+                    toolbar
+
+                    if !writable {
+                        DmBanner(icon: "triangle-alert", text: "这个目录没有写入权限，新建、上传、重命名与删除都不可用")
+                    }
+
+                    uploadRows
+
+                    content
+
+                    statusBar
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                if overflowOpen {
+                    overflowLayer(in: geo.size)
                 }
             }
-
-            toolbar
-
-            if !writable {
-                DmBanner(icon: "triangle-alert", text: "当前目录不可写，新建、上传、改名与删除已停用")
-            }
-
-            uploadRows
-
-            content
-
-            statusBar
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .onPreferenceChange(ToolbarAnchorKey.self) { overflowAnchor = $0 }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .coordinateSpace(name: Self.toolbarSpace)
     }
 
     /// 面包屑：路径逐段拆开，最后一段是当前所在（不可点）。原型 `.crumb`。
@@ -82,40 +104,34 @@ struct FilesView: View {
     /// 在浏览态里再操作。
     private var browse: Bool { !search.isActive }
 
-    /// 工具条：新建文件夹 / 上传 / 下载 / 复制到… / 移动到… / 重命名 / 删除 —— 已接线的
-    /// 动作（原型那一排与顺序一致）。
+    /// 工具条：动作按钮组在左、搜索框在右（原型那一排与顺序一致）。
+    ///
+    /// **放不下时从末尾收起进 `…` 菜单**。最小窗宽 1170 时七颗钮加 200 宽搜索框
+    /// 排不下，早先的后果是文字被压成「新…」「上…」—— 那种截断读不出是什么动作。
+    /// 判定交给 `ViewThatFits`：从「全显示」到「全收」逐个试、取第一个装得下的；
+    /// 不自己量宽度，因为按钮宽随字号与语言变，硬编码阈值必然错位。
     ///
     /// 复制与移动**各占一个入口**，不做「复制 / 粘贴 / 剪切」三件套：剪贴板状态要用户
     /// 记着「粘到哪、粘没粘过」，两个入口各弹一次选目标就都省了（原型注明）。
     private var toolbar: some View {
-        HStack(spacing: DmSpace.s8) {
-            action("新建文件夹", icon: "folder-plus", enabled: browse && writable) {
-                state.openFileDialog(.newFolder(in: model.currentPath))
+        ViewThatFits(in: .horizontal) {
+            ForEach(Array(stride(from: FileToolbarAction.allCases.count, through: 0, by: -1)),
+                    id: \.self) { count in
+                toolbarRow(visible: count)
             }
-            action("上传", icon: "upload", enabled: browse && writable) {
-                state.pickAndUpload()
+        }
+        .padding(.horizontal, DmSpace.s24)
+        .padding(.bottom, DmSpace.s12)
+    }
+
+    private func toolbarRow(visible: Int) -> some View {
+        let all = FileToolbarAction.allCases
+        return HStack(spacing: DmSpace.s8) {
+            ForEach(all.prefix(visible)) { item in
+                action(item)
             }
-            action("下载", icon: "download",
-                   enabled: browse && model.singleSelection?.isDirectory == false) {
-                guard let entry = model.singleSelection else { return }
-                Task { await state.download(file: entry) }
-            }
-            action("复制到…", icon: "copy",
-                   enabled: browse && !model.selection.isEmpty) {
-                state.beginTransfer(.copy)
-            }
-            action("移动到…", icon: "folder-input",
-                   enabled: browse && writable && !model.selection.isEmpty) {
-                state.beginTransfer(.move)
-            }
-            action("重命名", icon: "pencil",
-                   enabled: browse && writable && model.singleSelection != nil) {
-                guard let entry = model.singleSelection else { return }
-                state.openFileDialog(.rename(entry))
-            }
-            action("删除", icon: "trash",
-                   enabled: browse && writable && !model.selection.isEmpty) {
-                state.openFileDialog(.delete(model.selectedEntries))
+            if visible < all.count {
+                overflowButton(hidden: Array(all.dropFirst(visible)))
             }
 
             Spacer(minLength: 0)
@@ -128,26 +144,118 @@ struct FilesView: View {
             // 里当「退出搜索」处理。
             DmSearchField(
                 text: Binding(get: { search.query }, set: { search.query = $0 }),
-                placeholder: "搜索文件",
+                placeholder: "文件名或文件夹名",
                 onSubmit: { Task { await state.submitFileSearch() } }
             )
             .frame(width: FilesMetrics.searchWidth)
         }
-        .padding(.horizontal, DmSpace.s24)
-        .padding(.bottom, DmSpace.s12)
     }
 
     /// 工具条上的一个动作（原型 `.btn.btn-sec.btn-xs`：高 28 / 字 12 / 图标 12）。
-    private func action(_ title: String, icon: String, enabled: Bool,
-                        perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
+    private func action(_ item: FileToolbarAction) -> some View {
+        Button { perform(item) } label: {
             HStack(spacing: DmSpace.s6) {
-                LucideIcon(icon, size: DmIcon.i12)
-                Text(title)
+                LucideIcon(item.icon, size: DmIcon.i12)
+                Text(item.title)
             }
         }
         .buttonStyle(SecondaryButtonStyle())
-        .disabled(!enabled)
+        .disabled(!isEnabled(item))
+    }
+
+    /// `…` 钮：点开当前被收起的动作。只放图标 —— 它自己也是工具条上的一颗。
+    ///
+    /// 位置上报给主区层（菜单卡挂在那一层才盖得住表格）：菜单要对着这颗钮摆，
+    /// 而候选布局换一档它就换位置，写死偏移必错。
+    private func overflowButton(hidden: [FileToolbarAction]) -> some View {
+        IconButton(iconName: "ellipsis", iconSize: DmIcon.i14, label: "更多操作") {
+            overflowHidden = hidden
+            overflowOpen = true
+        }
+        .help("更多操作")
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ToolbarAnchorKey.self,
+                    value: proxy.frame(in: .named(Self.toolbarSpace))
+                )
+            }
+        )
+        .onAppear {
+            // 冒烟：AI 点不了 UI（合成鼠标事件进不了 SwiftUI 手势），只能让菜单自己开。
+            guard model.overflowSmoke, !overflowOpen else { return }
+            model.overflowSmoke = false
+            overflowHidden = hidden
+            overflowOpen = true
+        }
+    }
+
+    /// 溢出菜单层：透明遮罩（点哪儿都先收菜单）+ 菜单卡（对着 `…` 钮摆，越界收回主区内）。
+    @ViewBuilder
+    private func overflowLayer(in size: CGSize) -> some View {
+        Color.black.opacity(0.001)
+            .contentShape(Rectangle())
+            .onTapGesture { closeOverflow() }
+
+        DmMenuCard(width: FilesMetrics.overflowWidth) {
+            ForEach(overflowHidden) { item in
+                DmMenuRow(title: item.title, icon: item.icon) {
+                    closeOverflow()
+                    perform(item)
+                }
+                .disabled(!isEnabled(item))
+            }
+        }
+        .offset(x: overflowSpot(in: size).x, y: overflowSpot(in: size).y)
+    }
+
+    private func overflowSpot(in size: CGSize) -> CGPoint {
+        let width = FilesMetrics.overflowWidth
+        let x = min(max(overflowAnchor.minX, DmSpace.s24),
+                    max(DmSpace.s24, size.width - width - DmSpace.s24))
+        return CGPoint(x: x, y: overflowAnchor.maxY + DmSpace.s6)
+    }
+
+    private func closeOverflow() {
+        overflowOpen = false
+    }
+
+    private func isEnabled(_ item: FileToolbarAction) -> Bool {
+        switch item {
+        case .newFolder, .upload:
+            return browse && writable
+        case .download:
+            return browse && model.singleSelection?.isDirectory == false
+        case .copy:
+            return browse && !model.selection.isEmpty
+        case .move:
+            return browse && writable && !model.selection.isEmpty
+        case .rename:
+            return browse && writable && model.singleSelection != nil
+        case .delete:
+            return browse && writable && !model.selection.isEmpty
+        }
+    }
+
+    private func perform(_ item: FileToolbarAction) {
+        switch item {
+        case .newFolder:
+            state.openFileDialog(.newFolder(in: model.currentPath))
+        case .upload:
+            state.pickAndUpload()
+        case .download:
+            guard let entry = model.singleSelection else { return }
+            Task { await state.download(file: entry) }
+        case .copy:
+            state.beginTransfer(.copy)
+        case .move:
+            state.beginTransfer(.move)
+        case .rename:
+            guard let entry = model.singleSelection else { return }
+            state.openFileDialog(.rename(entry))
+        case .delete:
+            state.openFileDialog(.delete(model.selectedEntries))
+        }
     }
 
     /// 列表上方那一行上传进度（原型 `.up-row`，常驻不藏弹窗）。
@@ -244,7 +352,7 @@ struct FilesView: View {
                     uploads.retry(manager: manager)
                 }
                 .buttonStyle(SecondaryButtonStyle())
-                IconButton(iconName: "x") {
+                IconButton(iconName: "x", label: "移除") {
                     uploads.dropFailed()
                 }
             }
@@ -261,14 +369,14 @@ struct FilesView: View {
         } else if let message = model.errorMessage {
             FilesNotice(
                 icon: "triangle-alert",
-                title: "读不到这个目录",
+                title: "无法读取这个目录",
                 note: message,
                 actionTitle: "重试"
             ) {
                 Task { await model.refresh(state.sessionManager, username: state.username) }
             }
         } else if model.isLoading && model.entries.isEmpty {
-            FilesNotice(icon: "loader", title: "正在载入…", note: "列一层目录，一页 \(FileBrowser.pageSize) 项")
+            FilesNotice(icon: "loader", title: "正在加载…")
         } else if model.entries.isEmpty {
             FilesNotice(icon: "folder", title: "这个目录是空的", note: model.currentPath)
         } else {
@@ -308,8 +416,7 @@ struct FilesView: View {
         } else if search.hits.isEmpty {
             FilesNotice(
                 icon: "search",
-                title: "没有匹配的项",
-                note: "在「\(search.folder)」里找「\(search.query)」"
+                title: "没有匹配的项"
             )
         } else {
             SearchHitList(search: search, manager: state.sessionManager) { hit in
@@ -346,7 +453,7 @@ struct FilesView: View {
                         )
                 )
                 .overlay(
-                    Text("松手即传到「\(model.currentPath)」")
+                    Text("松手即传到“\(model.currentPath)”")
                         .font(.system(size: DmText.t13, weight: .medium))
                         .foregroundColor(Color.dmAccent2)
                 )
@@ -367,7 +474,6 @@ struct FilesView: View {
                 Text("已选中 \(model.selection.count) 项\(byteSuffix)")
             }
             Spacer(minLength: 0)
-            Text("\(model.shares.count) 个共享夹")
         }
         .font(.system(size: DmText.t11))
         .monospacedDigit()
@@ -407,13 +513,22 @@ private struct FileTreePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("共享文件夹")
-                .font(.system(size: DmText.t11, weight: .bold))
-                .kerning(0.66)
-                .foregroundColor(Color.dmInk3)
-                .padding(.horizontal, DmSpace.s16)
-                .padding(.top, DmSpace.s14)
-                .padding(.bottom, DmSpace.s8)
+            HStack(spacing: DmSpace.s8) {
+                Text("共享文件夹")
+                    .font(.system(size: DmText.t11, weight: .bold))
+                    .kerning(0.66)
+                    .foregroundColor(Color.dmInk3)
+                Spacer(minLength: 0)
+                // 计数留在这一行：状态栏只报当前列表的统计，不掺分组总数 ——
+                // 搜索是跨目录的，那会儿这个数跟结果无关。
+                Text("\(model.shares.count)")
+                    .font(.system(size: DmText.t11))
+                    .monospacedDigit()
+                    .foregroundColor(Color.dmInk3)
+            }
+            .padding(.horizontal, DmSpace.s16)
+            .padding(.top, DmSpace.s14)
+            .padding(.bottom, DmSpace.s8)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: DmSpace.s2) {
@@ -507,6 +622,7 @@ private struct FileTreeRow: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(model.isExpanded(row.path) ? "收起" : "展开")
     }
 
     private func activate() {
@@ -516,6 +632,55 @@ private struct FileTreeRow: View {
         case .share, .folder:
             Task { await model.open(row.path, on: manager) }
         }
+    }
+}
+
+// MARK: - 工具条动作
+
+/// 工具条上的七个动作。**顺序即显示顺序**，放不下时从末尾收起 —— 重命名与删除
+/// 要选中才可用、排最后，正好先让位给「新建文件夹」「上传」这些高频入口。
+enum FileToolbarAction: String, CaseIterable, Identifiable {
+    case newFolder
+    case upload
+    case download
+    case copy
+    case move
+    case rename
+    case delete
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newFolder: return "新建文件夹"
+        case .upload: return "上传"
+        case .download: return "下载"
+        case .copy: return "复制到…"
+        case .move: return "移动到…"
+        case .rename: return "重命名"
+        case .delete: return "删除"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .newFolder: return "folder-plus"
+        case .upload: return "upload"
+        case .download: return "download"
+        case .copy: return "copy"
+        case .move: return "folder-input"
+        case .rename: return "pencil"
+        case .delete: return "trash"
+        }
+    }
+}
+
+/// `…` 钮在主区坐标系里的位置。菜单卡是绝对定位的，位置跟着候选布局走。
+private struct ToolbarAnchorKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
 
@@ -542,6 +707,8 @@ enum FilesMetrics {
     /// 搜索框宽（原型 `.toolbar .right` 里 `.searchbox{width:200px}`）。
     /// 与选目标弹窗那个不同档：那个在弹窗里占满一行，这个挤在工具条右端。
     static let searchWidth: CGFloat = 200
+    /// 工具条溢出菜单的宽：与曲库字段菜单同档 196。
+    static let overflowWidth: CGFloat = 196
     /// 固定列拖宽后的下限。再窄右对齐的数字格就贴边了。
     static let minColumnWidth: CGFloat = 60
 
@@ -563,6 +730,9 @@ private struct FileColumnWidth: ViewModifier {
     let field: FileSortField
     /// 拖宽覆盖（模型 `columnWidths` 里那份）。`nil` = 用默认宽。
     var override: CGFloat?
+    /// 对齐覆盖。表头传 `.leading` —— 表头文字一律左对齐，不跟数据格（大小列
+    /// 贴右）的判据走。与曲库表 `ColumnWidth` 同一套。
+    var alignment: Alignment?
 
     func body(content: Content) -> some View {
         // 名称列：min = 覆盖 ?? 保底、max 恒 .infinity —— 覆盖是**最小宽**；
@@ -574,7 +744,7 @@ private struct FileColumnWidth: ViewModifier {
         return content.frame(
             minWidth: field.width == nil ? (override ?? FilesMetrics.nameMinWidth) : pinned,
             maxWidth: field.width == nil ? .infinity : pinned,
-            alignment: field.isNumeric ? .trailing : .leading
+            alignment: alignment ?? (field.isNumeric ? .trailing : .leading)
         )
     }
 }
@@ -599,48 +769,52 @@ private struct FilesTable: View {
     }
 
     var body: some View {
-        // 视口窄于内容时横向滚动（表头与行在同一个滚动容器里，一起滚）。
+        // 🔴 与曲库表（`TrackTable`）同一条规矩：**单个双向滚动视图**，pinned
+        // section header 吸顶 —— 两层嵌套时纵向滚动条画在内层右缘，列宽一拖出
+        // 视口就被横向滚动带出窗口。两条滚动条都贴视口边缘。
         GeometryReader { geo in
             let width = FilesMetrics.contentWidth(viewport: geo.size.width,
                                                   widths: model.columnWidths)
-            ScrollView(.horizontal) {
-                VStack(spacing: 0) {
-                    header
-
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(model.entries) { entry in
-                                FileRow(
-                                    entry: entry,
-                                    // 目录的大小要问 `DirSize`（按需算的那一份），
-                                    // 所以这一格的文案从模型拿 —— 文件是列表自带的 `size`。
-                                    sizeText: model.sizeText(for: entry),
-                                    isSelected: model.isSelected(entry.path),
-                                    isChecked: model.isSelected(entry.path),
-                                    manager: manager,
-                                    columnWidths: model.columnWidths
-                                ) {
-                                    onSelect(entry, Self.mode())
-                                } onToggleCheck: {
-                                    model.toggle(entry)
-                                } onOpen: {
-                                    onOpen(entry)
-                                } onContext: { point in
-                                    onContext(entry, point)
-                                }
-                            }
-                            if model.hasMore {
-                                FileLoadMoreRow(
-                                    loaded: model.entries.count,
-                                    isLoading: model.isLoadingMore
-                                ) {
-                                    Task { await model.loadMore(manager) }
-                                }
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(model.entries) { entry in
+                            FileRow(
+                                entry: entry,
+                                // 目录的大小要问 `DirSize`（按需算的那一份），
+                                // 所以这一格的文案从模型拿 —— 文件是列表自带的 `size`。
+                                sizeText: model.sizeText(for: entry),
+                                isSelected: model.isSelected(entry.path),
+                                isChecked: model.isSelected(entry.path),
+                                manager: manager,
+                                columnWidths: model.columnWidths
+                            ) {
+                                onSelect(entry, Self.mode())
+                            } onToggleCheck: {
+                                model.toggle(entry)
+                            } onOpen: {
+                                onOpen(entry)
+                            } onContext: { point in
+                                onContext(entry, point)
                             }
                         }
+                        if model.hasMore {
+                            FileLoadMoreRow(
+                                loaded: model.entries.count,
+                                isLoading: model.isLoadingMore
+                            ) {
+                                Task { await model.loadMore(manager) }
+                            }
+                        }
+                    } header: {
+                        header
                     }
                 }
                 .frame(width: width)
+                // 🔴 双轴 ScrollView 在内容矮于视口时**垂直居中**（单轴顶对齐，
+                // 双轴不是）—— 目录条数少时整块表浮到中间、顶上空一截。钉一个
+                // 「至少视口高、顶对齐」的下限压回去。
+                .frame(minHeight: geo.size.height, alignment: .top)
             }
         }
     }
@@ -658,6 +832,8 @@ private struct FilesTable: View {
                 headerCell(field)
             }
         }
+        // pinned 吸顶后行从表头底下穿过，必须垫一层不透明底（与页面同色）。
+        .background(Color.dmPanel)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
         }
@@ -694,7 +870,9 @@ private struct FilesTable: View {
         .lineLimit(1)
         .padding(.horizontal, FilesMetrics.padH)
         .frame(height: FilesMetrics.headerHeight)
-        .modifier(FileColumnWidth(field: field, override: model.columnWidths[field]))
+        // 表头恒左对齐（大小列的数据贴右不带动表头，与曲库表同一套）。
+        .modifier(FileColumnWidth(field: field, override: model.columnWidths[field],
+                                  alignment: .leading))
         .contentShape(Rectangle())
         // 🔴 接管层要从右缘让出 `hitWidth`：平台视图命中测试先于 SwiftUI 层，
         // 整格罩住时调宽把手收不到事件（2026-10-18 用户实抓）；对齐必须显式
@@ -716,7 +894,7 @@ private struct FilesTable: View {
                 model.setColumnWidth($0, for: field)
             }
         }
-        .help("点按按这一列排序")
+        .help("按这一列排序")
     }
 }
 
@@ -937,7 +1115,7 @@ private struct FileLoadMoreRow: View {    let loaded: Int
         HStack(spacing: DmSpace.s8) {
             LucideIcon(isLoading ? "loader" : "chevron-down", size: DmIcon.i12)
                 .foregroundColor(Color.dmInk3)
-            Text(isLoading ? "正在载入…" : "已载入 \(loaded) 项，继续载入")
+            Text(isLoading ? "正在加载…" : "已加载 \(loaded) 项，继续加载")
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk3)
             Spacer(minLength: 0)
@@ -954,7 +1132,8 @@ private struct FileLoadMoreRow: View {    let loaded: Int
 private struct FilesNotice: View {
     let icon: String
     let title: String
-    let note: String
+    /// 只有标题讲不清时才给第二行（空态里已经在路径条上看得到的信息不要重写一遍）。
+    var note: String? = nil
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -965,10 +1144,12 @@ private struct FilesNotice: View {
             Text(title)
                 .font(.system(size: DmText.t15, weight: .semibold))
                 .foregroundColor(Color.dmInk2)
-            Text(note)
-                .font(.system(size: DmText.t12))
-                .foregroundColor(Color.dmInk3)
-                .multilineTextAlignment(.center)
+            if let note {
+                Text(note)
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk3)
+                    .multilineTextAlignment(.center)
+            }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(SecondaryButtonStyle())
@@ -1121,7 +1302,7 @@ struct FileDialogCard: View {
 
     private func deleteDialog(_ entries: [FileEntry]) -> some View {
         DmModalCard(title: Self.deleteTitle(entries), onClose: { state.closeFileDialog() }) {
-            DmDangerNote(text: "删除后不进回收站，无法恢复。文件夹里的内容会一并删除。")
+            DmDangerNote(text: "删除后不进回收站，也不能撤销。文件夹里的内容会一并删除。")
             DmPickList {
                 ForEach(entries) { entry in
                     DmPickRow(
@@ -1175,7 +1356,7 @@ struct FileDialogCard: View {
 
     /// 删除确认的标题：单项报名字，多项报个数。
     static func deleteTitle(_ entries: [FileEntry]) -> String {
-        guard entries.count != 1 else { return "删除「\(entries[0].name)」？" }
+        guard entries.count != 1 else { return "删除“\(entries[0].name)”？" }
         return "删除 \(entries.count) 个项目？"
     }
 
@@ -1212,9 +1393,9 @@ struct FileConflictCard: View {
 
                 VStack(spacing: DmSpace.s6) {
                     option(.replace, title: "替换",
-                           note: "用来源覆盖目标，目标那一份不可恢复")
+                           note: "用来源覆盖目标，目标那一份不能撤销")
                     option(.keepBoth, title: "保留两者",
-                           note: "这一份传上去叫「\(prompt.keptName)」，两份都保留")
+                           note: "这一份传上去叫“\(prompt.keptName)”，两份都保留")
                     option(.skip, title: "跳过",
                            note: "这一项不传，其余继续")
                 }

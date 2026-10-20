@@ -140,7 +140,7 @@ final class LibraryModel {
         switch mode {
         case .allSongs: return "全部曲目"
         case .filtered(let filter): return filter.value
-        case .searched(let keyword): return "搜索「\(keyword)」"
+        case .searched(let keyword): return "搜索“\(keyword)”"
         case .artistList: return "艺术家"
         case .albumList: return "专辑"
         case .genreList: return "流派"
@@ -647,7 +647,7 @@ struct LibraryView: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 }
-                IconButton(iconName: "refresh-cw") {
+                IconButton(iconName: "refresh-cw", label: "刷新曲库") {
                     Task { await model.refresh(state.sessionManager) }
                 }
             }
@@ -698,7 +698,7 @@ struct LibraryView: View {
         if let message = model.errorMessage {
             LibraryNotice(
                 icon: "triangle-alert",
-                title: "读不到曲库",
+                title: "无法读取曲库",
                 note: message,
                 actionTitle: "重试"
             ) {
@@ -707,8 +707,7 @@ struct LibraryView: View {
         } else if model.isLoading && model.isEmptyContent {
             LibraryNotice(
                 icon: "loader",
-                title: "正在载入…",
-                note: "首屏拉一页 1000 首，约 1 秒"
+                title: "正在加载…"
             )
         } else if model.showsTrackTable {
             if model.songs.isEmpty {
@@ -728,7 +727,7 @@ struct LibraryView: View {
             LibraryNotice(
                 icon: "music",
                 title: "这里还没有内容",
-                note: "曲库里还没扫到这一类"
+                note: "曲库里还没有这一类"
             )
         } else {
             EntityList(model: model, manager: state.sessionManager)
@@ -795,6 +794,7 @@ private struct LibraryRail: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("新建歌单")
                     }
                     .padding(.horizontal, DmSpace.s8)
                     .padding(.top, DmSpace.s14)
@@ -904,8 +904,13 @@ enum TrackMetrics {
     }
 }
 
-/// 表头固定——列表滚多长表头都钉在顶上，所以它放在 `ScrollView` 外面，
-/// 不对着滚（原型是 CSS `sticky`）。
+/// 表头固定——双向 `ScrollView` + `LazyVStack(pinnedViews:)` 的 Section header，
+/// 纵向滚动时表头钉在顶上（原型是 CSS `sticky`）。
+///
+/// 🔴 表格必须是**单个双向滚动视图**：以前是「外层横向 + 内层纵向」两层嵌套，
+/// 内层的宽度被内容撑满，纵向滚动条画在内层右缘 —— 列宽一拖出视口，滚动条就
+/// 被横向滚动带出窗口（2026-10-19 用户实抓）。合并后两条滚动条都贴视口边缘；
+/// pinned header 纵向吸顶、横向跟着内容走（实验验证过，列不错位）。
 ///
 /// 字段配置菜单浮在表头右下方（原型 `.menu` 定位在 `top:151px;right:11px` 那一格）：
 /// 它压在 `ZStack` 最上层，配一层透明遮罩接住「点别处关闭」—— 不参与布局，
@@ -921,66 +926,68 @@ private struct TrackTable: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // 视口窄于内容时横向滚动（表头与行在同一个滚动容器里，一起滚）。
-            // 内容宽由可见列算出，标题列吸收余量 —— 窗口宽时与以前完全一样。
+            // 双向滚动：横竖两条滚动条都钉在视口边缘。内容宽由可见列算出，
+            // 标题列吸收余量 —— 窗口宽时与以前完全一样。
             GeometryReader { geo in
                 let width = TrackMetrics.contentWidth(viewport: geo.size.width,
                                                       visible: model.visibleColumns,
                                                       widths: model.columnWidths)
-                ScrollView(.horizontal) {
-                    VStack(spacing: 0) {
-                        TrackHeader(
-                            sort: model.sort,
-                            columns: model.visibleColumns,
-                            widths: model.columnWidths,
-                            onSort: { field in
-                                Task { await model.toggleSort(field, on: manager) }
-                            },
-                            onConfigure: { model.showsFieldMenu = true },
-                            onMove: { field, index in model.moveColumn(field, to: index) },
-                            onResize: { field, width in
-                                model.setColumnWidth(width, for: field)
-                            },
-                            onFrames: { frames in model.headerFrames = frames }
-                        )
-
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                ForEach(model.songs) { song in
-                                    TrackRow(
-                                        song: song,
-                                        isSelected: model.selectedSongID == song.id,
-                                        isPlaying: engine?.currentSong?.id == song.id,
-                                        visible: model.visibleColumns,
-                                        widths: model.columnWidths,
-                                        // 行尾留出字段配置那一格的空道，与表头对齐。
-                                        trailingLane: TrackMetrics.configWidth
-                                    ) {
-                                        model.select(song: song)
-                                    } onPlay: {
-                                        // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
-                                        // 追加进模型后，下次播放自然带上新页）。
-                                        model.select(song: song)
-                                        engine?.play(model.songs, songID: song.id)
-                                    } onRate: { stars in
-                                        onRate(song, stars)
-                                    } onContextMenu: { point in
-                                        model.select(song: song)
-                                        onContextMenu(song, point)
-                                    }
-                                }
-                                if model.hasMore {
-                                    LoadMoreRow(
-                                        loaded: model.songs.count,
-                                        isLoading: model.isLoadingMore
-                                    ) {
-                                        Task { await model.loadMore(manager) }
-                                    }
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(model.songs) { song in
+                                TrackRow(
+                                    song: song,
+                                    isSelected: model.selectedSongID == song.id,
+                                    isPlaying: engine?.currentSong?.id == song.id,
+                                    visible: model.visibleColumns,
+                                    widths: model.columnWidths,
+                                    // 行尾留出字段配置那一格的空道，与表头对齐。
+                                    trailingLane: TrackMetrics.configWidth
+                                ) {
+                                    model.select(song: song)
+                                } onPlay: {
+                                    // 双击 = 从这首起播，当前这张表就是队列（滚到底懒加载
+                                    // 追加进模型后，下次播放自然带上新页）。
+                                    model.select(song: song)
+                                    engine?.play(model.songs, songID: song.id)
+                                } onRate: { stars in
+                                    onRate(song, stars)
+                                } onContextMenu: { point in
+                                    model.select(song: song)
+                                    onContextMenu(song, point)
                                 }
                             }
+                            if model.hasMore {
+                                LoadMoreRow(
+                                    loaded: model.songs.count,
+                                    isLoading: model.isLoadingMore
+                                ) {
+                                    Task { await model.loadMore(manager) }
+                                }
+                            }
+                        } header: {
+                            TrackHeader(
+                                sort: model.sort,
+                                columns: model.visibleColumns,
+                                widths: model.columnWidths,
+                                onSort: { field in
+                                    Task { await model.toggleSort(field, on: manager) }
+                                },
+                                onConfigure: { model.showsFieldMenu = true },
+                                onMove: { field, index in model.moveColumn(field, to: index) },
+                                onResize: { field, width in
+                                    model.setColumnWidth(width, for: field)
+                                },
+                                onFrames: { frames in model.headerFrames = frames }
+                            )
                         }
                     }
                     .frame(width: width)
+                    // 🔴 双轴 ScrollView 在内容矮于视口时**垂直居中**（单轴顶对齐，
+                    // 双轴不是）—— 歌单条数少时整块表浮到中间、顶上空一截。钉一个
+                    // 「至少视口高、顶对齐」的下限压回去。
+                    .frame(minHeight: geo.size.height, alignment: .top)
                 }
             }
 
@@ -1054,6 +1061,9 @@ private struct TrackHeader: View {
             }
             configCell
         }
+        // pinned 吸顶后行从表头底下穿过，必须垫一层不透明底（与页面同色），
+        // 否则滚上来的行文字透出来。
+        .background(Color.dmPanel)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.dmLine).frame(height: DmLine.hairline)
         }
@@ -1083,7 +1093,8 @@ private struct TrackHeader: View {
         .foregroundColor(isDragging ? Color.dmAccent2 : Color.dmInk3)
         .padding(.horizontal, TrackMetrics.padH)
         .padding(.vertical, DmSpace.s8)
-        .modifier(ColumnWidth(field: field, override: widths[field]))
+        // 表头恒左对齐：数据格贴右（数字 / 星组）不带动表头（2026-10-19 用户指出）。
+        .modifier(ColumnWidth(field: field, override: widths[field], alignment: .leading))
         .contentShape(Rectangle())
         // 一个格子上两个动作：点 = 排序、拖 = 改列序。用 AppKit 接管层而不是
         // SwiftUI 手势 —— 手势那条路合成事件验不到（见 `HeaderGrabber`）。
@@ -1115,7 +1126,7 @@ private struct TrackHeader: View {
         .overlay(alignment: .trailing) {
             if dropIndexIfDragging == columns.count, field == columns.last { dropLine }
         }
-        .help(field.canHide ? "点按排序 · 拖动改列序" : "点按排序")
+        .help(field.canHide ? "点按排序 · 拖动调整列顺序" : "点按排序")
     }
 
     /// 表头一格的鼠标接管层：点击排序、拖动改列序（位移判定在 AppKit 那一侧）。
@@ -1168,7 +1179,7 @@ private struct TrackHeader: View {
 
     /// 字段配置（原型 `.tbl th.th-cfg`：列宽 32、按钮右贴、右留 `s6`）。
     private var configCell: some View {
-        IconButton(iconName: "more-vertical", compact: true) { onConfigure() }
+        IconButton(iconName: "more-vertical", compact: true, label: "选择显示哪些列") { onConfigure() }
             .padding(.trailing, DmSpace.s6)
             .frame(width: TrackMetrics.configWidth, alignment: .trailing)
     }
@@ -1181,6 +1192,9 @@ private struct ColumnWidth: ViewModifier {
     let field: TrackField
     /// 拖宽覆盖（模型 `columnWidths` 里那份）。`nil` = 用默认宽。
     var override: CGFloat?
+    /// 对齐覆盖。表头传 `.leading` —— 表头文字一律左对齐，不跟数据格的贴右
+    /// 判据走（时长 / 曲序是数字、评分是星组，数据贴右跟表头文字无关）。
+    var alignment: Alignment?
 
     func body(content: Content) -> some View {
         // 自适应列（标题）：min = 覆盖 ?? 保底、max 恒 .infinity —— 覆盖是**最小宽**；
@@ -1189,7 +1203,7 @@ private struct ColumnWidth: ViewModifier {
         return content.frame(
             minWidth: field.width == nil ? (override ?? TrackMetrics.titleMinWidth) : pinned,
             maxWidth: field.width == nil ? nil : pinned,
-            alignment: field.isTrailing ? .trailing : .leading
+            alignment: alignment ?? (field.isTrailing ? .trailing : .leading)
         )
     }
 }
@@ -1367,7 +1381,7 @@ private struct LoadMoreRow: View {
         Button(action: onLoad) {
             HStack(spacing: DmSpace.s8) {
                 LucideIcon("chevron-down", size: DmIcon.i14)
-                Text(isLoading ? "正在加载…" : "已载入 \(loaded) 首，继续加载")
+                Text(isLoading ? "正在加载…" : "已加载 \(loaded) 首，继续加载")
             }
             .font(.system(size: DmText.t12))
             .foregroundColor(Color.dmInk3)
@@ -1456,7 +1470,8 @@ private struct EntityRow: View {
 private struct LibraryNotice: View {
     let icon: String
     let title: String
-    let note: String
+    /// 只有标题讲不清时才给第二行。
+    var note: String? = nil
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -1467,10 +1482,12 @@ private struct LibraryNotice: View {
             Text(title)
                 .font(.system(size: DmText.t15, weight: .semibold))
                 .foregroundColor(Color.dmInk2)
-            Text(note)
-                .font(.system(size: DmText.t12))
-                .foregroundColor(Color.dmInk3)
-                .multilineTextAlignment(.center)
+            if let note {
+                Text(note)
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk3)
+                    .multilineTextAlignment(.center)
+            }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(SecondaryButtonStyle())

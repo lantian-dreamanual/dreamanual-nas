@@ -32,6 +32,19 @@ struct RootView: View {
                             // 层压在壳之上：侧栏与主区留在原位被盖住，不做淡出。
                             .zIndex(1)
                     }
+                    // 照片查看器：与沉浸屏同一套整窗覆盖层、同一条进出曲线。
+                    // 层序压在最上 —— 两者不会同时出现，但查看器从网格里点开时，
+                    // 它是比沉浸屏更「当前」的一层。
+                    if state.photos.viewingID != nil {
+                        PhotoViewerView()
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom)
+                                    .animation(.timingCurve(0.22, 1, 0.36, 1, duration: DmMotion.slow)),
+                                removal: .move(edge: .bottom)
+                                    .animation(.timingCurve(0.4, 0, 1, 1, duration: DmMotion.base))
+                            ))
+                            .zIndex(2)
+                    }
                 }
                 .background(Color.dmBg)
             } else {
@@ -48,6 +61,8 @@ struct RootView: View {
         .overlay { songMenuLayer }
         // 文件列表的右键菜单同一归属、同一套摆位。
         .overlay { fileMenuLayer }
+        // 照片块的右键菜单也一样（打开 / 在文件夹中显示 / 下载原图 / 添加到相册 / 删除）。
+        .overlay { photoMenuLayer }
         // 提示条挂在根上：曲库表与播放条两处评分入口都落到同一条上。
         .dmToast($state.toast)
         // 选目标弹窗（复制 / 移动共用）与它的撞名弹窗。**挂在写操作弹窗之前** ——
@@ -74,6 +89,16 @@ struct RootView: View {
         ) {
             if let dialog = state.fileDialog {
                 FileDialogCard(dialog: dialog)
+            }
+        }
+        // 照片的写操作弹窗（新建相册 / 相册改名 / 删除确认 / 选相册）。同一挂法 ——
+        // 遮罩要盖住整个窗口，连侧栏与播放条一起。
+        .dmModal(
+            isPresented: state.photoDialog != nil,
+            onDismiss: { state.closePhotoDialog() }
+        ) {
+            if let dialog = state.photoDialog {
+                PhotoDialogCard(dialog: dialog)
             }
         }
         // 新建歌单弹窗。从右键菜单的二级面板与侧栏「+ 新建」两处进来，
@@ -355,6 +380,118 @@ struct RootView: View {
         // 与歌曲菜单同一条规矩：geo 原点钉窗口顶（见 songMenuLayer 的注）。
         .ignoresSafeArea()
     }
+
+    /// 照片块的右键菜单层：与上面两层同构。
+    ///
+    /// 项按**这一批**出：多选时「在文件夹中显示」与「下载原图」置灰（两个都只对
+    /// 单张成立），「添加到相册」与「删除」对整批生效；在相册详情里右键时
+    /// 「添加到相册」换成「移出相册」（只移出容器、不删图）。
+    @ViewBuilder
+    private var photoMenuLayer: some View {
+        GeometryReader { geo in
+            if let request = state.photoMenu {
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { state.closePhotoMenu() }
+
+                    DmMenuCard(width: PhotoMenu.width) {
+                        switch request.target {
+                        case .album(let album):
+                            // 相册卡 / 详情页头的 ⋯：两条动作，与右键同一份。
+                            DmMenuRow(title: "改名", icon: "pencil") {
+                                state.closePhotoMenu()
+                                state.openPhotoDialog(.renameAlbum(album))
+                            }
+                            DmMenuSeparator()
+                            DmMenuRow(title: "删除相册", icon: "trash") {
+                                state.closePhotoMenu()
+                                state.openPhotoDialog(.deleteAlbum(album))
+                            }
+                        case .person(let person):
+                            // 人物卡 / 详情页头的 ⋯：改名（命名）与归并。
+                            // 隐藏不做 —— `set` 的 show 参数服务端不认（2026-10-21 实测）。
+                            DmMenuRow(title: person.isNamed ? "改名" : "命名", icon: "pencil") {
+                                state.closePhotoMenu()
+                                state.openPhotoDialog(.renamePerson(person))
+                            }
+                            DmMenuSeparator()
+                            DmMenuRow(title: "归并到…", icon: "users") {
+                                state.closePhotoMenu()
+                                state.openPhotoDialog(.mergePerson(person))
+                            }
+                        case .items(let item, let targets, let albumID):
+                            if request.phase == .root {
+                                itemRows(item: item, targets: targets, albumID: albumID)
+                            } else {
+                                albumPickerRows(targets: targets)
+                            }
+                        }
+                    }
+                    .offset(x: PhotoMenu.spot(request, in: geo.size,
+                                              albums: state.photoShelf.albums.count).x,
+                            y: PhotoMenu.spot(request, in: geo.size,
+                                              albums: state.photoShelf.albums.count).y)
+                }
+            }
+        }
+        // 与歌曲菜单同一条规矩：geo 原点钉窗口顶。
+        .ignoresSafeArea()
+    }
+
+    /// 照片 / 视频块的根级五项。
+    @ViewBuilder
+    private func itemRows(item: PhotosAPI.Item, targets: [PhotosAPI.Item],
+                          albumID: Int?) -> some View {
+        let single = targets.count == 1
+        DmMenuRow(title: "打开", icon: "image") {
+            state.closePhotoMenu()
+            state.photos.openViewer(item, in: targets)
+        }
+        DmMenuRow(title: "在文件夹中显示", icon: "folder-open") {
+            state.closePhotoMenu()
+            Task { await state.revealInFiles(item) }
+        }
+        .disabled(!single)
+        DmMenuSeparator()
+        DmMenuRow(title: single ? "下载原图" : "下载原图（仅单选）",
+                  icon: "download") {
+            state.closePhotoMenu()
+            Task { await state.savePhotoOriginal(item) }
+        }
+        .disabled(!single)
+        if let albumID {
+            DmMenuRow(title: "移出相册", icon: "images") {
+                state.closePhotoMenu()
+                Task { await state.removePhotos(targets, from: albumID) }
+            }
+        } else {
+            DmMenuRow(title: "添加到相册", icon: "images") {
+                state.showAlbumPickerInPhotoMenu()
+            }
+        }
+        DmMenuSeparator()
+        DmMenuRow(title: PhotoMenu.deleteTitle(targets), icon: "trash") {
+            state.closePhotoMenu()
+            state.openPhotoDialog(.delete(targets))
+        }
+    }
+
+    /// 二级：原地换成相册列表（与歌曲菜单的歌单选择同一做法）。
+    @ViewBuilder
+    private func albumPickerRows(targets: [PhotosAPI.Item]) -> some View {
+        DmMenuRow(title: "新建相册…", icon: "plus") {
+            state.closePhotoMenu()
+            state.openPhotoDialog(.newAlbum)
+        }
+        DmMenuSeparator()
+        ForEach(state.photoShelf.albums) { album in
+            DmMenuRow(title: album.name, icon: "images") {
+                state.closePhotoMenu()
+                Task { await state.addPhotos(targets, to: album.id) }
+            }
+        }
+    }
 }
 
 /// 歌曲右键菜单的摆位。菜单卡宽固定（原型 `.menu` 的 `min-width:160`，这里给
@@ -432,6 +569,57 @@ enum FileMenu {
     }
 }
 
+/// 照片右键菜单的摆位与行数。宽与项高与歌曲 / 文件菜单同档。
+///
+/// 根级：打开 / 在文件夹中显示 / 下载原图 / 添加到相册（相册详情里是「移出相册」）
+/// / 删除，恒 5 行、2 条分隔线；二级面板是「新建相册…」+ 每个相册一行。
+enum PhotoMenu {
+    static let width: CGFloat = 196
+    static let itemHeight: CGFloat = 30
+    private static let inset: CGFloat = 8
+
+    static func rowCount(_ request: AppState.PhotoMenuRequest, albums: Int) -> Int {
+        switch request.target {
+        // 相册卡 / 人物卡与各自详情页头的 ⋯：两条动作（一条分隔线）。
+        case .album, .person: return 2
+        case .items:
+            switch request.phase {
+            case .root: return 5
+            case .albumPicker: return 1 + max(albums, 0)
+            }
+        }
+    }
+
+    static func deleteTitle(_ targets: [PhotosAPI.Item]) -> String {
+        targets.count == 1 ? "删除" : "删除（\(targets.count) 张）"
+    }
+
+    /// 指针位置 → 菜单左上角，越界时收回窗口内。
+    static func spot(_ request: AppState.PhotoMenuRequest, in size: CGSize,
+                     albums: Int) -> CGPoint {
+        let lines = CGFloat(rowCount(request, albums: albums))
+        let isRoot: Bool
+        switch request.target {
+        case .album, .person: isRoot = true
+        case .items: isRoot = request.phase == .root
+        }
+        let separators = CGFloat(isRoot ? (isSingleAction(request) ? 1 : 2) : 1)
+        let height = itemHeight * lines + 9 * separators + inset
+        return CGPoint(
+            x: min(max(inset, request.point.x), max(inset, size.width - width - inset)),
+            y: min(max(inset, request.point.y), max(inset, size.height - height - inset))
+        )
+    }
+
+    /// 两行动作的菜单（相册 / 人物）只有一条分隔线；照片块那张是五行两条。
+    private static func isSingleAction(_ request: AppState.PhotoMenuRequest) -> Bool {
+        switch request.target {
+        case .album, .person: return true
+        case .items: return false
+        }
+    }
+}
+
 /// 新建歌单弹窗：一张名称输入框。重名在 `createPlaylist` 里先拦（本地清单上对），
 /// 这里只拦空名。默认名与文件管理「新建文件夹」同思路 —— 给一个能直接改的名字。
 struct PlaylistDialogCard: View {
@@ -450,7 +638,7 @@ struct PlaylistDialogCard: View {
                 HStack(spacing: DmSpace.s6) {
                     LucideIcon("info", size: DmIcon.i12)
                         .foregroundColor(Color.dmInk3)
-                    Text("重名会拦下，建在个人歌单里。")
+                    Text("同名歌单会被拒绝创建。新歌单建在个人歌单里。")
                         .font(.system(size: DmText.t11))
                         .foregroundColor(Color.dmInk3)
                     Spacer(minLength: 0)
@@ -631,6 +819,9 @@ private struct MainAreaView: View {
                 QueueView(engine: engine)
             } else if state.module == .music {
                 LibraryView()
+            } else if state.module == .photos {
+                // 照片页自带页头（标题 + 张数），不走外面这一条。
+                PhotosView()
             } else if state.module == .files {
                 // 文件管理自带页头（标题 + 面包屑），不走外面这一条。
                 FilesView()
@@ -687,7 +878,7 @@ private struct SettingsPane: View {
                     DmSettingsRow("直连地址",
                                   note: directAddressNote,
                                   noteIsWarning: isDirectAddressInvalid) {
-                        TextField("留空走 QuickConnect", text: $state.directAddress)
+                        TextField("留空则使用 QuickConnect", text: $state.directAddress)
                             .formFieldRow()
                             .frame(width: 240)
                     }
@@ -720,7 +911,7 @@ private struct SettingsPane: View {
                             .foregroundColor(Color.dmInk2)
                     }
                     DmSettingsRow("连接方式") {
-                        Text("DSM Web API 直调")
+                        Text("群晖 DSM 接口直连")
                             .font(.system(size: DmText.t13))
                             .foregroundColor(Color.dmInk2)
                     }
@@ -836,8 +1027,8 @@ private struct SettingsPane: View {
 
     private var directAddressNote: String {
         if isDirectAddressInvalid {
-            return "这个地址认不出，重连会走 QuickConnect。按「主机」或「主机:端口」填，端口用数字。"
+            return "地址格式不对，重连时会改用 QuickConnect。请按“主机”或“主机:端口”填写，端口用数字。"
         }
-        return "局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点「重新连接」生效。"
+        return "局域网或 Tailscale 地址，填了优先于 QuickConnect；改完点“重新连接”生效。"
     }
 }

@@ -199,18 +199,36 @@ struct FileTask: Equatable {
 }
 
 /// 任务 `errors[]` 里的一条。
+///
+/// 🔴 **码不上界面**：它是查文档的钥匙，对用户只是噪音。翻不出具体原因时给一句
+/// 「没有完成，请重试」，让用户知道下一步做什么；原始码只进日志。
 struct FileTaskError: Equatable {
     let code: Int
     let path: String
 
-    /// 码转人话。**只翻实测过的那两个**，其余把码原样带上 —— 码本身是查文档的钥匙，
-    /// 认不出来的就别说成某个具体原因。
+    /// 码转人话。翻不出具体原因时给一句重试提示 —— 映射表与错误信封共用一份
+    /// （`SynologyError.fileTaskMessage`），两处各写一套迟早会漂。
     var text: String {
-        let name = path.isEmpty ? "" : "「\(path.split(separator: "/").last.map(String.init) ?? path)」"
-        switch code {
-        case 408: return "\(name)找不到了，可能已被移走。"
-        case 414: return "\(name)名字重复了。"
-        default: return "\(name)操作失败（code \(code)）。"
+        if let text = SynologyError.fileTaskMessage(code: code, path: path) { return text }
+        let name = path.isEmpty ? "" : "“\(path.split(separator: "/").last.map(String.init) ?? path)”"
+        return "\(name)没有完成，请重试。"
+    }
+}
+
+/// 操作没跑起来 / 没等到结果时的说明。
+///
+/// **不带内部术语**（任务号、接口名、应答结构一律不上界面）：用户要知道的是
+/// 「哪一步没成、接下来做什么」，原始细节只进日志。
+enum FileActionError: LocalizedError {
+    case notStarted(String)
+    case timedOut(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .notStarted(action):
+            return "\(action)没有完成，请重试。"
+        case let .timedOut(action):
+            return "\(action)超时，请稍后重试。"
         }
     }
 }
@@ -282,13 +300,28 @@ enum FileStation {
 
     /// 缩略图（`FileStation.Thumb` v3 `get`）。图片与视频出图，音频与非媒体回 404
     /// —— 取不到不是异常，界面退回图标。
+    ///
+    /// `size=small` 只对**有预生成小图**的文件成立（实测 JPG 一律有）；HEIC / MOV
+    /// 的 small 档直接回 Synology 404 HTML，`medium` / `large` 是现算的、总能出图
+    /// （2026-10-20 探针 `experiments/shuffle-lab/thumbprobe.py`）。所以 small 失败
+    /// 就退 medium 再试一次，两档都失败才向上抛 —— 由调用方负缓存成「无图」。
     static func thumbnail(_ manager: SessionManager, path: String) async throws -> Data {
+        do {
+            return try await thumbRequest(manager, path: path, size: "small")
+        } catch {
+            return try await thumbRequest(manager, path: path, size: "medium")
+        }
+    }
+
+    private static func thumbRequest(
+        _ manager: SessionManager, path: String, size: String
+    ) async throws -> Data {
         try await manager.data(
             kind: .file,
             api: "SYNO.FileStation.Thumb",
             version: 3,
             method: "get",
-            params: ["path": path, "size": "small", "rotate": "0"]
+            params: ["path": path, "size": size, "rotate": "0"]
         )
     }
 
@@ -356,11 +389,11 @@ enum FileStation {
         )
         let data = (raw as? [String: Any]) ?? [:]
         guard let taskid = data["taskid"] as? String else {
-            throw QuickConnectError.badResponse("删除没有回任务号")
+            throw FileActionError.notStarted("删除")
         }
         return try await awaitTask(
             manager, api: "SYNO.FileStation.Delete", version: 2,
-            taskid: taskid, timeout: taskTimeout
+            taskid: taskid, action: "删除", timeout: taskTimeout
         )
     }
 
@@ -400,11 +433,11 @@ enum FileStation {
         )
         let data = (raw as? [String: Any]) ?? [:]
         guard let taskid = data["taskid"] as? String else {
-            throw QuickConnectError.badResponse("复制 / 移动没有回任务号")
+            throw FileActionError.notStarted(move ? "移动" : "复制")
         }
         return try await awaitTask(
             manager, api: "SYNO.FileStation.CopyMove", version: 3,
-            taskid: taskid, timeout: taskTimeout
+            taskid: taskid, action: move ? "移动" : "复制", timeout: taskTimeout
         )
     }
 
@@ -485,7 +518,7 @@ enum FileStation {
         )
         let data = (raw as? [String: Any]) ?? [:]
         guard let taskid = data["taskid"] as? String, !taskid.isEmpty else {
-            throw QuickConnectError.badResponse("搜索没有回任务号")
+            throw FileActionError.notStarted("搜索")
         }
         return taskid
     }
@@ -578,7 +611,7 @@ enum FileStation {
                 let data = (raw as? [String: Any]) ?? [:]
                 taskid = (data["taskid"] as? String) ?? ""
                 guard !taskid.isEmpty else {
-                    lastError = QuickConnectError.badResponse("算目录大小没有回任务号")
+                    lastError = FileActionError.notStarted("计算文件夹大小")
                     continue
                 }
                 return try await awaitDirectorySize(manager, taskid: taskid)
@@ -588,7 +621,7 @@ enum FileStation {
                 if !taskid.isEmpty { await stopDirectorySize(manager, taskid: taskid) }
             }
         }
-        throw lastError ?? QuickConnectError.badResponse("算不出这个文件夹的大小")
+        throw lastError ?? FileActionError.notStarted("计算文件夹大小")
     }
 
     /// 算完了但用户不等了（`DirSize` **有** `stop`，实测回 `success`）。
@@ -626,18 +659,21 @@ enum FileStation {
             }
             try? await Task.sleep(nanoseconds: 400_000_000)
         }
-        throw QuickConnectError.badResponse("算目录大小超时（\(Int(dirSizeTimeout)) 秒）")
+        throw FileActionError.timedOut("计算文件夹大小")
     }
 
     /// 等一个文件任务落地（`status` 轮询）。`CopyMove` / `Delete` / `DirSize` 都是这个形状。
     ///
     /// 超时按失败抛 —— 任务号还在但总不 finished 的场合（网络断了、NAS 忙），
     /// 让界面知道「没等到结果」，别默认成功。
+    ///
+    /// - Parameter action: 出错时给用户看的动作名（「删除」「移动」……），不带内部术语。
     static func awaitTask(
         _ manager: SessionManager,
         api: String,
         version: Int,
         taskid: String,
+        action: String,
         timeout: TimeInterval
     ) async throws -> FileTask {
         let deadline = Date().addingTimeInterval(timeout)
@@ -649,7 +685,7 @@ enum FileStation {
             if task.finished { return task }
             try? await Task.sleep(nanoseconds: 400_000_000)
         }
-        throw QuickConnectError.badResponse("操作超时（\(Int(timeout)) 秒没等到结果）")
+        throw FileActionError.timedOut(action)
     }
 
     /// 文件任务等多久。删除一棵大目录会慢，给足；轮询间隔 0.4 秒。

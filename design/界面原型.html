@@ -414,7 +414,9 @@ input,select{font:inherit;color:inherit}
 
 /* 目录树（文件管理） */
 .tree{width:240px;flex:none;border-right:var(--lw-hairline) solid var(--line);display:flex;flex-direction:column;min-height:0}
-.tree-head{padding:var(--sp-14) var(--sp-16) var(--sp-8);font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
+.tree-head{padding:var(--sp-14) var(--sp-16) var(--sp-8);font-size:var(--fs-11);font-weight:700;letter-spacing:.06em;color:var(--ink-3);display:flex;align-items:baseline;justify-content:space-between}
+/* 分组总数留在标题这一行；状态栏只报当前列表的统计（搜索是跨目录的，那时这个数跟结果无关） */
+.tree-head .cnt{font-weight:400;letter-spacing:0;font-variant-numeric:tabular-nums}
 .tree-body{flex:1;overflow-y:auto;padding:0 var(--sp-8) var(--sp-12);display:flex;flex-direction:column;gap:var(--sp-2)}
 .tree-row{display:flex;align-items:center;gap:var(--sp-8);padding:var(--sp-6) var(--sp-8);border-radius:var(--r-6);font-size:var(--fs-13);color:var(--ink-2);transition:var(--mo-fast)}
 .tree-row:hover{background:var(--panel-2);color:var(--ink)}
@@ -685,12 +687,12 @@ body.anno [data-note]::before{
               <input class="inp on-card" value="wuyifa001" spellcheck="false">
             </div>
             <div class="field">
-              <label>口令</label>
+              <label>密码</label>
               <input class="inp on-card" type="password" value="............">
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat" data-note="两段都要有可见状态：解析端点一次往返、登录一次往返，不做「按下去转圈到出结果」。">
-              <i data-ic="loader" data-sz="14" class="spin"></i>正在解析 QuickConnect 端点…
+              <i data-ic="loader" data-sz="14" class="spin"></i>正在连接 QuickConnect…
             </div>
           </div>
         </div>
@@ -721,12 +723,12 @@ body.anno [data-note]::before{
               <input class="inp on-card" value="wuyifa001" spellcheck="false">
             </div>
             <div class="field">
-              <label>口令</label>
+              <label>密码</label>
               <input class="inp on-card" type="password" value="............">
             </div>
             <button class="btn btn-pri" style="width:100%">连接</button>
             <div class="connect-stat">
-              <i data-ic="loader" data-sz="14" class="spin"></i>正在握手…
+              <i data-ic="loader" data-sz="14" class="spin"></i>正在连接…
             </div>
           </div>
         </div>
@@ -791,7 +793,7 @@ body.anno [data-note]::before{
             <!-- 字段配置下拉（表头最右竖三点，画出来不做交互） -->
             <div class="menu" style="top:151px;right:11px;width:196px">
               <div class="fg-title">显示的字段</div>
-              <div class="mi">标题<span class="cb dis on" title="主键列，不可隐藏"><i data-ic="check" data-sz="10"></i></span></div>
+              <div class="mi">标题<span class="cb dis on" title="标题列固定显示"><i data-ic="check" data-sz="10"></i></span></div>
               <div class="mi">艺术家<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
               <div class="mi">专辑<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
               <div class="mi">流派<span class="cb on"><i data-ic="check" data-sz="10"></i></span></div>
@@ -830,11 +832,11 @@ body.anno [data-note]::before{
             <div class="page-head" style="padding-bottom:var(--sp-8)">
               <div>
                 <div class="page-title">播放队列</div>
-                <div class="page-sub">23 首 · 来自「深夜开车」</div>
+                <div class="page-sub">23 首 · 来自“深夜开车”</div>
               </div>
               <div class="page-acts">
                 <button class="btn btn-sec btn-xs"><i data-ic="shuffle" data-sz="12"></i>随机播放</button>
-                <button class="btn btn-sec btn-xs"><i data-ic="trash-2" data-sz="12"></i>清空</button>
+                <button class="btn btn-sec btn-xs"><i data-ic="trash-2" data-sz="12"></i>清空队列</button>
               </div>
             </div>
             <div class="tbl-wrap">
@@ -934,7 +936,7 @@ body.anno [data-note]::before{
             <div class="imm-title">夜航</div>
             <div class="imm-artist">林间电台</div>
             <div class="imm-meta">潮汐 · 2024 · Ambient · 4:12</div>
-            <div class="imm-next" data-note="无歌词态：曲库带内嵌歌词的只约 0.3%，所以这是常态、不配警告色。说明行只写「未匹配到歌词」，不解释接口与来源。下有牌头 + 可点跳的下一首条目。队列到尾时把牌头换成「队列到此为止」，条目位改成一行占位文案。">
+            <div class="imm-next" data-note="无歌词态：曲库带内嵌歌词的只约 0.3%，所以这是常态、不配警告色。说明行只写“未匹配到歌词”，不解释接口与来源。下有牌头 + 可点跳的下一首条目。队列到尾时牌头换成“队列到此为止”，下面不再摆条目 —— 表头已经把这件事说完，再补一行就是同一句话说两遍。">
               <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>未匹配到歌词</span></div>
               <div class="nx-cap">接下来播放</div>
               <div class="nx-item">
@@ -956,7 +958,7 @@ body.anno [data-note]::before{
       <div class="page">
         <div class="body" style="overflow:hidden">
           <div class="tree" data-note="共享夹是导航第一层（实测 8 个，全部可写；可写性读 perm.acl.write 判定）。可写是常态、不给标志，只在不可写时标（见列表的名称列）。含子目录的行在右侧给箭头：点箭头展开 / 收起一层，点行本身仍是进入该目录，两件事分开。子层过长时只列前几项，其余收进「还有 N 个」一行 —— music 下就有几千个文件夹。拖拽移动：从列表拖文件 / 文件夹到树上任意目录 = 移动，目标行亮主色虚线描边（即图中的「欧美」）。">
-            <div class="tree-head">共享文件夹</div>
+            <div class="tree-head">共享文件夹<span class="cnt">8</span></div>
             <div class="tree-body" id="tree"></div>
           </div>
           <div style="flex:1;min-width:0;display:flex;flex-direction:column">
@@ -966,13 +968,13 @@ body.anno [data-note]::before{
                 <div class="crumb" style="padding:var(--sp-4) 0 0"><span>music</span><i data-ic="chevron-right" data-sz="12"></i><span>华语</span><i data-ic="chevron-right" data-sz="12"></i><b>2024</b></div>
               </div>
             </div>
-            <div class="toolbar" data-note="操作与搜索同排；放不下的操作收进「…」下拉（打开样态见组件板）。不做「复制 / 粘贴 / 剪切」三件套 —— 改「复制到…」「移动到…」两个入口，各自弹目录选择，省掉剪贴板状态（现在粘到哪、粘没粘过，都不用记）。上传是次要按钮。目录大小入口已去掉。支持多选：Cmd 点加选、Shift 点范围选、Cmd+A 全选，操作按选中集合生效。">
+            <div class="toolbar" data-note="操作与搜索同排；放不下的操作从末尾收进「…」下拉（判定按实测宽度逐档试，不写死阈值）。不做「复制 / 粘贴 / 剪切」三件套 —— 改「复制到…」「移动到…」两个入口，各自弹目录选择，省掉剪贴板状态（现在粘到哪、粘没粘过，都不用记）。上传是次要按钮。目录大小入口已去掉。支持多选：Cmd 点加选、Shift 点范围选、Cmd+A 全选，操作按选中集合生效。">
               <button class="btn btn-sec btn-xs"><i data-ic="folder-plus" data-sz="12"></i>新建文件夹</button>
               <button class="btn btn-sec btn-xs"><i data-ic="upload" data-sz="12"></i>上传</button>
               <button class="btn btn-sec btn-xs"><i data-ic="download" data-sz="12"></i>下载</button>
               <button class="btn btn-sec btn-xs"><i data-ic="copy" data-sz="12"></i>复制到…</button>
               <button class="btn btn-sec btn-xs"><i data-ic="folder-input" data-sz="12"></i>移动到…</button>
-              <button class="icon-btn" title="更多操作" style="width:var(--ctl-28);height:var(--ctl-28)"><i data-ic="more-horizontal" data-sz="14" data-fill="1"></i></button>
+              <button class="icon-btn" title="更多操作" style="width:var(--ctl-28);height:var(--ctl-28)"><i data-ic="ellipsis" data-sz="14"></i></button>
               <div class="right">
                 <div class="searchbox" style="width:200px">
                   <i data-ic="search" data-sz="14"></i>
@@ -983,7 +985,7 @@ body.anno [data-note]::before{
             <div class="up-row" data-note="上传必须有进度条与取消：上行只有 0.31 MB/s，传 50 MB 要两分半。这一行常驻在列表上方，不藏在弹窗里。">
               <i data-ic="upload" data-sz="16"></i>
               <div class="m">
-                <b>正在上传 潮汐.flac</b>
+                <b>正在上传潮汐.flac</b>
                 <span>0.31 MB/s · 已传 18.4 MB / 49.2 MB · 剩余约 1 分 40 秒</span>
                 <div class="prog"><i style="width:37%"></i></div>
               </div>
@@ -1006,9 +1008,6 @@ body.anno [data-note]::before{
             </div>
             <div class="statusbar">
               <span>已选中 3 项 · 61.8 MB</span>
-              <div class="right">
-                <span>8 个共享夹</span>
-              </div>
             </div>
           </div>
         </div>
@@ -1051,7 +1050,7 @@ body.anno [data-note]::before{
             <div class="card list" data-note="关机与重启都要二次确认：确认框里列出影响（正在进行的上传会中断、关机后无法远程唤醒）。关机后唯一出路是 NAS 侧的开机计划 —— 这条写在电源卡上，不放在帮助文档里。">
               <div style="padding:var(--sp-14) var(--sp-14) var(--sp-10)">
                 <div class="card-head" style="margin-bottom:var(--sp-6)"><div class="card-title" style="font-size:var(--fs-13)">电源</div></div>
-                <div class="hint">关机后无法远程唤醒：要它自己开机，先设好右边的开机计划。</div>
+                <div class="hint">关机后无法远程唤醒。需要自动开机，请先在右侧设置开机计划。</div>
               </div>
               <div class="srow" style="border-top:var(--lw-hairline) solid var(--line)">
                 <div class="k">立刻关机</div>
@@ -1098,19 +1097,19 @@ body.anno [data-note]::before{
               <div class="v"><input class="inp" value="my-nas" style="width:180px;height:var(--ctl-32);background:var(--panel-3);text-align:right" spellcheck="false"></div>
             </div>
             <div class="srow">
-              <div class="k">直连地址<small>留空走 QuickConnect</small></div>
-              <div class="v"><input class="inp" placeholder="未设置" style="width:180px;height:var(--ctl-32);background:var(--panel-3);text-align:right"></div>
+              <div class="k">直连地址<small>留空则使用 QuickConnect</small></div>
+              <div class="v"><input class="inp" placeholder="尚未设置" style="width:180px;height:var(--ctl-32);background:var(--panel-3);text-align:right"></div>
             </div>
             <div class="srow">
               <div class="k">账号</div>
               <div class="v mono">wuyifa001</div>
             </div>
             <div class="srow">
-              <div class="k">口令<small>存 macOS 钥匙串</small></div>
+              <div class="k">密码<small>存 macOS 钥匙串</small></div>
               <div class="v"><span class="pill ok"><i data-ic="key-round" data-sz="10"></i>已保存</span><button class="btn btn-sec btn-xs">更换</button></div>
             </div>
             <div class="srow">
-              <div class="k">当前端点</div>
+              <div class="k">连接方式</div>
               <div class="v mono" style="font-size:var(--fs-12);color:var(--ink-3)">中继 · 16 ms</div>
             </div>
           </div>
@@ -1151,7 +1150,7 @@ body.anno [data-note]::before{
             </div>
             <div class="srow"><div class="k">版本</div><div class="v mono">0.1.0（开发中）</div></div>
             <div class="srow"><div class="k">许可</div><div class="v">MIT</div></div>
-            <div class="srow"><div class="k">接口结论</div><div class="v"><button class="btn btn-sec btn-xs">在仓库中查看</button></div></div>
+            <div class="srow"><div class="k">接口说明</div><div class="v"><button class="btn btn-sec btn-xs">在仓库中查看</button></div></div>
             <div class="srow" style="cursor:pointer" data-note="整行是一个动作（不是「说明 + 按钮」），与密码管理、投资监控同形；右侧箭头表示会离开本应用、在浏览器里打开。">
               <div class="k" style="display:flex;align-items:center;gap:var(--sp-6);color:var(--accent-2)">
                 <i data-ic="coffee" data-sz="14"></i>请我喝杯咖啡
@@ -1203,7 +1202,7 @@ body.anno [data-note]::before{
         <div class="modal-body">
           <div class="mv-search" data-note="输入即筛选：浏览树切换为平铺结果，每行带相对共享夹的完整路径。数据两路：已加载层级客户端过滤兜底；全库搜走 FileStation.Search（filetype=folder，假空要重试，见硬约束）。回车 = 选中第一个结果。">
             <i data-ic="search" data-sz="14"></i>
-            <input class="inp" id="mvQ" placeholder="搜索目标文件夹名，如「2024」" spellcheck="false">
+            <input class="inp" id="mvQ" placeholder="文件夹名，如 2024" spellcheck="false">
           </div>
           <div class="mv-path" data-note="目标路径随选中实时显示。默认定位到当前所在目录（此处来源是 music › 华语 › 2024）；「最近使用目标」是后续增强，v1 不做。">
             <span>目标</span><b id="mvPath">music › 华语 › 纯音乐</b>
@@ -1261,11 +1260,11 @@ body.anno [data-note]::before{
           </div>
           <div class="opt on" data-note="「替换」的代价要写出来：目标那份直接没了（删除不进回收站，见删除确认）。">
             <span class="radio"></span>
-            <span><span class="t">替换</span><span class="d">用来源覆盖目标，目标那一份不可恢复</span></span>
+            <span><span class="t">替换</span><span class="d">用来源覆盖目标，目标那一份不能撤销</span></span>
           </div>
           <div class="opt" data-note="「保留两者」= 先把目标那项改名（Rename 撞名会回 1200，得自己拼一个不撞的名字），再做移动/复制。">
             <span class="radio"></span>
-            <span><span class="t">保留两者</span><span class="d">目标那份改名为「夜航 2.mp3」，两份都保留</span></span>
+            <span><span class="t">保留两者</span><span class="d">目标那份改名为“夜航 2.mp3”，两份都保留</span></span>
           </div>
           <div class="opt">
             <span class="radio"></span>
@@ -1318,7 +1317,7 @@ body.anno [data-note]::before{
         </div>
       </div>
 
-      <div class="modal hidden" data-dlg="delete" data-note="删除不进回收站（实测），确认文案必须写明不可恢复。多选时列清单，文件夹要标出「含 N 项」，因为删的是整棵子树。">
+      <div class="modal hidden" data-dlg="delete" data-note="删除不进回收站（实测），确认文案必须写明不能撤销。多选时列清单，文件夹要标出「含 N 项」，因为删的是整棵子树。">
         <div class="modal-head">
           <h2>删除 3 个项目？</h2>
           <button class="icon-btn"><i data-ic="x" data-sz="12"></i></button>
@@ -1326,7 +1325,7 @@ body.anno [data-note]::before{
         <div class="modal-body">
           <div class="banner-d" data-note="这一条是硬约束（见产品定义第七节）：删除不进回收站，写不清楚就是一次不可逆的误操作。">
             <i data-ic="triangle-alert" data-sz="14"></i>
-            <span>删除后不进回收站，无法恢复。文件夹里的内容会一并删除。</span>
+            <span>删除后不进回收站，不能撤销。文件夹里的内容会一并删除。</span>
           </div>
           <div class="pick-list">
             <div class="row"><i data-ic="music" data-sz="14"></i>夜航.mp3<span class="sz">12.4 MB</span></div>
@@ -1387,7 +1386,7 @@ body.anno [data-note]::before{
     <div class="b-row"><span class="b-lab">紧凑</span><button class="btn btn-sec btn-xs"><i data-ic="plus" data-sz="12"></i>新建文件夹</button><button class="btn btn-sec btn-xs" disabled>新建文件夹</button></div>
     <div class="b-row"><span class="b-lab">危险</span><button class="btn btn-danger"><i data-ic="power" data-sz="14"></i>关机…</button><button class="btn btn-danger" disabled>关机…</button></div>
     <div class="b-row"><span class="b-lab">图标</span><button class="icon-btn"><i data-ic="refresh-cw" data-sz="12"></i></button><button class="icon-btn" disabled><i data-ic="trash-2" data-sz="12"></i></button></div>
-    <div class="b-note">强调色 sky-500（#00a6f4，v4 原值）：深字方案，950 压 500 = 7.32:1，hover 提到 400 档 9.09:1；白字压 500 仅 2.71:1，不可用。禁用一律「原样整体压暗 0.5」，不换色。</div>
+    <div class="b-note">强调色 sky-500（#00a6f4，v4 原值）：深字方案，950 压 500 = 7.32:1，hover 提到 400 档 9.09:1；白字压 500 仅 2.71:1，不可用。禁用一律“原样整体压暗 0.5”，不换色。</div>
   </div>
 
   <div class="card">
@@ -1411,7 +1410,7 @@ body.anno [data-note]::before{
       <div class="nav-row on" style="border-radius:var(--r-8)">选中 · sky-700 实心底 + 白字（5.86:1）</div>
       <div class="nav-row on" style="border-radius:var(--r-8)">正在播放 · 同选中底色，另加均衡器 <span class="eq" style="margin-left:var(--sp-6)"><i></i><i></i><i></i></span></div>
     </div>
-    <div class="b-note">三条轨道按选中块面积分（design-system.md 第八节）。大面积 —— 只有侧栏行 —— 走白字：底取本族能压住白字的最浅档 sky-700（白字 5.86:1），窗口失焦时底掉到 accent-soft、字保持白（13.89:1）。浅底 —— 列表行（表行、目录树行、弹窗结果行）：accent-soft 底 + accent-2 字，不做失焦降级，因为这底本身就是深字端的降级档、没有再退一档的余地；侧栏总共三四行、选中行表达「你在哪个模块」，列表行一屏几十上百行、多选还会成片连成色带，两条分开走。小块 —— 分段段、主按钮、开关、计数徽章：底 accent-fill、字 on-accent，悬停提到 accent-fill-2。选中与正在播放共用一种底色，靠均衡器区分。</div>
+    <div class="b-note">三条轨道按选中块面积分（design-system.md 第八节）。大面积 —— 只有侧栏行 —— 走白字：底取本族能压住白字的最浅档 sky-700（白字 5.86:1），窗口失焦时底掉到 accent-soft、字保持白（13.89:1）。浅底 —— 列表行（表行、目录树行、弹窗结果行）：accent-soft 底 + accent-2 字，不做失焦降级，因为这底本身就是深字端的降级档、没有再退一档的余地；侧栏总共三四行、选中行表达“你在哪个模块”，列表行一屏几十上百行、多选还会成片连成色带，两条分开走。小块 —— 分段段、主按钮、开关、计数徽章：底 accent-fill、字 on-accent，悬停提到 accent-fill-2。选中与正在播放共用一种底色，靠均衡器区分。</div>
   </div>
 
   <div class="card">
@@ -1445,7 +1444,7 @@ body.anno [data-note]::before{
       <div class="p-line hover-demo" style="position:relative;top:0;height:8px"><i style="width:36%;background:var(--accent-2)"></i><em style="left:36%;opacity:1"></em><span class="tip" style="left:36%;opacity:1">1:32 / 4:12</span></div>
       <div class="b-lab" style="margin-top:var(--sp-14)">悬停 8px + 拇指 + 气泡</div>
     </div>
-    <div class="b-note">进度条贴播放条上沿、撑满整窗宽（网易云布局）。悬停即拉高便于点击，气泡显示「当前时点 / 总时长」，不用按住。</div>
+    <div class="b-note">进度条贴播放条上沿、撑满整窗宽（网易云布局）。悬停即拉高便于点击，气泡显示“当前时点 / 总时长”，不用按住。</div>
   </div>
 
   <div class="card">
@@ -1477,10 +1476,10 @@ body.anno [data-note]::before{
           <div class="mi"><i data-ic="pencil" data-sz="12"></i>改名</div>
           <div class="mi danger"><i data-ic="trash-2" data-sz="12"></i>删除</div>
         </div>
-        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">工具条「…」</div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">工具条“…”</div>
       </div>
     </div>
-    <div class="b-note">菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。文件操作不做复制 / 粘贴 / 剪切三件套：「复制到…」「移动到…」各弹一次目录选择，省掉剪贴板状态。</div>
+    <div class="b-note">菜单底 panel-2、发丝描边、圆角 8、阴影 card，危险项悬停转 danger-soft。文件操作不做复制 / 粘贴 / 剪切三件套：“复制到…”“移动到…”各弹一次目录选择，省掉剪贴板状态。</div>
   </div>
 
   <div class="card">
@@ -1500,10 +1499,10 @@ body.anno [data-note]::before{
           <div class="msep"></div>
           <div class="mi"><i data-ic="rotate-ccw" data-sz="12"></i>恢复默认字段</div>
         </div>
-        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">「曲序」未勾选 = 该列隐藏</div>
+        <div class="b-lab" style="margin-top:var(--sp-8);width:auto">“曲序”未勾选 = 该列隐藏</div>
       </div>
       <div style="max-width:280px">
-        <div class="b-note" style="margin:0">勾选即显示，改完立即生效，不用「确定」。标题是主键、不可隐藏 —— 用勾选 + 禁用的多选框表达（`.cb.dis.on`）。列序不在这里改：表头直接拖动（见「表头：排序与拖动改列序」卡）。字段显示、列序、列宽三样一起按用户偏好持久化。<br>配置项贴右、与设置页的状态控件同侧；一张表一个配置，曲库 / 队列 / 已筛选 / 文件管理各自记各自的。</div>
+        <div class="b-note" style="margin:0">勾选即显示，改完立即生效，不用“确定”。标题是主键、不可隐藏 —— 用勾选 + 禁用的多选框表达（`.cb.dis.on`）。列序不在这里改：表头直接拖动（见“表头：排序与拖动改列序”卡）。字段显示、列序、列宽三样一起按用户偏好持久化。<br>配置项贴右、与设置页的状态控件同侧；一张表一个配置，曲库 / 队列 / 已筛选 / 文件管理各自记各自的。</div>
       </div>
     </div>
   </div>
@@ -1522,15 +1521,15 @@ body.anno [data-note]::before{
       <span class="tag">Folk</span>
       <span class="tag">Jazz</span>
     </div>
-    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；「还没开始」走中性档。流派标签无彩色 —— 一格常放两个以上，带色会花；用英文原名，多值按「; 」拆成多个胶囊。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。<br>目录读写不用徽章表达：可写是常态、不给标志，只在不可写时于名称右侧给一个灰 pencil（见文件管理页的「备份」）。</div>
+    <div class="b-note">徽章：底统一 panel-2 + 发丝描边，颜色只进文字与图标；“还没开始”走中性档。流派标签无彩色 —— 一格常放两个以上，带色会花；用英文原名，多值按“; ”拆成多个胶囊。主色 sky 与 warn（amber）分族，上一稿的同族碰撞已解除。<br>目录读写不用徽章表达：可写是常态、不给标志，只在不可写时于名称右侧给一个灰 pencil（见文件管理页的“备份”）。</div>
   </div>
 
   <div class="card">
     <div class="card-title">提示条（两档）</div>
-    <div class="banner" style="border-radius:var(--r-6)"><i data-ic="triangle-alert" data-sz="16"></i><div><div class="t">当前目录不可写，上传与改名已停用</div></div></div>
+    <div class="banner" style="border-radius:var(--r-6)"><i data-ic="triangle-alert" data-sz="16"></i><div><div class="t">这个目录没有写入权限，新建、上传、重命名与删除都不可用</div></div></div>
     <div class="banner-card bad" style="margin:var(--sp-12) 0 0">
       <i data-ic="triangle-alert" data-sz="16"></i>
-      <div><div class="t">上传中断</div><div class="d">连接被重置，已传的 18.4 MB 不会保留。<code>Upload</code> 没有断点续传。</div></div>
+      <div><div class="t">上传中断</div><div class="d">连接被重置，已传的 18.4 MB 不会保留，请重新上传。</div></div>
     </div>
     <div class="b-note">通栏横幅贴容器左右边、直角，用于与当前页强相关的常驻提示；卡片式四周留边，用于与内容并列的块级提示。废话提示一律不上 —— 提示条只在有可操作后果时出现。</div>
   </div>
@@ -1539,7 +1538,7 @@ body.anno [data-note]::before{
     <div class="card-title">Toast（底部居中）</div>
     <div class="toast-wrap">
       <span class="toast"><i data-ic="circle-check" data-sz="16"></i>标签已写回 NAS</span>
-      <span class="toast"><i data-ic="circle-x" data-sz="16"></i>改名失败：目标已存在</span>
+      <span class="toast"><i data-ic="circle-x" data-sz="16"></i>改名失败：目标已存在，请换一个名称</span>
       <span class="toast"><i data-ic="info" data-sz="16"></i>已复制 3 个文件</span>
     </div>
     <div class="b-note">三态由图标形状承载，图标与字同取 toast-ink —— 族色压这块浅实色底只有 2.0–2.9:1，不够承载图形。默认 2 秒；窗口内实测位置抬到播放条之上 16px（已确认）。</div>
@@ -1551,7 +1550,7 @@ body.anno [data-note]::before{
       <div class="empty-lg">
         <i data-ic="music" data-sz="44"></i>
         <b>这个歌单还是空的</b>
-        <span>从曲库里右键「添加到歌单」</span>
+        <span>从曲库里右键“添加到歌单”</span>
       </div>
     </div>
     <div class="empty">搜索没有匹配的曲目 · 换个关键词或改用筛选</div>
@@ -1566,7 +1565,7 @@ body.anno [data-note]::before{
       <span class="on">仪表盘的光落在手上</span>
       <span>电台里放着老歌</span>
     </div>
-    <div class="b-lab" style="width:auto;margin-top:var(--sp-16)">没有歌词 —— 换成「接下来播放」</div>
+    <div class="b-lab" style="width:auto;margin-top:var(--sp-16)">没有歌词 —— 换成“接下来播放”</div>
     <div class="imm-next" style="margin-top:var(--sp-8);height:auto">
       <div class="nx-why"><i data-ic="info" data-sz="12"></i><span>未匹配到歌词</span></div>
       <div class="nx-cap">接下来播放</div>
@@ -1579,23 +1578,22 @@ body.anno [data-note]::before{
         <div class="nx-dur">4:02</div>
       </div>
     </div>
-    <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以「没有歌词」是常态，不配警告色。说明行只写「未匹配到歌词」。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成「队列到此为止」。</div>
-    <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以「没有歌词」是常态，不配警告色。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成「队列到此为止」。</div>
+    <div class="b-note">歌词区不留白板、也不走通用空态：有歌词渲染歌词本身，没有就把下一首摆出来（可点跳）。曲库带内嵌歌词的只约 0.3%，所以“没有歌词”是常态，不配警告色。说明行只写“未匹配到歌词”。这块走自然高度，有歌词那态才是 250px —— 两态各自居中，不互相迁就。队列到尾时牌头换成“队列到此为止”，下面不再摆条目。</div>
   </div>
 
   <div class="card">
     <div class="card-title">进度 · 重试</div>
     <div class="up-row" style="margin:0 0 var(--sp-12)">
       <i data-ic="upload" data-sz="16"></i>
-      <div class="m"><b>正在上传 潮汐.flac</b><span>0.31 MB/s · 已传 18.4 MB / 49.2 MB · 剩余约 1 分 40 秒</span><div class="prog"><i style="width:37%"></i></div></div>
+      <div class="m"><b>正在上传潮汐.flac</b><span>0.31 MB/s · 已传 18.4 MB / 49.2 MB · 剩余约 1 分 40 秒</span><div class="prog"><i style="width:37%"></i></div></div>
       <button class="btn btn-sec btn-xs">取消</button>
     </div>
     <div class="up-row" style="margin:0;background:transparent;border:var(--lw-hairline) solid var(--line)">
       <i data-ic="loader" data-sz="16" class="spin"></i>
-      <div class="m"><b>正在搜索…</b><span>服务端第一次返回空结果，正在重试（第 2 次 / 上限 8 次）</span></div>
+      <div class="m"><b>正在搜索…</b><span>正在重新搜索…（第 2 次，最多 8 次）</span></div>
       <button class="btn btn-sec btn-xs">停止</button>
     </div>
-    <div class="b-note">搜索的「重试中」是一等状态，不是错误 —— 服务端会随机返回假空（应答里连 total 都没有），重试平均 3 次、4 秒。</div>
+    <div class="b-note">搜索的“重试中”是一等状态，不是错误 —— 服务端会随机返回假空（应答里连 total 都没有），重试平均 3 次、4 秒。</div>
   </div>
 
   <div class="card">
@@ -1649,7 +1647,7 @@ body.anno [data-note]::before{
       <div class="stat" style="background:var(--panel-2)"><div class="k"><i data-ic="thermometer" data-sz="12"></i>温度</div><div class="v">42<small>°C</small></div><div class="f">正常</div></div>
       <div class="stat" style="background:var(--panel-2)"><div class="k"><i data-ic="activity" data-sz="12"></i>CPU</div><div class="v">12<small>%</small></div><div class="f">4 核</div></div>
     </div>
-    <div class="b-note">牌卡嵌在深一层底上时长宽自适应、两列铺开；数字用 20 档，标签与脚注取 11 档。并排两张卡片由 grid 拉到等高（向高的那张看齐），卡内长列表自己滚、操作脚注贴卡底 —— 系统状态页的「电源 / 开关机计划」就是这么对齐的。</div>
+    <div class="b-note">牌卡嵌在深一层底上时长宽自适应、两列铺开；数字用 20 档，标签与脚注取 11 档。并排两张卡片由 grid 拉到等高（向高的那张看齐），卡内长列表自己滚、操作脚注贴卡底 —— 系统状态页的“电源 / 开关机计划”就是这么对齐的。</div>
   </div>
 </section>
 
@@ -1972,6 +1970,7 @@ function renderLegend(mode, name){
 }
 
 setScreen('music');
+if(location.hash){ const h=location.hash.slice(1); if(document.querySelector(`[data-screen="${h}"]`)) setScreen(h); }
 </script>
 </body>
 </html>
