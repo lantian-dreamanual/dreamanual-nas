@@ -103,6 +103,20 @@ final class PhotoLibrary {
         positionCache = nil
     }
 
+    /// 就地改一条条目（描述 / 评分写回后的本地校正）。天分组与查看器序列
+    /// 同步改；各维度页拿的快照（搜索结果等）不追 —— 下次进维度自然重建。
+    func updateItem(id: Int, mutate: (inout PhotosAPI.Item) -> Void) {
+        for key in items.keys {
+            guard var list = items[key],
+                  let index = list.firstIndex(where: { $0.id == id }) else { continue }
+            mutate(&list[index])
+            items[key] = list
+        }
+        if let index = viewSequence.firstIndex(where: { $0.id == id }) {
+            mutate(&viewSequence[index])
+        }
+    }
+
     // MARK: - 全量载入与分组
 
     func loadIfNeeded(_ manager: SessionManager?) async {

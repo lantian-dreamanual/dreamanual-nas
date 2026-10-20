@@ -217,6 +217,45 @@ enum PhotoWriter {
         return !albums.contains { $0.id == albumID }
     }
 
+    // MARK: - 条目写回（2026-10-21 实测，`photosprobe26/27.py`）
+
+    /// 写描述。成功回落库的文本（trim 后），失败回 `nil`。
+    ///
+    /// 清空传 JSON 编码的空串（服务端无视裸空串，见 `PhotosAPI.setItem`）；
+    /// 回读交给调用方（`AppState` 拿返回值就地改，不另起一次网络）—— 写入
+    /// 本身在这条通道上已被探针回读验证过。
+    static func setDescription(_ itemID: Int, to text: String,
+                               manager: SessionManager) async -> String? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = value.isEmpty ? "\"\"" : value
+        do {
+            try await PhotosAPI.setItem(id: itemID, update: ["description": payload],
+                                        manager: manager)
+        } catch {
+            NSLog("[photos] 写描述失败：%@", Self.describe(error))
+            return nil
+        }
+        return value
+    }
+
+    /// 写评分。回回读到的值（`set` 对假 id 也回 success，这条通道的判据
+    /// 与删除同一套：不拿回执当真）。回读失败时退回写入值 —— 通道已被
+    /// 探针验证，比报错打断用户合理。
+    static func setRating(_ itemID: Int, to rating: Int,
+                          manager: SessionManager) async -> Int? {
+        do {
+            try await PhotosAPI.setItem(id: itemID, update: ["rating": String(rating)],
+                                        manager: manager)
+        } catch {
+            NSLog("[photos] 写评分失败：%@", Self.describe(error))
+            return nil
+        }
+        if let item = try? await PhotosAPI.getItem(id: itemID, manager: manager) {
+            return item.rating
+        }
+        return rating
+    }
+
     // MARK: - 人物
 
     /// 人物命名 / 改名。写完回读列表确认新名字落库了。

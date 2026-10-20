@@ -971,6 +971,29 @@ final class AppState {
         }
     }
 
+    /// 写查看器当前这张的描述。成功就地改（信息栏立即反映），失败只出提示。
+    func setPhotoDescription(_ text: String) async {
+        guard let manager = sessionManager, let item = photos.viewingItem else { return }
+        guard let saved = await PhotoWriter.setDescription(item.id, to: text,
+                                                           manager: manager) else {
+            showToast("描述没有保存上，请重试", .err)
+            return
+        }
+        photos.updateItem(id: item.id) { $0.note = saved.isEmpty ? nil : saved }
+        showToast("描述已保存", .ok)
+    }
+
+    /// 写查看器当前这张的评分。回读值就地改，读回来几颗就是几颗。
+    func setPhotoRating(_ rating: Int) async {
+        guard let manager = sessionManager, let item = photos.viewingItem else { return }
+        guard let verified = await PhotoWriter.setRating(item.id, to: rating,
+                                                         manager: manager) else {
+            showToast("评分没有保存上，请重试", .err)
+            return
+        }
+        photos.updateItem(id: item.id) { $0.rating = verified }
+    }
+
     /// 加到相册。加完把相册计数补上（相册卡与详情页头都用 `item_count` 报数）。
     func addPhotos(_ items: [PhotosAPI.Item], to albumID: Int) async {
         guard let manager = sessionManager, !items.isEmpty else { return }

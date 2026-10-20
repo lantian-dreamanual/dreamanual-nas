@@ -28,6 +28,9 @@ struct PhotoViewerView: View {
     @State private var isStepping = false
     /// `←` `→` 用本机事件监听：覆盖层里没有文本输入，全局拦这两个键不会误伤。
     @State private var keyMonitor: Any?
+    /// 描述行内编辑态（规划第四节 8：悬停出铅笔、点开变行内表单）。
+    @State private var isEditingDescription = false
+    @State private var descriptionDraft = ""
 
     // 视频
     @State private var player: AVPlayer?
@@ -517,16 +520,15 @@ struct PhotoViewerView: View {
                     }
 
                     section("内容") {
-                        if item.rating > 0 {
-                            row("评分") {
-                                RatingStars(rating: item.rating)
-                            }
-                        } else {
-                            row("评分", "未评分")
+                        row("评分") {
+                            // 信息栏里常驻可点（与曲库行悬停才亮不同：这里
+                            // 一屏只有这一行评分，不需要「先悬停再点」）。
+                            RatingStars(rating: item.rating, revealsEmpty: true,
+                                        onRate: { value in
+                                            Task { await state.setPhotoRating(value) }
+                                        })
                         }
-                        if let note = item.note {
-                            row("描述", note)
-                        }
+                        descriptionRow(item)
                     }
                 }
             }
@@ -551,9 +553,39 @@ struct PhotoViewerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// 描述行：悬停出铅笔，点开变行内表单。保存走 `state.setPhotoDescription`，
+    /// 成功就地改 `item.note`（写回通道 2026-10-21 实测定案：id 方括号串）。
+    @ViewBuilder
+    private func descriptionRow(_ item: PhotosAPI.Item) -> some View {
+        if isEditingDescription {
+            VStack(alignment: .leading, spacing: DmSpace.s6) {
+                TextField("给这张写点什么", text: $descriptionDraft, axis: .vertical)
+                    .formField(on: .panel)
+                    .lineLimit(2...4)
+                HStack(spacing: DmSpace.s6) {
+                    Spacer(minLength: 0)
+                    Button("取消") { isEditingDescription = false }
+                        .buttonStyle(SecondaryButtonStyle())
+                    Button("保存") {
+                        isEditingDescription = false
+                        let draft = descriptionDraft
+                        Task { await state.setPhotoDescription(draft) }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+            }
+        } else {
+            row("描述") {
+                DescriptionValueRow(note: item.note) {
+                    descriptionDraft = item.note ?? ""
+                    isEditingDescription = true
+                }
+            }
+        }
+    }
+
     /// 标签定宽 44：六件相机字段的字头都是两个字，值对齐成一条线才扫得下去。
-    private func row(_ label: String, _ value: String) -> some View {
-        row(label) {
+    private func row(_ label: String, _ value: String) -> some View {        row(label) {
             Text(value)
                 .font(.system(size: DmText.t12))
                 .foregroundColor(Color.dmInk2)
@@ -678,4 +710,29 @@ private struct VideoSurface: NSViewRepresentable {
             CATransaction.commit()
         }
     }
+}
+
+/// 描述的值行：有字显字、没字显灰占位；悬停浮出铅笔。
+private struct DescriptionValueRow: View {
+    let note: String?
+    let onEdit: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: DmSpace.s6) {
+            Text(hasText ? (note ?? "") : "写点什么…")
+                .font(.system(size: DmText.t12))
+                .foregroundColor(hasText ? Color.dmInk2 : Color.dmInk3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if isHovered {
+                IconButton(iconName: "pencil", label: "编辑描述") { onEdit() }
+            }
+        }
+        .contentShape(Rectangle())
+        .trackingHover($isHovered)
+    }
+
+    private var hasText: Bool { !(note ?? "").isEmpty }
 }

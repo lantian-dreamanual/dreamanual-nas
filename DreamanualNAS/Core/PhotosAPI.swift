@@ -72,10 +72,10 @@ enum PhotosAPI {
         let height: Int
         /// `additional.exif` 六件，服务端随条目下发（不另查 EXIF 接口）。
         let exif: Exif
-        /// 0–5，0 就是没评过。
-        let rating: Int
-        /// 用户写的描述，空串按没有处理。
-        let note: String?
+        /// 0–5，0 就是没评过。`var`：写回成功后就地改。
+        var rating: Int
+        /// 用户写的描述，空串按没有处理。`var`：写回成功后就地改。
+        var note: String?
 
         var isVideo: Bool { type == "video" }
         /// 像素尺寸文案：`3024 × 4032`，缺一维就不显示。
@@ -438,6 +438,39 @@ enum PhotosAPI {
         _ = try await manager.call(
             kind: .file, api: "\(team).Browse.Item", version: 7, method: "delete",
             params: ["id": "[\(id)]"])
+    }
+
+    // MARK: - 条目写回（2026-10-21 实测，`photosprobe25/26/27.py`）
+
+    /// 写条目字段（`rating` / `description`）。
+    ///
+    /// 🔴 **`id` 必须方括号串**（`"[15705]"`）—— 与 `delete` / `Person.merge` 的
+    /// `merged_id` / `Download.unit_id` 同一套约定。**裸数字回 `ok` + `error_list`
+    /// 空，但什么都不写**（10-21 实测：rating 裸 id 回读仍 0、description 三种
+    /// 形态回读全空；方括号形态回读 4 / 写入原文）。10-18「`set` 只认 time 与
+    /// rating」的结论是裸 id 静默空转造成的误判 —— `description` 方括号形态
+    /// 写得进，101 只出现在 `tag` 一族。
+    /// - `description` 传裸串写入；**清空传 JSON 编码的空串**（两个引号字符），
+    ///   裸空串被服务端无视（10-21 实测）。
+    /// - `set` 对不存在的 id 也回 success，**写完必回读**（`getItem`）。
+    static func setItem(id: Int, update: [String: String],
+                        manager: SessionManager) async throws {
+        var params = update
+        params["id"] = "[\(id)]"
+        _ = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "set",
+            params: params)
+    }
+
+    /// 单条读（`get`，`id` 同样方括号串）。回读校验用，别为读一条翻全库。
+    static func getItem(id: Int, manager: SessionManager) async throws -> Item? {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "get",
+            params: ["id": "[\(id)]", "additional": itemAdditional])
+        guard let root = raw as? [String: Any],
+              let list = root["list"] as? [[String: Any]],
+              let first = list.first else { return nil }
+        return Item(json: first)
     }
 
     /// 新建相册。**`Album` 族没有 `create`** —— 它在 `Browse.NormalAlbum` 上
