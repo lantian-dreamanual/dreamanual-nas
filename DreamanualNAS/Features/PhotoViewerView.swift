@@ -30,7 +30,10 @@ struct PhotoViewerView: View {
     @State private var keyMonitor: Any?
     /// 描述行内编辑态（规划第四节 8：悬停出铅笔、点开变行内表单）。
     @State private var isEditingDescription = false
+    /// 编辑中的草稿。进编辑态时从 `item.note` 复制，取消即弃。
     @State private var descriptionDraft = ""
+    /// 编辑框焦点：进编辑态即聚焦，回车直接提交。
+    @FocusState private var isDescriptionFieldFocused: Bool
 
     // 视频
     @State private var player: AVPlayer?
@@ -71,6 +74,7 @@ struct PhotoViewerView: View {
         // 边界上、阴影被裁掉看不见，只有滑入动画的一瞬可见 —— 沉浸屏同样没画，
         // 与它保持一致（真机上滑入过程也没有可感知的缺失）。
         .task(id: item?.id) {
+            exitEditingIfNeeded(item?.id ?? 0)
             await load()
             // 冒烟通路（`DM_UI=photovideo`）：查看器一开就播，省掉「点一下海报」
             // 这一步。真机照常从海报开始。
@@ -555,33 +559,43 @@ struct PhotoViewerView: View {
 
     /// 描述行：悬停出铅笔，点开变行内表单。保存走 `state.setPhotoDescription`，
     /// 成功就地改 `item.note`（写回通道 2026-10-21 实测定案：id 方括号串）。
+    ///
+    /// 编辑态**不替换整行** —— 标签「描述」留在原位，只有值列变成输入框：
+    /// 表单从值列起头，跟上面的字段栅格对齐（整行替换的话表单贴面板左缘，
+    /// 与标签列断开，2026-10-21 用户截图指出）。输入框用行内嵌档
+    /// `formFieldRow()`（32 / `panel-3`，与设置页「直连地址」同一档），
+    /// 不用弹窗档的 38 高。
     @ViewBuilder
     private func descriptionRow(_ item: PhotosAPI.Item) -> some View {
-        if isEditingDescription {
-            VStack(alignment: .leading, spacing: DmSpace.s6) {
-                TextField("给这张写点什么", text: $descriptionDraft, axis: .vertical)
-                    .formField(on: .panel)
-                    .lineLimit(2...4)
-                HStack(spacing: DmSpace.s6) {
-                    Spacer(minLength: 0)
-                    Button("取消") { isEditingDescription = false }
-                        .buttonStyle(SecondaryButtonStyle())
-                    Button("保存") {
-                        isEditingDescription = false
-                        let draft = descriptionDraft
-                        Task { await state.setPhotoDescription(draft) }
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-            }
-        } else {
-            row("描述") {
+        row("描述") {
+            if isEditingDescription {
+                TextField("给这张写点什么", text: $descriptionDraft)
+                    .focused($isDescriptionFieldFocused)
+                    .formFieldRow()
+                    .onSubmit { commitDescription() }
+            } else {
                 DescriptionValueRow(note: item.note) {
                     descriptionDraft = item.note ?? ""
                     isEditingDescription = true
+                    isDescriptionFieldFocused = true
                 }
             }
         }
+    }
+
+    /// 提交描述：空串按「清空」处理（写回通道：JSON 编码空串）。
+    private func commitDescription() {
+        isEditingDescription = false
+        isDescriptionFieldFocused = false
+        let draft = descriptionDraft
+        Task { await state.setPhotoDescription(draft) }
+    }
+
+    /// 编辑中切了照片：退出编辑、弃草稿（不替用户把半句话写到另一张上）。
+    private func exitEditingIfNeeded(_ newID: Int) {
+        guard isEditingDescription else { return }
+        isEditingDescription = false
+        isDescriptionFieldFocused = false
     }
 
     /// 标签定宽 44：六件相机字段的字头都是两个字，值对齐成一条线才扫得下去。
@@ -641,6 +655,15 @@ struct PhotoViewerView: View {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 描述编辑中：Esc 只取消编辑（其余键还给输入框 —— 方向键移光标、
+            // 回车交给 onSubmit），不然按 Esc 会把整个查看器关掉。
+            if isEditingDescription {
+                if event.keyCode == 53 {
+                    isEditingDescription = false
+                    return nil
+                }
+                return event
+            }
             switch event.keyCode {
             case 123:  // ←
                 Task { await step(-1) }
@@ -713,6 +736,10 @@ private struct VideoSurface: NSViewRepresentable {
 }
 
 /// 描述的值行：有字显字、没字显灰占位；悬停浮出铅笔。
+///
+/// 铅笔挂**浮层**（overlay）而非进排版流：它 28 高，进了 HStack 会把行从
+/// 文字高撑到控件高，基线跟着挪 —— 悬停瞬间整段内容跳一下（2026-10-21
+/// 用户截图指出「悬浮时行错位」）。浮层不占布局，行高恒等于文字高。
 private struct DescriptionValueRow: View {
     let note: String?
     let onEdit: () -> Void
@@ -720,18 +747,18 @@ private struct DescriptionValueRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: DmSpace.s6) {
-            Text(hasText ? (note ?? "") : "写点什么…")
-                .font(.system(size: DmText.t12))
-                .foregroundColor(hasText ? Color.dmInk2 : Color.dmInk3)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            if isHovered {
-                IconButton(iconName: "pencil", label: "编辑描述") { onEdit() }
+        Text(hasText ? (note ?? "") : "写点什么…")
+            .font(.system(size: DmText.t12))
+            .foregroundColor(hasText ? Color.dmInk2 : Color.dmInk3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                if isHovered {
+                    IconButton(iconName: "pencil", label: "编辑描述") { onEdit() }
+                }
             }
-        }
-        .contentShape(Rectangle())
-        .trackingHover($isHovered)
+            .contentShape(Rectangle())
+            .trackingHover($isHovered)
     }
 
     private var hasText: Bool { !(note ?? "").isEmpty }
