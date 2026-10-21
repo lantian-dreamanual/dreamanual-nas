@@ -1313,8 +1313,9 @@ private struct PersonCard: View {
         .task(id: person.id) {
             guard image == nil else { return }
             guard let data = await library.personFaceImage(key: "p:\(person.id)",
-                                                           unitID: person.coverUnitID,
-                                                           cacheKey: person.coverKey,
+                                                           personID: person.id,
+                                                           coverUnitID: person.coverUnitID,
+                                                           coverKey: person.coverKey,
                                                            manager: manager) else { return }
             image = NSImage(data: data)
         }

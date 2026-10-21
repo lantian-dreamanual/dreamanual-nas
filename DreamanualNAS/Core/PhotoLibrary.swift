@@ -505,21 +505,27 @@ final class PhotoLibrary {
         }
     }
 
-    /// 人物卡头像：**先取人脸裁切（`type=face`），落空回退整图**。
+    /// 人物卡头像：**先取本人脸的裁切（`type=face` + `id=face_id`），落空回退整图**。
     ///
-    /// face 档对部分人物的 cover 回 404（服务端没有现成脸图），那种就沿用
-    /// 整张照片缩略图；成败都只发两发请求以内，缓存键与整图共用一个。
-    func personFaceImage(key: String, unitID: Int, cacheKey: String,
-                         manager: SessionManager?) async -> Data? {
+    /// 🔴 脸裁切的 `id` 必须用 face_id（`photosprobe62/63` 定案）：早年用 cover 的
+    /// unit_id，服务端裁的是那张 unit 里的某张脸 —— cover 是合影就把别人的脸栽到
+    /// 卡上（用户实测「脸和人名对不上」）。定位：人物名下照片逐张找本人脸
+    /// （`personFaceLocator`），找不到（未确认人物 / cover 没标脸）回退整张
+    /// cover 缩略图。缓存键与整图共用一个。
+    func personFaceImage(key: String, personID: Int, coverUnitID: Int,
+                         coverKey: String, manager: SessionManager?) async -> Data? {
         if let cached = auxThumbs[key] { return cached }
-        guard let manager, unitID > 0, !cacheKey.isEmpty else { return nil }
-        if let face = try? await PhotosAPI.faceThumbnail(unitID: unitID, cacheKey: cacheKey,
+        guard let manager, personID > 0 else { return nil }
+        if let located = try? await PhotosAPI.personFaceLocator(personID: personID,
+                                                                manager: manager),
+           let face = try? await PhotosAPI.faceThumbnail(faceID: located.faceID,
+                                                         cacheKey: located.unitCacheKey,
                                                          manager: manager),
            face.starts(with: [0xFF, 0xD8]) {
             auxThumbs[key] = face
             return face
         }
-        return await coverImage(key: key, unitID: unitID, cacheKey: cacheKey,
+        return await coverImage(key: key, unitID: coverUnitID, cacheKey: coverKey,
                                 manager: manager)
     }
 

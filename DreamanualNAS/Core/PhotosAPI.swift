@@ -397,24 +397,51 @@ enum PhotosAPI {
 
     /// 人物卡的人脸裁切：同一条 `Thumbnail`，**`type=face`**。
     ///
-    /// 2026-10-21 实测定案（`photosprobe32/33.py`）：同一组 `unit_id` +
-    /// `cache_key`（`Person.list` 的 `additional.thumbnail` 那两件），`type`
-    /// 换 `face` 就回**正方形人脸裁切** —— 群晖 Photos 人物列表用的正是它。
-    /// 🔴 `size` 对 face 档**无效**（固定按源图出，79–231px 不等）；部分人物
-    /// 的 cover 没有现成脸图（HTTP 404），调用方回退 `type=unit` 整图。
-    /// （`type=person` 只在个别人身上有回图，其余 404，不用；`type=cover`
-    /// 不存在。）
-    static func faceThumbnail(unitID: Int, cacheKey: String,
+    /// 🔴 `id` 必须是 **face_id**，`cache_key` 用**这枚脸所在 unit 的 cache_key**
+    /// （2026-10-21 `photosprobe62/63` 二次定案）。`id` 传 unit_id 时服务端裁的是
+    /// 那张 unit 里检测到的某张脸、不管人物身份 —— cover 是合影就把别人的脸
+    /// 栽到卡上（蓝菊芳 / 葛宜云两位拿到过同一文件）；`id=face_id` 才是「裁这枚
+    /// 脸」。face_id 从 `personFaceLocator` 拿。
+    /// 🔴 `size` 对 face 档**无效**（固定按源图出）；部分脸没有现成缩略图
+    /// （HTTP 404），调用方回退 `type=unit` 整图。
+    static func faceThumbnail(faceID: Int, cacheKey: String,
                               manager: SessionManager) async throws -> Data {
         try await manager.data(
             kind: .file, api: "\(team).Thumbnail", version: 2, method: "get",
             params: [
-                "id": String(unitID),
+                "id": String(faceID),
                 "cache_key": cacheKey,
                 "type": "face",
                 "size": ThumbSize.sm.rawValue,
             ]
         )
+    }
+
+    /// 给人物找一枚「确认是本人」的脸：名下照片逐张 `list_face`，取 `person_id`
+    /// 等于本人的第一枚，回 `(face_id, 该 unit 的 cache_key)` 供 `faceThumbnail`
+    /// 用。回 nil = 名下翻了几张都没标到本人脸（未确认人物常见）。
+    ///
+    /// 🔴 `list_face` **不带** `person_id`（带了会对部分条目回 117），
+    /// 拿全量脸列表在客户端按 `personID` 过滤。
+    static func personFaceLocator(personID: Int, scan: Int = 4,
+                                  manager: SessionManager) async throws
+        -> (faceID: Int, unitCacheKey: String)? {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "list",
+            params: ["person_id": String(personID), "offset": "0",
+                     "limit": String(scan), "additional": "[\"thumbnail\"]"])
+        guard let root = raw as? [String: Any],
+              let list = root["list"] as? [[String: Any]] else { return nil }
+        for entry in list {
+            guard let itemID = entry["id"] as? Int else { continue }
+            let thumb = (entry["additional"] as? [String: Any])?["thumbnail"] as? [String: Any]
+            let cacheKey = (thumb?["cache_key"] as? String) ?? ""
+            let faces = (try? await faces(itemID: itemID, manager: manager)) ?? []
+            if let mine = faces.first(where: { $0.personID == personID }) {
+                return (mine.id, cacheKey)
+            }
+        }
+        return nil
     }
 
     /// 原图 / 原视频的字节。`unit_id` 必须是**方括号串**（裸数字回 117，2026-10-20
