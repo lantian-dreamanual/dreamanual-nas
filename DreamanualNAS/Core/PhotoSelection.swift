@@ -256,6 +256,27 @@ enum PhotoWriter {
         return rating
     }
 
+    /// 写拍摄时间。参数是 Unix 秒（`time`），写完用 `get` 回读确认。
+    ///
+    /// 通道 2026-10-21 实测定案（`photosprobe28.py`）：`id` 方括号串 + `time`
+    /// 整数真写；裸 id 回 ok + `error_list` 空但什么都不动。回读值带秒，
+    /// 界面上的输入只到分钟 —— 回读与写入不等时以回读为准。
+    static func setTime(_ itemID: Int, to date: Date,
+                        manager: SessionManager) async -> Date? {
+        let seconds = Int(date.timeIntervalSince1970)
+        do {
+            try await PhotosAPI.setItem(id: itemID, update: ["time": String(seconds)],
+                                        manager: manager)
+        } catch {
+            NSLog("[photos] 写拍摄时间失败：%@", Self.describe(error))
+            return nil
+        }
+        if let item = try? await PhotosAPI.getItem(id: itemID, manager: manager) {
+            return item.time
+        }
+        return date
+    }
+
     // MARK: - 人物
 
     /// 人物命名 / 改名。写完回读列表确认新名字落库了。

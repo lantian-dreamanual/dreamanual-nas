@@ -994,6 +994,19 @@ final class AppState {
         photos.updateItem(id: item.id) { $0.rating = verified }
     }
 
+    /// 改查看器当前这张的拍摄时间。改完要挪天分组（时间轴按拍摄时间排），
+    /// 用 `resettleItem` 就地搬，不整库重拉。
+    func setPhotoTime(_ date: Date) async {
+        guard let manager = sessionManager, let item = photos.viewingItem else { return }
+        guard let saved = await PhotoWriter.setTime(item.id, to: date,
+                                                    manager: manager) else {
+            showToast("拍摄时间没有保存上，请重试", .err)
+            return
+        }
+        photos.resettleItem(id: item.id, time: saved)
+        showToast("拍摄时间已改，照片挪到了新的日期", .ok)
+    }
+
     /// 加到相册。加完把相册计数补上（相册卡与详情页头都用 `item_count` 报数）。
     func addPhotos(_ items: [PhotosAPI.Item], to albumID: Int) async {
         guard let manager = sessionManager, !items.isEmpty else { return }

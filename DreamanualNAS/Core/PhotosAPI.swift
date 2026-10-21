@@ -60,7 +60,9 @@ enum PhotosAPI {
         let filesize: Int
         /// 拍摄时间。Unix 秒，**按 UTC 读出来的才是墙上时间**（12 条样本里
         /// 11 条与文件名逐字对上），显示时统一走 `PhotoDate`。
-        let time: Date
+        /// `var`：写回成功后就地改 —— 改完还可能换天分组，见
+        /// `PhotoLibrary.resettleItem`。
+        var time: Date
         /// 进库（索引）时间。毫秒，同样按 UTC 读。「最近添加」按它排序与分组 ——
         /// 它取的是**最近 30 天进库**的项，与拍摄时间无关。
         let indexedTime: Date

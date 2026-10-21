@@ -233,6 +233,46 @@ final class PhotoLibrary {
         items = buckets
     }
 
+    /// 改完拍摄时间就地挪分组：从原天摘出、按新时间插到目标天里该在的位置，
+    /// 目标天不存在就按天序补进去。
+    ///
+    /// 不走整库重拉 —— 改一张照片的时间要翻十几页，且网格会闪。列表顺序的口径
+    /// 与 `group` 一致：天新→旧、天内按时间新→旧（服务端就是按时间给的）。
+    func resettleItem(id: Int, time: Date) {
+        var moved: PhotosAPI.Item?
+        for key in items.keys {
+            guard let index = items[key]?.firstIndex(where: { $0.id == id }) else { continue }
+            moved = items[key]?.remove(at: index)
+            if items[key]?.isEmpty == true {
+                items.removeValue(forKey: key)
+                days.removeAll { $0.id == key }
+            }
+            break
+        }
+        guard var item = moved else { return }
+        item.time = time
+
+        let calendar = PhotoDate.utcCalendar
+        let c = calendar.dateComponents([.year, .month, .day], from: time)
+        guard let y = c.year, let m = c.month, let d = c.day else { return }
+        let day = PhotosAPI.Day(year: y, month: m, day: d)
+
+        var bucket = items[day.id] ?? []
+        let at = bucket.firstIndex { $0.time < time } ?? bucket.count
+        bucket.insert(item, at: at)
+        items[day.id] = bucket
+        if !days.contains(where: { $0.id == day.id }) {
+            let index = days.firstIndex { Self.isOlder($0, than: day) } ?? days.count
+            days.insert(day, at: index)
+        }
+
+        // 查看器的 ←/→ 走这一份序列，不跟着挪的话翻页顺序会跟时间轴对不上。
+        if let index = viewSequence.firstIndex(where: { $0.id == id }) {
+            viewSequence[index] = item
+            viewSequence.sort { $0.time > $1.time }
+        }
+    }
+
     // MARK: - 写操作之后
 
     /// 某条还在不在库里。删除写完回读校正用（这套接口「回 ok」不算删掉了）。
@@ -499,6 +539,28 @@ enum PhotoDate {
         let c = utcCalendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         return String(format: "%04d年%02d月%02d日 %02d:%02d",
                       c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// 解析手输的拍摄时间。接受界面自己的显示格式（`2026年10月18日 20:46`），
+    /// 也容忍 `2026-10-18 20:46` / `2026/10/18 20:46` 与带秒的写法；
+    /// 只填日期按当天零点。解析不了回 `nil` —— 由调用方提示，不猜。
+    static func parse(_ text: String) -> Date? {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let patterns = [
+            "yyyy年M月d日 HH:mm:ss", "yyyy年M月d日 HH:mm", "yyyy年M月d日",
+            "yyyy-M-d HH:mm:ss", "yyyy-M-d HH:mm", "yyyy-M-d",
+            "yyyy/M/d HH:mm:ss", "yyyy/M/d HH:mm", "yyyy/M/d",
+        ]
+        let formatter = DateFormatter()
+        formatter.calendar = utcCalendar
+        formatter.timeZone = utcCalendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        for pattern in patterns {
+            formatter.dateFormat = pattern
+            if let date = formatter.date(from: cleaned) { return date }
+        }
+        return nil
     }
 
     /// 文件大小：`1.3 MB`。照片信息栏与列表共用。

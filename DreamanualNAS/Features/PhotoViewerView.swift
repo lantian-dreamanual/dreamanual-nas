@@ -36,6 +36,11 @@ struct PhotoViewerView: View {
     @State private var descriptionOriginal = ""
     /// 编辑框焦点：进编辑态即聚焦，回车直接提交。
     @FocusState private var isDescriptionFieldFocused: Bool
+    /// 拍摄时间的行内编辑态（与描述同一套出口与脏检查）。
+    @State private var isEditingTime = false
+    @State private var timeDraft = ""
+    @State private var timeOriginal = ""
+    @FocusState private var isTimeFieldFocused: Bool
 
     // 视频
     @State private var player: AVPlayer?
@@ -511,7 +516,7 @@ struct PhotoViewerView: View {
                     }
 
                     section("拍摄") {
-                        row("时间", PhotoDate.stamp(item.time))
+                        timeRow(item)
                     }
 
                     if !item.exif.isEmpty {
@@ -559,65 +564,120 @@ struct PhotoViewerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// 可编辑行的只读态：值 + 悬停浮出的铅笔。
+    ///
+    /// 不挂 `row()` —— 它尾端的 Spacer 会跟铺满的值区平分剩余宽度，铅笔落到
+    /// 行中段而不是右缘（2026-10-21 用户指出）。
+    private func editableRow(label: String, text: String?, placeholder: String,
+                             onEdit: @escaping () -> Void) -> some View {
+        HStack(spacing: DmSpace.s12) {
+            rowLabel(label)
+            EditableValueRow(text: text, placeholder: placeholder, onEdit: onEdit)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 可编辑行的编辑态：标签列不动、输入框吃剩余宽度、两枚出口在框外右侧。
+    ///
+    /// 两枚图标放框外是用户定的：框内尾端那个位置是搜索框清除钮的语义位，
+    /// ✗ 放进去会被读成「清空输入框」。失焦也算提交，但要先让一拍 ——
+    /// 点 ✗ / ✓ 是先失焦后跑按钮动作，不等这一拍就会「点了取消照样写回去」。
+    private func inlineEditor(label: String,
+                              text: Binding<String>,
+                              focus: FocusState<Bool>.Binding,
+                              placeholder: String,
+                              isActive: @escaping () -> Bool,
+                              onCommit: @escaping () -> Void,
+                              onCancel: @escaping () -> Void) -> some View {
+        HStack(spacing: DmSpace.s12) {
+            rowLabel(label)
+            HStack(spacing: DmSpace.s6) {
+                TextField(placeholder, text: text)
+                    .focused(focus)
+                    .formFieldRow()
+                    .frame(maxWidth: .infinity)
+                    .onSubmit(onCommit)
+                    .onChange(of: focus.wrappedValue) { _, focused in
+                        guard !focused else { return }
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(120))
+                            guard isActive(), !focus.wrappedValue else { return }
+                            onCommit()
+                        }
+                    }
+                IconButton(iconName: "x", compact: true, label: "取消", action: onCancel)
+                IconButton(iconName: "check", compact: true, label: "保存", action: onCommit)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// 描述行：悬停出铅笔，点开变行内表单。保存走 `state.setPhotoDescription`，
     /// 成功就地改 `item.note`（写回通道 2026-10-21 实测定案：id 方括号串）。
-    ///
-    /// 编辑态**不替换整行** —— 标签「描述」留在原位，只有值列变成输入框：
-    /// 表单从值列起头，跟上面的字段栅格对齐（整行替换的话表单贴面板左缘，
-    /// 与标签列断开，2026-10-21 用户截图指出）。输入框用行内嵌档
-    /// `formFieldRow()`（32 / `panel-3`，与设置页「直连地址」同一档），
-    /// 不用弹窗档的 38 高。
-    ///
-    /// **出口四条**（2026-10-21 用户反馈「没有按钮点不了」后补）：
-    /// 回车 / 失焦 / ✓ 提交，Esc / ✗ 取消。失焦提交要脏检查 —— 点一下别处
-    /// 没改字就发请求等于白写一次库，也白白刷一次回读。
+    /// 出口四条：回车 / 失焦 / ✓ 提交，Esc / ✗ 取消；失焦提交走脏检查，
+    /// 没改字只退出、不发请求。
     @ViewBuilder
     private func descriptionRow(_ item: PhotosAPI.Item) -> some View {
         if isEditingDescription {
-            // 编辑态自己排一行：标签列宽与只读行一致（44 + 12），输入框吃掉
-            // 剩余宽度、两枚图标固定 22 —— 交给 `row()` 的话它内部的 Spacer
-            // 会跟输入框抢空间。
-            HStack(spacing: DmSpace.s12) {
-                rowLabel("描述")
-                HStack(spacing: DmSpace.s6) {
-                    TextField("给这张写点什么", text: $descriptionDraft)
-                        .focused($isDescriptionFieldFocused)
-                        .formFieldRow()
-                        .frame(maxWidth: .infinity)
-                        .onSubmit { commitDescription() }
-                        // 失焦提交：先让一拍再判断 —— 点 ✗ / ✓ 也是先失焦后跑
-                        // 按钮动作，不等这一拍就会「点了取消照样写回去」。
-                        .onChange(of: isDescriptionFieldFocused) { _, focused in
-                            guard !focused else { return }
-                            Task {
-                                try? await Task.sleep(for: .milliseconds(120))
-                                guard isEditingDescription,
-                                      !isDescriptionFieldFocused else { return }
-                                commitDescription()
-                            }
-                        }
-                    // 两枚出口在**框外**右侧（2026-10-21 用户定）：框内尾端那个位置
-                    // 是搜索框清除钮的语义位，✗ 放进去会被读成「清空输入框」。
-                    // 22 小档、间距 6 —— 两枚读成一对，又不多吃输入框的宽度。
-                    IconButton(iconName: "x", compact: true, label: "取消") {
-                        cancelDescription()
-                    }
-                    IconButton(iconName: "check", compact: true, label: "保存") {
-                        commitDescription()
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            inlineEditor(label: "描述", text: $descriptionDraft,
+                         focus: $isDescriptionFieldFocused,
+                         placeholder: "给这张写点什么",
+                         isActive: { isEditingDescription },
+                         onCommit: { commitDescription() },
+                         onCancel: { cancelDescription() })
         } else {
-            row("描述") {
-                DescriptionValueRow(note: item.note) {
-                    descriptionDraft = item.note ?? ""
-                    descriptionOriginal = item.note ?? ""
-                    isEditingDescription = true
-                    isDescriptionFieldFocused = true
-                }
+            editableRow(label: "描述", text: item.note, placeholder: "写点什么…") {
+                descriptionDraft = item.note ?? ""
+                descriptionOriginal = item.note ?? ""
+                isEditingDescription = true
+                isDescriptionFieldFocused = true
             }
         }
+    }
+
+    /// 拍摄时间行。编辑态是一行文本（`2026年10月18日 20:46`），提交时解析；
+    /// 解析不了就留在编辑态并提示，不猜也不发请求。改完会挪到新的日期，
+    /// 时间轴上的位置跟着变（`PhotoLibrary.resettleItem`）。
+    @ViewBuilder
+    private func timeRow(_ item: PhotosAPI.Item) -> some View {
+        if isEditingTime {
+            inlineEditor(label: "时间", text: $timeDraft,
+                         focus: $isTimeFieldFocused,
+                         placeholder: "2026-10-18 20:46",
+                         isActive: { isEditingTime },
+                         onCommit: { commitTime(item) },
+                         onCancel: { cancelTime() })
+        } else {
+            editableRow(label: "时间", text: PhotoDate.stamp(item.time),
+                        placeholder: "未设置") {
+                timeDraft = PhotoDate.stamp(item.time)
+                timeOriginal = timeDraft
+                isEditingTime = true
+                isTimeFieldFocused = true
+            }
+        }
+    }
+
+    /// 提交拍摄时间：草稿跟原值逐字相同就只退出（秒数不会被白白抹掉，
+    /// 显示格式只到分钟）；解析不了留在编辑态提示格式。
+    private func commitTime(_ item: PhotosAPI.Item) {
+        guard timeDraft != timeOriginal else {
+            isEditingTime = false
+            isTimeFieldFocused = false
+            return
+        }
+        guard let date = PhotoDate.parse(timeDraft) else {
+            state.showToast("时间看不懂，按「2026-10-18 20:46」填", .err)
+            return
+        }
+        isEditingTime = false
+        isTimeFieldFocused = false
+        Task { await state.setPhotoTime(date) }
+    }
+
+    private func cancelTime() {
+        isEditingTime = false
+        isTimeFieldFocused = false
     }
 
     /// 提交描述：没改字就只退出、不发请求；空串按「清空」处理（写回通道：
@@ -637,11 +697,16 @@ struct PhotoViewerView: View {
         isDescriptionFieldFocused = false
     }
 
-    /// 编辑中切了照片：退出编辑、弃草稿（不替用户把半句话写到另一张上）。
+    /// 编辑中切了照片：两处编辑都退出、弃草稿（不替用户把半句话写到另一张上）。
     private func exitEditingIfNeeded(_ newID: Int) {
-        guard isEditingDescription else { return }
-        isEditingDescription = false
-        isDescriptionFieldFocused = false
+        if isEditingDescription {
+            isEditingDescription = false
+            isDescriptionFieldFocused = false
+        }
+        if isEditingTime {
+            isEditingTime = false
+            isTimeFieldFocused = false
+        }
     }
 
     /// 标签定宽 44：六件相机字段的字头都是两个字，值对齐成一条线才扫得下去。
@@ -707,11 +772,12 @@ struct PhotoViewerView: View {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // 描述编辑中：Esc 只取消编辑（其余键还给输入框 —— 方向键移光标、
-            // 回车交给 onSubmit），不然按 Esc 会把整个查看器关掉。
-            if isEditingDescription {
+            // 描述 / 时间编辑中：Esc 只取消当次编辑（其余键还给输入框 ——
+            // 方向键移光标、回车交给 onSubmit），不然按 Esc 会把整个查看器关掉。
+            if isEditingDescription || isEditingTime {
                 if event.keyCode == 53 {
                     cancelDescription()
+                    cancelTime()
                     return nil
                 }
                 return event
@@ -787,31 +853,32 @@ private struct VideoSurface: NSViewRepresentable {
     }
 }
 
-/// 描述的值行：有字显字、没字显灰占位；悬停浮出铅笔。
+/// 可编辑字段的值行：有值显值、没值显灰占位；悬停浮出铅笔。
 ///
 /// 铅笔挂**浮层**（overlay）而非进排版流：它 28 高，进了 HStack 会把行从
 /// 文字高撑到控件高，基线跟着挪 —— 悬停瞬间整段内容跳一下（2026-10-21
 /// 用户截图指出「悬浮时行错位」）。浮层不占布局，行高恒等于文字高。
-private struct DescriptionValueRow: View {
-    let note: String?
+private struct EditableValueRow: View {
+    let text: String?
+    let placeholder: String
     let onEdit: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        Text(hasText ? (note ?? "") : "写点什么…")
+        Text(hasText ? (text ?? "") : placeholder)
             .font(.system(size: DmText.t12))
             .foregroundColor(hasText ? Color.dmInk2 : Color.dmInk3)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .trailing) {
                 if isHovered {
-                    IconButton(iconName: "pencil", label: "编辑描述") { onEdit() }
+                    IconButton(iconName: "pencil", label: "编辑") { onEdit() }
                 }
             }
             .contentShape(Rectangle())
             .trackingHover($isHovered)
     }
 
-    private var hasText: Bool { !(note ?? "").isEmpty }
+    private var hasText: Bool { !(text ?? "").isEmpty }
 }
