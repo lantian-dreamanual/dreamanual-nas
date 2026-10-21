@@ -280,9 +280,10 @@ enum PhotoWriter {
     /// 把照片从人物里去掉：列出这张里该人物的脸（同张同脸可多枚），逐个摘，
     /// 回读确认清空。回 `true` 才算成 —— `delete_face` 对假 id 也回 ok。
     ///
-    /// 通道 2026-10-21 实测定案（`photosprobe29`）：`Browse.Item.list_face`
+    /// 通道 2026-10-21 实测定案（`photosprobe29/31`）：`Browse.Item.list_face`
     /// （`id_item` + `person_id`）拿脸 id → `Browse.Person.delete_face`
-    /// （`person_id` + `face_id` 明文）逐枚摘。
+    /// （`person_id` 明文 + `face_id` **方括号串**）逐枚摘。裸数字 face_id 回 ok
+    /// 但什么都不删 —— 这条踩过，别再改回去。
     static func removeFromPerson(_ itemID: Int, personID: Int,
                                  manager: SessionManager) async -> Bool {
         let faceIDs: [Int]

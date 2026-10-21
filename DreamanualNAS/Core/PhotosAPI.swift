@@ -498,13 +498,17 @@ enum PhotosAPI {
 
     /// 把一枚脸从人物里摘掉（= 这张照片不再属于该人物）。
     ///
-    /// 🔴 假 `face_id` 也回 ok + 空 `list`（与 delete / set 同一族假成功）——
-    /// 成败只能回读，见 `PhotoWriter.removeFromPerson`。
+    /// 🔴 `face_id` **必须方括号串**（`"[7348]"`）—— 裸数字回 ok + 空 list、
+    /// 什么都不删（2026-10-21 `photosprobe31` 真脸实测，与 `Item.delete` /
+    /// `merge.merged_id` / `Download.unit_id` 同一套约定）；`person_id` 明文
+    /// （`"[387]"` 回 120 type）。真删成功的回执是 `{"list": [受影响的 item_id]}`，
+    /// 但**别拿回执当证据** —— 假 `face_id` 也回 ok + 空 list，成败只能回读，
+    /// 见 `PhotoWriter.removeFromPerson`。
     static func deleteFace(personID: Int, faceID: Int,
                            manager: SessionManager) async throws {
         _ = try await manager.call(
             kind: .file, api: "\(team).Browse.Person", version: 3, method: "delete_face",
-            params: ["person_id": String(personID), "face_id": String(faceID)])
+            params: ["person_id": String(personID), "face_id": "[\(faceID)]"])
     }
 
     /// 新建相册。**`Album` 族没有 `create`** —— 它在 `Browse.NormalAlbum` 上
