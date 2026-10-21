@@ -573,11 +573,17 @@ struct PhotoViewerView: View {
     /// 没改字就发请求等于白写一次库，也白白刷一次回读。
     @ViewBuilder
     private func descriptionRow(_ item: PhotosAPI.Item) -> some View {
-        row("描述") {
-            if isEditingDescription {
-                HStack(spacing: DmSpace.s8) {
+        if isEditingDescription {
+            // 编辑态自己排一行：标签列宽与只读行一致（44 + 12），输入框吃掉
+            // 剩余宽度、两枚图标固定 22 —— 交给 `row()` 的话它内部的 Spacer
+            // 会跟输入框抢空间。
+            HStack(spacing: DmSpace.s12) {
+                rowLabel("描述")
+                HStack(spacing: DmSpace.s6) {
                     TextField("给这张写点什么", text: $descriptionDraft)
                         .focused($isDescriptionFieldFocused)
+                        .formFieldRow()
+                        .frame(maxWidth: .infinity)
                         .onSubmit { commitDescription() }
                         // 失焦提交：先让一拍再判断 —— 点 ✗ / ✓ 也是先失焦后跑
                         // 按钮动作，不等这一拍就会「点了取消照样写回去」。
@@ -590,22 +596,20 @@ struct PhotoViewerView: View {
                                 commitDescription()
                             }
                         }
-                    // 尾端两枚图标，形态照搜索框的清除钮（14 号、贴字段内边距）。
-                    Button { cancelDescription() } label: {
-                        LucideIcon("x", size: DmIcon.i14)
-                            .foregroundColor(Color.dmInk3)
+                    // 两枚出口在**框外**右侧（2026-10-21 用户定）：框内尾端那个位置
+                    // 是搜索框清除钮的语义位，✗ 放进去会被读成「清空输入框」。
+                    // 22 小档、间距 6 —— 两枚读成一对，又不多吃输入框的宽度。
+                    IconButton(iconName: "x", compact: true, label: "取消") {
+                        cancelDescription()
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("取消")
-                    Button { commitDescription() } label: {
-                        LucideIcon("check", size: DmIcon.i14)
-                            .foregroundColor(Color.dmAccent)
+                    IconButton(iconName: "check", compact: true, label: "保存") {
+                        commitDescription()
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("保存")
                 }
-                .formFieldRow()
-            } else {
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            row("描述") {
                 DescriptionValueRow(note: item.note) {
                     descriptionDraft = item.note ?? ""
                     descriptionOriginal = item.note ?? ""
@@ -649,13 +653,19 @@ struct PhotoViewerView: View {
         }
     }
 
+    /// 字段标签：定宽 44 / 11 号 / `ink-3`。只读行与编辑行共用同一份，
+    /// 栅格才不会因为换态而错开。
+    private func rowLabel(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: DmText.t11))
+            .foregroundColor(Color.dmInk3)
+            .frame(width: 44, alignment: .leading)
+    }
+
     private func row<Content: View>(_ label: String,
                                     @ViewBuilder value: () -> Content) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DmSpace.s12) {
-            Text(label)
-                .font(.system(size: DmText.t11))
-                .foregroundColor(Color.dmInk3)
-                .frame(width: 44, alignment: .leading)
+            rowLabel(label)
             value()
             Spacer(minLength: 0)
         }
