@@ -23,25 +23,27 @@ final class AppState {
     static let appStart = Date()
 
     enum Module: String, CaseIterable, Identifiable {
-        case music, photos, files, status, settings
+        // 顺序即侧栏顺序（侧栏直接遍历 allCases）：**系统在第一位** —— 它是
+        // 登录后的落地页（2026-10-21 用户定），也是「先看一眼机器」的入口。
+        case status, music, photos, files, settings
         var id: String { rawValue }
 
         var title: String {
             switch self {
+            case .status: return "系统"
             case .music: return "歌曲"
             case .photos: return "照片"
             case .files: return "文件"
-            case .status: return "系统"
             case .settings: return "设置"
             }
         }
 
         var icon: String {
             switch self {
+            case .status: return "gauge"
             case .music: return "headphones"
             case .photos: return "image"
             case .files: return "folder"
-            case .status: return "gauge"
             case .settings: return "settings"
             }
         }
@@ -132,7 +134,11 @@ final class AppState {
     /// 不只是文案差别 —— 实测同一批请求，局域网直连的 `DirSize` 成功率
     /// 4/10、QuickConnect 中继 2/10（`接口结论.md` 第十节），页头上看得见才有用。
     private(set) var linkMode: LinkMode?
-    private(set) var module: Module = .music
+    /// 登录后的落地模块：**系统**（2026-10-21 用户定）。登录不一定是为了听歌 /
+    /// 看照片 / 翻文件，那三页进去就是一轮拉取；系统页数据最轻，也最像「刚连上
+    /// 先看一眼机器状态」。其余模块仍按「点进去才加载」，`MainAreaView` 只渲染
+    /// 当前模块的视图。
+    private(set) var module: Module = .status
     private(set) var sessionManager: SessionManager?
     /// 播放引擎：连上之后创建，断开即卸。曲库页与播放条都读它。
     private(set) var playback: PlaybackEngine?

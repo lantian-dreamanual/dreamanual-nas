@@ -178,10 +178,14 @@ struct StatusView: View {
                     DiskCard(disks: snapshot.storage?.disks ?? [])
                 }
 
-                // 原型下半屏的 grid2：电源 | 开关机计划 并排、由高的那张定高。
-                HStack(alignment: .top, spacing: DmSpace.s12) {
-                    PowerCard()
-                    PowerScheduleCard()
+                // 原型下半屏的 grid2：电源 | 开关机计划 并排**等高** —— Grid 行内
+                // 两格取较高那张定行高，矮的拉齐（卡面铺满、内容钉顶，2026-10-21
+                // 用户定；HStack 做不到这个，它只会各自按内容高）。
+                Grid(horizontalSpacing: DmSpace.s12, verticalSpacing: DmSpace.s12) {
+                    GridRow {
+                        PowerCard()
+                        PowerScheduleCard()
+                    }
                 }
             }
             .padding(.horizontal, DmSpace.s24)
@@ -225,6 +229,10 @@ private struct PowerCard: View {
                 state.openPowerConfirm(.reboot)
             }
         }
+        // 等高并排（Grid 行）：比开关机计划矮时卡面拉到行高、内容钉顶。
+        // 🔴 frame 必须挂在 `.dmCard()` **之前** —— 背景铺满拉伸后的 frame，
+        // 挂在后面就只有透明留白变高、卡面还是矮的。
+        .frame(maxHeight: .infinity, alignment: .top)
         .dmCard()
     }
 }

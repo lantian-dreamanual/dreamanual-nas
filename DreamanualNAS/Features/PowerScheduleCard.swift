@@ -207,9 +207,12 @@ struct PowerScheduleCard: View {
         VStack(alignment: .leading, spacing: 0) {
             head
             content
+            // 等高并排（Grid 行）：比电源卡高时行高随本卡；比它矮时卡面拉到行高，
+            // 这颗 Spacer 把页脚按回卡底（未被拉伸时高度为 0）。
+            Spacer(minLength: 0)
             footer
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .dmCard()
     }
 
