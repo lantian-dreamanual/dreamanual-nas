@@ -309,6 +309,24 @@ enum PhotoWriter {
         return rest.isEmpty
     }
 
+    /// 圈一块脸并回读。回回读里对上的那枚新脸；写失败或回读没对上（假成功族）
+    /// 都回 `nil`。接口形态见 `PhotosAPI.addFace` 的注释（2026-10-21 定案）。
+    static func addFace(_ itemID: Int, box: CGRect, owner: PhotosAPI.FaceOwner,
+                        manager: SessionManager) async -> PhotosAPI.Face? {
+        let tempID = String(Int.random(in: 100_000...999_999))
+        let faceID: Int?
+        do {
+            faceID = try await PhotosAPI.addFace(itemID: itemID, box: box, owner: owner,
+                                                 tempID: tempID, manager: manager)
+        } catch {
+            NSLog("[photos] 圈脸失败：%@", Self.describe(error))
+            return nil
+        }
+        guard let faceID else { return nil }
+        let faces = (try? await PhotosAPI.faces(itemID: itemID, manager: manager)) ?? []
+        return faces.first { $0.id == faceID }
+    }
+
     // MARK: - 人物
 
     /// 人物命名 / 改名。写完回读列表确认新名字落库了。

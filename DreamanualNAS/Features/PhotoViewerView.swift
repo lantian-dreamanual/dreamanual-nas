@@ -48,6 +48,23 @@ struct PhotoViewerView: View {
     /// 日历选日时才能带上最新时分。
     @State private var timeText = ""
 
+    // 圈脸编辑（2026-10-21）。进编辑模式先拉一次这张照片的全部脸，已有框
+    // 点 × 摘掉；在画面上拖拽画新框，画完弹命名浮层 —— 写新名字（服务端
+    // 自动建人物）或从建议里挑已有人物，保存即写回。
+    @State private var isEditingFaces = false
+    @State private var faces: [PhotosAPI.Face] = []
+    /// 正在拖的新框（归一化，原点左上）。
+    @State private var drawingBox: CGRect?
+    /// 画完待命名的框。
+    @State private var pendingBox: CGRect?
+    /// 命名浮层的输入与选中的已有人物（点建议行置上）。
+    @State private var faceNameDraft = ""
+    @State private var facePersonTarget: PhotosAPI.Person?
+    @State private var isSavingFace = false
+    @FocusState private var isFaceNameFocused: Bool
+    /// 悬停中的已有脸框（悬停才出 ×）。
+    @State private var hoveredFaceID: Int?
+
     // 视频
     @State private var player: AVPlayer?
     @State private var videoLoader: StreamLoader?
@@ -89,6 +106,15 @@ struct PhotoViewerView: View {
         .task(id: item?.id) {
             exitEditingIfNeeded(item?.id ?? 0)
             await load()
+            // 冒烟通路（`DM_UI=photoedit`）：查看器一开就进圈脸编辑，已有脸框
+            // 走一次真接口画出来。
+            if state.photoSmokeFaceEdit {
+                state.photoSmokeFaceEdit = false
+                if !isVideo {
+                    isEditingFaces = true
+                    await loadFaces()
+                }
+            }
             // 冒烟通路（`DM_UI=photovideo`）：查看器一开就播，省掉「点一下海报」
             // 这一步。真机照常从海报开始。
             if state.photoAutoStartVideo, let item, item.isVideo {
@@ -126,6 +152,15 @@ struct PhotoViewerView: View {
             }
 
             Spacer(minLength: DmSpace.s12)
+
+            // 圈脸编辑只给照片：视频没有识别脸这回事。
+            if !isVideo {
+                IconButton(iconName: "scan-face",
+                           label: isEditingFaces ? "退出编辑人脸" : "编辑人脸") {
+                    toggleFaceEditing()
+                }
+                .help(isEditingFaces ? "退出编辑人脸（Esc）" : "编辑人脸：框选画面里的人并命名")
+            }
 
             // 右键在独占整窗的查看器里不是自然动作，所以这里必须给按钮（规划第四节
             // 第 5 条）。跳过去是单向的：切到文件管理、打开所在目录并选中这张。
@@ -165,6 +200,13 @@ struct PhotoViewerView: View {
                         .frame(width: box.width, height: box.height)
                         .clipShape(RoundedRectangle(cornerRadius: DmRadius.r12))
                         .dmShadowModal()
+                        // 圈脸层挂在图上：坐标随 `fitted` 框走，归一化直接乘宽高。
+                        // 🔴 alignment 必须 topLeading（默认 center 会把整层居中，
+                        // 框整体漂到右下），层内 ZStack 也要钉满图框，offset 才是
+                        // 相对图左上原点的。
+                        .overlay(alignment: .topLeading) {
+                            if isEditingFaces { faceLayer(size: box) }
+                        }
                 } else {
                     LucideIcon("loader", size: DmIcon.i24)
                         .foregroundColor(Color.dmInk3)
@@ -184,7 +226,7 @@ struct PhotoViewerView: View {
     /// 只有一张时整块不摆。
     @ViewBuilder
     private func stageArrow(_ direction: Int, in size: CGSize) -> some View {
-        if isStageHovered, let current = item,
+        if isStageHovered, !isEditingFaces, let current = item,
            library.neighbor(of: current, step: direction) != nil,
            library.viewSequence.count > 1 {
             Button {
@@ -208,6 +250,291 @@ struct PhotoViewerView: View {
             .frame(maxHeight: .infinity, alignment: .center)
             .transition(.opacity)
         }
+    }
+
+    // MARK: - 圈脸编辑
+
+    private func toggleFaceEditing() {
+        if isEditingFaces {
+            exitFaceEditing()
+        } else {
+            isEditingFaces = true
+            Task { await loadFaces() }
+        }
+    }
+
+    private func exitFaceEditing() {
+        isEditingFaces = false
+        faces = []
+        drawingBox = nil
+        discardPendingFace()
+        hoveredFaceID = nil
+    }
+
+    private func discardPendingFace() {
+        pendingBox = nil
+        faceNameDraft = ""
+        facePersonTarget = nil
+    }
+
+    private func loadFaces() async {
+        guard let item, let manager = state.sessionManager else { return }
+        faces = (try? await PhotosAPI.faces(itemID: item.id, manager: manager)) ?? []
+        NSLog("[photos] 圈脸：%@ 有 %d 枚脸", item.filename, faces.count)
+    }
+
+    /// 圈脸层。已有框 accent 实线 + 名字角标（悬停出 ×，摘除即写回）；正在画的
+    /// 框 warn 虚线；画完的框下弹命名浮层。挂在图上，归一化坐标直接乘显示宽高。
+    @ViewBuilder
+    private func faceLayer(size: CGSize) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(faces) { face in
+                existingFaceBox(face, size: size)
+            }
+            if let box = drawingBox {
+                faceRect(facePixelFrame(box, in: size),
+                         stroke: Color.dmWarnInk, dashed: true)
+            }
+            if let box = pendingBox {
+                faceRect(facePixelFrame(box, in: size),
+                         stroke: Color.dmWarnInk, dashed: true)
+                faceNamingCard(for: box, in: size)
+            }
+        }
+        .contentShape(Rectangle())
+        // 🔴 alignment 必须显式 topLeading。ZStack 自身尺寸等于内容尺寸
+        // （框的 offset 不参与布局），钉满图框时若走默认 center，整个内容会先被
+        // 居中、再叠加各自的 offset —— 框就整体漂到右下（2026-10-21 撞上）。
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .gesture(faceDrawGesture(size: size))
+    }
+
+    /// 归一化 → 显示像素（层挂在图上，原点就是图左上）。
+    private func facePixelFrame(_ normalized: CGRect, in size: CGSize) -> CGRect {
+        CGRect(x: normalized.minX * size.width, y: normalized.minY * size.height,
+               width: normalized.width * size.width,
+               height: normalized.height * size.height)
+    }
+
+    private func faceRect(_ frame: CGRect, stroke: Color, dashed: Bool) -> some View {
+        RoundedRectangle(cornerRadius: DmRadius.r4)
+            .strokeBorder(stroke,
+                          style: StrokeStyle(lineWidth: DmLine.base,
+                                             dash: dashed ? [5, 4] : []))
+            .frame(width: frame.width, height: frame.height)
+            .offset(x: frame.minX, y: frame.minY)
+    }
+
+    private func clampPoint(_ point: CGPoint, size: CGSize) -> CGPoint {
+        CGPoint(x: min(max(point.x, 0), size.width),
+                y: min(max(point.y, 0), size.height))
+    }
+
+    private func faceDrawGesture(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+            .onChanged { value in
+                guard pendingBox == nil else { return }
+                let a = clampPoint(value.startLocation, size: size)
+                let b = clampPoint(value.location, size: size)
+                drawingBox = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                                    width: abs(a.x - b.x), height: abs(a.y - b.y))
+            }
+            .onEnded { _ in
+                guard let box = drawingBox else { return }
+                drawingBox = nil
+                // 太小的拖动当误触，不弹浮层。
+                guard box.width > 0.02, box.height > 0.02 else { return }
+                pendingBox = box
+                faceNameDraft = ""
+                facePersonTarget = nil
+                isFaceNameFocused = true
+            }
+    }
+
+    private func existingFaceBox(_ face: PhotosAPI.Face, size: CGSize) -> some View {
+        let frame = facePixelFrame(face.box, in: size)
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: DmRadius.r4)
+                .strokeBorder(Color.dmAccent, lineWidth: DmLine.bold)
+            Text(face.displayName)
+                .font(.system(size: DmText.t11, weight: .medium))
+                .foregroundColor(Color.dmOnAccent)
+                .padding(.horizontal, DmSpace.s6)
+                .padding(.vertical, DmSpace.s4)
+                .background(Capsule().fill(Color.dmAccent))
+                .padding(DmSpace.s4)
+            if hoveredFaceID == face.id {
+                // 编辑态里的显式动作：摘的是「这张不再属于该人物」，照片本体不动；
+                // 误摘可以画个新框标回来，所以不摆二次确认。
+                Button {
+                    removeFace(face)
+                } label: {
+                    LucideIcon("x", size: DmIcon.i12)
+                        .foregroundColor(Color.dmInk)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.dmPanel2))
+                        .overlay(Circle().strokeBorder(Color.dmLine2,
+                                                       lineWidth: DmLine.base))
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: .topTrailing)
+                .padding(DmSpace.s4)
+            }
+        }
+        .frame(width: frame.width, height: frame.height)
+        .offset(x: frame.minX, y: frame.minY)
+        .onHover { hoveredFaceID = $0 ? face.id : nil }
+    }
+
+    private func removeFace(_ face: PhotosAPI.Face) {
+        guard let item else { return }
+        faces.removeAll { $0.id == face.id }
+        Task {
+            await state.removePhotoFromPerson(item, personID: face.personID)
+            await loadFaces()
+        }
+    }
+
+    /// 命名浮层：挂在待命名框的正下（放不下就翻到框上方）。输入新名字直接保存
+    /// = 建新人物；输入时下方出已有人物建议，点一条 = 挂到那个人。
+    @ViewBuilder
+    private func faceNamingCard(for box: CGRect, in size: CGSize) -> some View {
+        let suggestions = faceSuggestions
+        let cardHeight: CGFloat = 118 + CGFloat(min(suggestions.count, 4)) * 26
+        let cardWidth: CGFloat = 240
+        let frame = facePixelFrame(box, in: size)
+        let below = frame.maxY + DmSpace.s8
+        let y = below + cardHeight <= size.height
+            ? below
+            : max(DmSpace.s8, frame.minY - cardHeight - DmSpace.s8)
+        let x = min(max(frame.midX - cardWidth / 2, DmSpace.s8),
+                    size.width - cardWidth - DmSpace.s8)
+        VStack(spacing: DmSpace.s8) {
+            Text("给这块脸标个名字")
+                .font(.system(size: DmText.t12, weight: .medium))
+                .foregroundColor(Color.dmInk2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            TextField("新名字，或输入名字挑已有人物", text: $faceNameDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: DmText.t13))
+                .foregroundColor(Color.dmInk)
+                .focused($isFaceNameFocused)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, DmSpace.s8)
+                .frame(height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: DmRadius.r8)
+                        .fill(Color.dmPanel3)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DmRadius.r8)
+                        .strokeBorder(Color.dmLine2, lineWidth: DmLine.base)
+                )
+                .onSubmit { Task { await commitFace() } }
+            ForEach(suggestions.prefix(4)) { person in
+                Button {
+                    facePersonTarget = person
+                    faceNameDraft = person.displayName
+                } label: {
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("user", size: DmIcon.i12)
+                            .foregroundColor(Color.dmInk3)
+                        Text(person.displayName)
+                            .font(.system(size: DmText.t12))
+                            .foregroundColor(Color.dmInk)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(person.itemCount) 张")
+                            .font(.system(size: DmText.t11))
+                            .monospacedDigit()
+                            .foregroundColor(Color.dmInk3)
+                    }
+                    .padding(.horizontal, DmSpace.s8)
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(spacing: DmSpace.s8) {
+                Spacer()
+                Button("取消") { discardPendingFace() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk2)
+                    .padding(.horizontal, DmSpace.s10)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: DmRadius.r6)
+                            .fill(Color.dmPanel3)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DmRadius.r6)
+                            .strokeBorder(Color.dmLine2, lineWidth: DmLine.base)
+                    )
+                Button {
+                    Task { await commitFace() }
+                } label: {
+                    Text(isSavingFace ? "保存中…" : "保存")
+                        .font(.system(size: DmText.t12, weight: .medium))
+                        .foregroundColor(faceCommitReady ? Color.dmOnAccent : Color.dmInk3)
+                        .padding(.horizontal, DmSpace.s10)
+                        .frame(height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: DmRadius.r6)
+                                .fill(faceCommitReady ? Color.dmAccentFill : Color.dmPanel3)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!faceCommitReady)
+            }
+        }
+        .padding(DmSpace.s10)
+        .frame(width: cardWidth)
+        .background(
+            RoundedRectangle(cornerRadius: DmRadius.r10)
+                .fill(Color.dmPanel2)
+                .dmShadowCard()
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DmRadius.r10)
+                .strokeBorder(Color.dmLine, lineWidth: DmLine.base)
+        )
+        .offset(x: x, y: y)
+    }
+
+    private var faceSuggestions: [PhotosAPI.Person] {
+        let word = faceNameDraft.trimmingCharacters(in: .whitespaces)
+        guard facePersonTarget == nil, !word.isEmpty else { return [] }
+        return state.photoShelf.people.filter {
+            $0.isNamed && $0.name.localizedCaseInsensitiveContains(word)
+        }
+    }
+
+    private var faceCommitReady: Bool {
+        if facePersonTarget != nil { return true }
+        return !faceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func commitFace() async {
+        guard let box = pendingBox, let item, !isSavingFace, faceCommitReady else { return }
+        isSavingFace = true
+        defer { isSavingFace = false }
+        let owner: PhotosAPI.FaceOwner
+        if let person = facePersonTarget {
+            owner = .person(person.id)
+        } else {
+            let word = faceNameDraft.trimmingCharacters(in: .whitespaces)
+            // 与已有人物同名就挂过去，不建重名人物（服务端 name 会照单全建）。
+            if let same = state.photoShelf.people.first(where: { $0.isNamed && $0.name == word }) {
+                owner = .person(same.id)
+            } else {
+                owner = .named(word)
+            }
+        }
+        guard let face = await state.addFace(to: item, box: box, owner: owner) else { return }
+        faces.append(face)
+        discardPendingFace()
     }
 
     // MARK: - 视频
@@ -796,6 +1123,9 @@ struct PhotoViewerView: View {
         if isEditingTime {
             isEditingTime = false
         }
+        if isEditingFaces {
+            exitFaceEditing()
+        }
     }
 
     /// 标签定宽 44：六件相机字段的字头都是两个字，值对齐成一条线才扫得下去。
@@ -861,6 +1191,17 @@ struct PhotoViewerView: View {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 圈脸编辑中：Esc 先收命名浮层、再退编辑模式（两层各吃一次）；
+            // 其余键交给命名输入框，← → 不翻页（编辑态翻页容易误触发）。
+            if isEditingFaces {
+                guard event.keyCode == 53 else { return event }
+                if pendingBox != nil {
+                    discardPendingFace()
+                } else {
+                    exitFaceEditing()
+                }
+                return nil
+            }
             // 描述 / 时间编辑中：Esc 只收起当次编辑（其余键照常交给输入框或
             // 日历浮层），不然按 Esc 会把整个查看器关掉。
             if isEditingDescription || isEditingTime {

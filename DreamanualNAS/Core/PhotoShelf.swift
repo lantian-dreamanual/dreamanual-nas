@@ -148,6 +148,13 @@ final class PhotoShelf {
               places.count, tags.count, albums.count)
     }
 
+    /// 人物列表重拉。圈脸写新名字会在服务端自动建人物，不重拉的话
+    /// 人物屏与圈脸浮层的建议列表都停在旧名单上。
+    func reloadPeople(_ manager: SessionManager?) async {
+        guard let manager else { return }
+        people = (try? await PhotosAPI.persons(manager: manager)) ?? people
+    }
+
     private func recentlyAdded(_ manager: SessionManager) async throws -> [PhotosAPI.Item] {
         var out: [PhotosAPI.Item] = []
         var offset = 0

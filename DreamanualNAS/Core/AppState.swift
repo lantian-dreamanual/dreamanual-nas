@@ -157,6 +157,9 @@ final class AppState {
     /// 冒烟口子：开播后立刻静音（`DM_UI=photomute`）。静音态换的是另一枚图标
     /// （`volume-x`），那条分支只有走到才能证明图标资源在包里。
     var photoSmokeMute = false
+    /// 冒烟口子：查看器一开就进圈脸编辑（`DM_UI=photoedit`）。编辑态里已有
+    /// 脸框要真机拉一次接口才画得出来，冒烟只负责把这一屏摆出来截图。
+    var photoSmokeFaceEdit = false
     /// 正拖在照片页上方的这批文件的落点摘要（拖入遮罩上那两句话）。
     /// 由 `FileDropCatcher.onHover` 算、松手或拖走时清空。放在这里而不是视图的
     /// `@State`：冒烟通路要能把它摆出来截图（真拖拽 AI 发不出来）。
@@ -1017,17 +1020,38 @@ final class AppState {
     /// 把这张照片从当前人物里移除。弹窗确认后走这；成功就地校正人物详情
     /// （条目摘掉、计数减一）与查看器序列。
     func removePhotoFromPerson(_ item: PhotosAPI.Item) async {
-        guard let manager = sessionManager,
-              let person = photoShelf.person else { return }
-        let ok = await PhotoWriter.removeFromPerson(item.id, personID: person.id,
+        guard let person = photoShelf.person else { return }
+        await removePhotoFromPerson(item, personID: person.id)
+    }
+
+    /// 指定人物的移除。查看器圈脸编辑里点已有框的 × 用 —— 那里不一定站在
+    /// 人物详情页上，`photoShelf.person` 是 nil，必须把人物 id 带进来。
+    func removePhotoFromPerson(_ item: PhotosAPI.Item, personID: Int) async {
+        guard let manager = sessionManager else { return }
+        let ok = await PhotoWriter.removeFromPerson(item.id, personID: personID,
                                                     manager: manager)
         if ok {
-            photoShelf.notePersonItemRemoved(item.id, personID: person.id)
+            photoShelf.notePersonItemRemoved(item.id, personID: personID)
             photos.forgetInViewSequence(ids: [item.id])
             showToast("已从这个人物移除，照片保留在照片库里", .ok)
         } else {
             showToast("没有移除成功，请重试", .err)
         }
+    }
+
+    /// 圈脸写回（查看器圈脸编辑的保存）。成功回新脸并重拉人物列表
+    /// （写新名字时服务端自动建人物，人物屏与建议列表都要跟上）。
+    func addFace(to item: PhotosAPI.Item, box: CGRect,
+                 owner: PhotosAPI.FaceOwner) async -> PhotosAPI.Face? {
+        guard let manager = sessionManager else { return nil }
+        guard let face = await PhotoWriter.addFace(item.id, box: box, owner: owner,
+                                                   manager: manager) else {
+            showToast("没有保存成功，请重试", .err)
+            return nil
+        }
+        showToast("已标记 \(face.displayName)", .ok)
+        await photoShelf.reloadPeople(manager)
+        return face
     }
 
     /// 加到相册。加完把相册计数补上（相册卡与详情页头都用 `item_count` 报数）。
@@ -3538,6 +3562,10 @@ final class AppState {
             } else if token == "photomute" {
                 // 同上，外加开播即静音 —— 核 `volume-x` 那枚图标与控制条的静音态。
                 await smokePhotoViewer(manager, advance: false, video: true, mute: true)
+            } else if token == "photoedit" {
+                // 圈脸编辑：开查看器并直接进编辑模式 —— 已有脸框走一次真接口，
+                // 截图核对框位、标签与顶栏的编辑态。
+                await smokePhotoViewer(manager, advance: false, faceEdit: true)
             } else if token == "photodrop" {
                 // 拖入遮罩：真拖拽 AI 发不出来，把高亮态与一份跨月摘要摆出来核形态
                 // （摘要两态：同月给路径、跨月给分月计数，这里挑跨月那份）。
@@ -3593,8 +3621,22 @@ final class AppState {
     /// 并让查看器**自动开播**（平时要点海报上的播放键）。自动播是冒烟口子：
     /// 真机上没人点，取流链路就只证明到「海报出来了」这一步。
     private func smokePhotoViewer(_ manager: SessionManager, advance: Bool,
-                                 video: Bool = false, mute: Bool = false) async {
+                                 video: Bool = false, mute: Bool = false,
+                                 faceEdit: Bool = false) async {
         if !photos.isReady { await photos.load(manager, force: true) }
+        if faceEdit {
+            photoSmokeFaceEdit = true
+            // 圈脸冒烟要挑一张**有脸**的：15560 是探针（photosprobe58/59）反复
+            // 用过的那张，固定两枚脸（田泽昱 + 蓝添），框位对不对一眼可判。
+            // 挑不到（照片删了之类）就落回第一张，编辑态本身照样能核。
+            if let known = photos.loadedItems.first(where: { $0.id == 15560 }) {
+                photoAutoStartVideo = false
+                photos.openViewer(known)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                NSLog("[photos] 圈脸冒烟：已开 %@", known.filename)
+                return
+            }
+        }
         if video {
             guard let clip = photos.loadedItems.first(where: { $0.isVideo }) else {
                 NSLog("[photos] 库里没有视频，跳过")

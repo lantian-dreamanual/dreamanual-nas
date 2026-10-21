@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Synology Photos（共享空间）的只读接口。
@@ -531,6 +532,87 @@ enum PhotosAPI {
         _ = try await manager.call(
             kind: .file, api: "\(team).Browse.Person", version: 3, method: "delete_face",
             params: ["person_id": String(personID), "face_id": "[\(faceID)]"])
+    }
+
+    /// 一枚脸：照片里框出的一个人。坐标**归一化 0..1、原点左上**
+    /// （`top_left` / `bottom_right`，读写同形 —— 2026-10-21 定案）。
+    struct Face: Identifiable, Hashable {
+        let id: Int
+        let personID: Int
+        let name: String
+        let box: CGRect
+
+        var displayName: String {
+            name.trimmingCharacters(in: .whitespaces).isEmpty ? "未确认" : name
+        }
+    }
+
+    /// 新框的归属：写新名字（服务端自动建人物）或挂到已有人物。
+    enum FaceOwner {
+        case named(String)
+        case person(Int)
+    }
+
+    /// 这张照片里的全部脸（不限人物）。`Item.list_face` 只给 `id_item` 这一个参数。
+    static func faces(itemID: Int,
+                      manager: SessionManager) async throws -> [Face] {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "list_face",
+            params: ["id_item": String(itemID)])
+        guard let root = raw as? [String: Any],
+              let list = root["list"] as? [[String: Any]] else { return [] }
+        return list.compactMap { entry in
+            guard let faceID = entry["face_id"] as? Int,
+                  let personID = entry["person_id"] as? Int,
+                  let rawBox = entry["face_bounding_box"] as? [String: Any],
+                  let tl = rawBox["top_left"] as? [String: Any],
+                  let br = rawBox["bottom_right"] as? [String: Any],
+                  let x0 = unitValue(tl["x"]), let y0 = unitValue(tl["y"]),
+                  let x1 = unitValue(br["x"]), let y1 = unitValue(br["y"]) else {
+                return nil
+            }
+            return Face(id: faceID, personID: personID,
+                        name: entry["name"] as? String ?? "",
+                        box: CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+        }
+    }
+
+    /// 服务端的坐标字段 Int / Double 都出现过，两收。
+    private static func unitValue(_ any: Any?) -> CGFloat? {
+        if let d = any as? Double { return d }
+        if let i = any as? Int { return CGFloat(i) }
+        return nil
+    }
+
+    /// 圈一块脸（**2026-10-21 定案**，官方前端包 + `photosprobe58/59` 真照片闭环）。
+    ///
+    /// 参数 `id_item`（🔴 **裸数字**，方括号串回 120 type）+ `face`（**JSON 数组串**），
+    /// 元素：归一化 `face_bounding_box` + `face_id_temp`（🔴 **必须字符串**，数字
+    /// 回 120 type，客户端自造、用来对回执）+ 归属二选一 —— `name`（新名字，
+    /// 服务端自动建人物）或 `person_id`（挂已有人物，裸数字）。回执
+    /// `{"list": [{"face_id": N, "face_id_temp": "…"}]}`。🔴 假 id 照旧假成功族，
+    /// 成败由 `PhotoWriter.addFace` 回读判定。
+    static func addFace(itemID: Int, box: CGRect, owner: FaceOwner,
+                        tempID: String, manager: SessionManager) async throws -> Int? {
+        var element: [String: Any] = [
+            "face_bounding_box": [
+                "top_left": ["x": box.minX, "y": box.minY],
+                "bottom_right": ["x": box.maxX, "y": box.maxY],
+            ],
+            "face_id_temp": tempID,
+        ]
+        switch owner {
+        case .named(let name): element["name"] = name
+        case .person(let id): element["person_id"] = id
+        }
+        guard let json = try? JSONSerialization.data(withJSONObject: [element]),
+              let text = String(data: json, encoding: .utf8) else { return nil }
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Person", version: 3, method: "add_face",
+            params: ["id_item": String(itemID), "face": text])
+        guard let root = raw as? [String: Any],
+              let list = root["list"] as? [[String: Any]] else { return nil }
+        return list.first?["face_id"] as? Int
     }
 
     /// 新建相册。**`Album` 族没有 `create`** —— 它在 `Browse.NormalAlbum` 上
