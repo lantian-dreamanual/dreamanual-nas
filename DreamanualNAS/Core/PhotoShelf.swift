@@ -22,6 +22,9 @@ final class PhotoShelf {
         case person(Int)
         case places
         case place(Int)
+        /// 一个市下所有地点的照片并集（地点屏组头的「看全部」）。参数是市名 ——
+        /// 地点条目没有市的 id，`city` 由 `ChinaDivisions` 从县名推出来。
+        case placeCity(String)
         case tags
         case tag(Int)
         case albums
@@ -32,7 +35,7 @@ final class PhotoShelf {
             case .timeline: return "时间轴"
             case .recent: return "最近添加"
             case .people, .person: return "人物"
-            case .places, .place: return "地点"
+            case .places, .place, .placeCity: return "地点"
             case .tags, .tag: return "标签"
             case .albums, .album: return "相册"
             }
@@ -42,7 +45,7 @@ final class PhotoShelf {
         var parent: Route? {
             switch self {
             case .person: return .people
-            case .place: return .places
+            case .place, .placeCity: return .places
             case .tag: return .tags
             case .album: return .albums
             default: return nil
@@ -103,6 +106,46 @@ final class PhotoShelf {
     private(set) var place: PhotosAPI.Place?
     private(set) var tag: PhotosAPI.Tag?
     private(set) var album: PhotosAPI.Album?
+
+    // MARK: - 地点屏：搜索与按市分组
+
+    /// 地点屏的搜索词。**输入即筛**（291 条本地筛无成本），与照片屏的提交式
+    /// 搜索不同口径：这里筛的是地点名 + 上级市/省，不是照片。
+    private(set) var placeQuery = ""
+    /// 市聚合详情页（`Route.placeCity`）当前市名 —— 页头标题从这里取。
+    private(set) var placeCityName: String?
+
+    func setPlaceQuery(_ text: String) {
+        placeQuery = text
+    }
+
+    /// 搜索词命中的地点（乡镇 / 县区 / 市 / 省，均含去后缀形态）。
+    /// 「衢州」命中龙游县下全部乡镇，靠的就是 `ChinaDivisions` 补出来的市名。
+    var matchedPlaces: [PhotosAPI.Place] {
+        places.filter { $0.matches(placeQuery) }
+    }
+
+    /// 一个市的地点聚合：组头（市 · 省 · 总张数）+ 组内地点（按张数倒序）。
+    struct PlaceGroup: Identifiable {
+        let city: String
+        let province: String
+        let places: [PhotosAPI.Place]
+
+        var total: Int { places.reduce(0) { $0 + $1.itemCount } }
+        /// 直辖市市名 = 省名，标题写一遍就够（「上海市」而不是「上海市 · 上海市」）。
+        var title: String { province == city || province.isEmpty ? city : "\(city) · \(province)" }
+        var id: String { city }
+    }
+
+    /// 地点按市分组（市内按张数倒序、市间按总张数倒序）。
+    /// 🔴 表查不到的一律归「其他」（`Place.city` 的兜底值），别丢条目。
+    var placeGroups: [PlaceGroup] {
+        let grouped = Dictionary(grouping: matchedPlaces) { $0.city }
+        return grouped
+            .map { PlaceGroup(city: $0.key, province: $0.value.first?.province ?? "",
+                              places: $0.value.sorted { $0.itemCount > $1.itemCount }) }
+            .sorted { $0.total > $1.total }
+    }
 
     private static let pageSize = 1000
 
@@ -178,6 +221,7 @@ final class PhotoShelf {
         place = nil
         tag = nil
         album = nil
+        placeCityName = nil
         items = []
         groupsByIndexed = false
 
@@ -201,6 +245,9 @@ final class PhotoShelf {
         case .place(let id):
             place = places.first { $0.id == id }
             await load(filter: .place(id), manager)
+        case .placeCity(let city):
+            placeCityName = city
+            await loadCity(city, manager)
         case .tag(let id):
             tag = tags.first { $0.id == id }
             await load(filter: .tag(id), manager)
@@ -225,6 +272,8 @@ final class PhotoShelf {
             await load(filter: .person(id), manager)
         case .place(let id):
             await load(filter: .place(id), manager)
+        case .placeCity(let city):
+            await loadCity(city, manager)
         case .tag(let id):
             await load(filter: .tag(id), manager)
         case .album(let id):
@@ -253,6 +302,24 @@ final class PhotoShelf {
                                                  manager: manager)
             phase = .ready
             NSLog("[photos] 过滤 %@ → %d 条", String(describing: filter), items.count)
+        } catch {
+            phase = .failed(Self.describe(error))
+        }
+    }
+
+    /// 一个市下所有地点的照片并集（地点屏组头「看全部」）。
+    /// `geocoding_id` 只收单值，按地点顺序拉再合并（`PhotosAPI.allItems(places:)`）。
+    private func loadCity(_ city: String, _ manager: SessionManager?) async {
+        guard let manager else { return }
+        let ids = places.filter { $0.city == city }.map(\.id)
+        phase = .loading
+        do {
+            let start = Date()
+            items = try await PhotosAPI.allItems(places: ids, pageSize: Self.pageSize,
+                                                 manager: manager)
+            phase = .ready
+            NSLog("[photos] 市聚合 %@（%d 个地点）→ %d 条，%.1fs",
+                  city, ids.count, items.count, Date().timeIntervalSince(start))
         } catch {
             phase = .failed(Self.describe(error))
         }
@@ -441,6 +508,7 @@ final class PhotoShelf {
         case .person: return person?.itemCount ?? items.count
         case .places: return places.count
         case .place: return place?.itemCount ?? items.count
+        case .placeCity: return items.count
         case .tags: return tags.count
         case .tag: return tag?.itemCount ?? items.count
         case .albums: return albums.count

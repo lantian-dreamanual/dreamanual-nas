@@ -87,6 +87,8 @@ if [ -f "$BUILD_DIR/Assets.car" ]; then
 fi
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
 cp DreamanualNAS/Resources/brand.svg "$APP_NAME/Contents/Resources/brand.svg"
+# 区县 → 市/省对照表（地点屏搜索与按市分组用，scripts/gen-divisions.mjs 生成）
+cp DreamanualNAS/Resources/ChinaDivisions.json "$APP_NAME/Contents/Resources/ChinaDivisions.json"
 # 空 .lproj 目录 = 向 AppKit 申报可用本地化，系统存盘/打开面板才出中文
 #（配合 Info.plist 的 CFBundleDevelopmentRegion/CFBundleLocalizations）。
 mkdir -p "$APP_NAME/Contents/Resources/zh-Hans.lproj" \

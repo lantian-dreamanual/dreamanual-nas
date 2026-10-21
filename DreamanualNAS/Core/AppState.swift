@@ -3696,6 +3696,13 @@ final class AppState {
             await photoShelf.submitSearch(word, in: photos.loadedItems, manager: manager)
             NSLog("[photos] 搜索「%@」→ %d 条", photoShelf.keyword,
                   photoShelf.searchItems.count)
+        } else if screen.hasPrefix("placecity=") {
+            // `photoscreen=placecity=衢州市`：市聚合网格（地点屏组头「看全部」）。
+            // 市名跟在等号后 —— 与 `search=` 同款解析，不能走下面的精确匹配。
+            let city = String(screen.dropFirst("placecity=".count))
+            await photoShelf.select(.placeCity(city), manager: manager)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            NSLog("[photos] 市聚合 %@ → %d 条", city, photoShelf.items.count)
         } else {
             var target: PhotoShelf.Route = .timeline
             switch screen {
@@ -3732,6 +3739,13 @@ final class AppState {
         }
 
         guard !actions.isEmpty else { return }
+        // 地点屏搜索态：`photoscreen=places+placequery=衢州`（输入即筛，无提交）。
+        if let qi = actions.firstIndex(where: { $0.hasPrefix("placequery=") }) {
+            let word = String(actions[qi].dropFirst("placequery=".count))
+            photoShelf.setPlaceQuery(word)
+            NSLog("[photos] 地点搜索「%@」→ %d 个地点",
+                  word, photoShelf.matchedPlaces.count)
+        }
         // 弹窗类动作不依赖条目（新建相册在空相册屏也要能开）；只有对照片动手的
         // 那几个需要先有一条样本。
         let needsItem = actions.contains { ["select", "menu", "delete", "picker"].contains($0) }

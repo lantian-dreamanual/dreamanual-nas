@@ -206,6 +206,24 @@ enum PhotosAPI {
         return all
     }
 
+    /// 一个市 / 一个县下**所有地点**的照片并集（地点屏「看全部」用）。
+    ///
+    /// 🔴 `geocoding_id` **只收单个值** —— 数组 `[63,38]`、逗号串 `63,38` 都回
+    /// 120（2026-10-21 `photosprobe65` 实测），所以只能按地点逐个拉再合并。
+    /// 一个市通常 3–15 个乡镇，每个一两页，顺序拉一两秒；合并按 id 去重、
+    /// 按拍摄时间倒序（与分类网格同一口径）。
+    static func allItems(places placeIDs: [Int], pageSize: Int = 1000,
+                         cap: Int = 4000, manager: SessionManager) async throws -> [Item] {
+        guard !placeIDs.isEmpty else { return [] }
+        var merged: [Int: Item] = [:]
+        for placeID in placeIDs {
+            let chunk = try await allItems(filter: .place(placeID), pageSize: pageSize,
+                                           cap: cap, manager: manager)
+            for item in chunk { merged[item.id] = item }
+        }
+        return merged.values.sorted { $0.time > $1.time }
+    }
+
     /// 「最近添加」：最近 30 天**进库**的项，按 `indexed_time` 倒序，无 `total`。
     static func recentlyAddedPage(offset: Int, limit: Int,
                                   manager: SessionManager) async throws -> [Item] {
@@ -257,11 +275,31 @@ enum PhotosAPI {
     }
 
     /// 一个地点。字段是服务端按行政层级拼的，`name` 已经是「浦东新区, 三林镇」。
+    ///
+    /// 🔴 服务端**只给两级**（`first_level` = 区/县/县级市/地级市混在一层，
+    /// `second_level` = 乡镇街道），没有市与省 —— 市与省由 `ChinaDivisions`
+    /// 在客户端补，这是「搜衢州命中龙游」的唯一路子（2026-10-21 `photosprobe64`）。
     struct Place: Identifiable, Hashable {
         let id: Int
         let name: String
         let country: String
         let itemCount: Int
+        let firstLevel: String
+        let secondLevel: String
+
+        /// 上级地级市。直辖市与省直辖县级单位回省名（「上海市」「河南省」）。
+        var city: String { ChinaDivisions.city(of: firstLevel) ?? "其他" }
+        /// 上级省。直辖市时与 `city` 相同，展示时由调用方去重。
+        var province: String { ChinaDivisions.province(of: firstLevel) ?? "" }
+
+        /// 这个地点能不能被 `keyword` 命中（乡镇 / 县区 / 市 / 省，均含去后缀形态）。
+        func matches(_ keyword: String) -> Bool {
+            let word = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !word.isEmpty else { return true }
+            let haystack = ChinaDivisions.searchWords(firstLevel: firstLevel,
+                                                      secondLevel: secondLevel)
+            return haystack.contains { $0.localizedStandardContains(word) }
+        }
     }
 
     /// 一个标签。
@@ -783,11 +821,18 @@ private extension PhotosAPI.Person {
 private extension PhotosAPI.Place {
     init?(json: [String: Any]) {
         guard let id = PhotosAPI.intValue(json["id"]) else { return nil }
+        let name = (json["name"] as? String) ?? ""
+        let first = (json["first_level"] as? String) ?? ""
+        let second = (json["second_level"] as? String) ?? ""
         self.init(
             id: id,
-            name: (json["name"] as? String) ?? "",
+            name: name,
             country: (json["country"] as? String) ?? "",
-            itemCount: PhotosAPI.intValue(json["item_count"]) ?? 0
+            itemCount: PhotosAPI.intValue(json["item_count"]) ?? 0,
+            firstLevel: first.isEmpty ? name.split(separator: ",").first.map(String.init) ?? "" : first,
+            secondLevel: second.isEmpty ? name.split(separator: ",").last.map {
+                $0.trimmingCharacters(in: .whitespaces)
+            } ?? "" : second
         )
     }
 }

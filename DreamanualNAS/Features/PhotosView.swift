@@ -437,6 +437,10 @@ struct PhotosView: View {
                 DmPageHead(shelf.place?.name ?? "地点",
                            subtitle: detailSubtitle(shelf.place?.itemCount),
                            onBack: { goBack() }) { EmptyView() }
+            case .placeCity(let city):
+                DmPageHead(city,
+                           subtitle: detailSubtitle(shelf.items.count),
+                           onBack: { goBack() }) { EmptyView() }
             case .tags:
                 DmPageHead("标签", subtitle: tagsSubtitle) { EmptyView() }
             case .tag:
@@ -521,7 +525,7 @@ struct PhotosView: View {
     private var placesSubtitle: String {
         shelf.places.isEmpty
             ? "共享空间 · 按拍摄地点归类"
-            : "共享空间 · \(shelf.places.count) 个地点 · 按张数从多到少"
+            : "共享空间 · \(shelf.places.count) 个地点 · 按市分组，可搜乡镇 / 县市 / 省"
     }
 
     private var tagsSubtitle: String {
@@ -600,7 +604,7 @@ struct PhotosView: View {
                 tagsContent
             case .albums:
                 albumsContent
-            case .person, .place, .tag, .album:
+            case .person, .place, .placeCity, .tag, .album:
                 shelfGrid(shelf.items, phase: shelf.phase)
             }
         }
@@ -793,18 +797,85 @@ struct PhotosView: View {
 
     // MARK: - 地点 / 标签
 
+    /// 地点屏：搜索框 + 按市分组。搜索词即时筛（本地 291 条），命中的是乡镇 /
+    /// 县区 / 市 / 省 —— 「衢州」能把龙游县下全部乡镇带出来（`ChinaDivisions`）。
+    /// 搜索态平铺结果；非搜索态按市分组，组头可点「看全部」聚合该市照片。
     private var placesContent: some View {
-        cardList(
-            isEmpty: shelf.places.isEmpty,
-            emptyTitle: "还没有地点信息",
-            emptyNote: "照片带 GPS 时 NAS 会按拍摄地归类。",
-            rows: shelf.places.map {
-                CardListRow(id: $0.id, icon: "map-pin", title: $0.name, count: $0.itemCount)
-            },
-            onSelect: { id in
-                Task { await shelf.select(.place(id), manager: state.sessionManager) }
+        Group {
+            if shelf.places.isEmpty {
+                PhotosNotice(icon: "circle-x", title: "还没有地点信息",
+                             note: "照片带 GPS 时 NAS 会按拍摄地归类。")
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        DmSearchField(text: Binding(
+                            get: { shelf.placeQuery },
+                            set: { shelf.setPlaceQuery($0) }
+                        ), placeholder: "搜乡镇 / 县市 / 省")
+                        .frame(width: 280)
+                        .padding(.horizontal, DmSpace.s24)
+                        .padding(.top, DmSpace.s8)
+                        .padding(.bottom, DmSpace.s12)
+
+                        if shelf.placeQuery.isEmpty {
+                            placeGroups
+                        } else {
+                            placeSearchResults
+                        }
+                    }
+                    .padding(.bottom, DmSpace.s24)
+                }
             }
-        )
+        }
+    }
+
+    @ViewBuilder
+    private var placeGroups: some View {
+        if shelf.placeGroups.isEmpty {
+            PhotosNotice(icon: "circle-x", title: "没有地点信息",
+                         note: "照片带 GPS 时 NAS 会按拍摄地归类。")
+        } else {
+            ForEach(shelf.placeGroups) { group in
+                PlaceGroupHead(title: group.title, count: group.total) {
+                    Task { await shelf.select(.placeCity(group.city),
+                                              manager: state.sessionManager) }
+                }
+                VStack(spacing: DmSpace.s2) {
+                    ForEach(group.places) { place in
+                        CardListRowView(row: CardListRow(
+                            id: place.id, icon: "map-pin", title: place.name,
+                            count: place.itemCount
+                        )) {
+                            Task { await shelf.select(.place(place.id),
+                                                      manager: state.sessionManager) }
+                        }
+                    }
+                }
+                .padding(.horizontal, DmSpace.s24)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var placeSearchResults: some View {
+        let hits = shelf.matchedPlaces
+        if hits.isEmpty {
+            PhotosNotice(icon: "search", title: "没有匹配「\(shelf.placeQuery)」的地点",
+                         note: "搜的是乡镇、县市与省名，比如「衢州」「龙游」。")
+        } else {
+            VStack(spacing: DmSpace.s2) {
+                ForEach(hits) { place in
+                    CardListRowView(row: CardListRow(
+                        id: place.id, icon: "map-pin", title: place.name,
+                        count: place.itemCount, note: place.city
+                    )) {
+                        Task { await shelf.select(.place(place.id),
+                                                  manager: state.sessionManager) }
+                    }
+                }
+            }
+            .padding(.horizontal, DmSpace.s24)
+        }
     }
 
     private var tagsContent: some View {
@@ -966,6 +1037,7 @@ private struct PhotoRail: View {
 
     private var isPlaceDetail: Bool {
         if case .place = shelf.route { return true }
+        if case .placeCity = shelf.route { return true }
         return false
     }
 
@@ -1433,11 +1505,39 @@ private struct AlbumOverflowButton: View {
 
 /// 地点 / 标签列表的一行。形态同列表卡（`panel-2` 底、悬停 `panel-3`），
 /// 行首一枚 14 图标、行尾张数。
+/// 地点屏的市分组头：市名（·省）+ 总张数 + 「看全部」。点组头进市聚合网格
+/// （该市下所有地点的照片并集，`Route.placeCity`）。
+private struct PlaceGroupHead: View {
+    let title: String
+    let count: Int
+    let onSeeAll: () -> Void
+
+    var body: some View {
+        HStack(spacing: DmSpace.s8) {
+            Text(title)
+                .font(.system(size: DmText.t13, weight: .semibold))
+                .foregroundColor(Color.dmInk2)
+            Text("\(count) 张")
+                .font(.system(size: DmText.t11))
+                .monospacedDigit()
+                .foregroundColor(Color.dmInk3)
+            Spacer(minLength: 0)
+            Button("看全部") { onSeeAll() }
+                .buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(.horizontal, DmSpace.s24)
+        .padding(.top, DmSpace.s12)
+        .padding(.bottom, DmSpace.s8)
+    }
+}
+
 private struct CardListRow: Identifiable {
     let id: Int
     let icon: String
     let title: String
     let count: Int
+    /// 次要说明（搜索态地点行右侧的市名），空串不显示。
+    var note: String = ""
 }
 
 private struct CardListRowView: View {
@@ -1454,6 +1554,12 @@ private struct CardListRowView: View {
                 .font(.system(size: DmText.t13))
                 .foregroundColor(Color.dmInk)
                 .lineLimit(1)
+            if !row.note.isEmpty {
+                Text(row.note)
+                    .font(.system(size: DmText.t11))
+                    .foregroundColor(Color.dmInk3)
+                    .lineLimit(1)
+            }
             Spacer(minLength: DmSpace.s8)
             Text("\(row.count) 张")
                 .font(.system(size: DmText.t11))
