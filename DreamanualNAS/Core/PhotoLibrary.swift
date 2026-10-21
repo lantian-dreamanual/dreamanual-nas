@@ -541,6 +541,24 @@ enum PhotoDate {
                       c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
     }
 
+    /// `HH:mm`（补零）。时间编辑的显示与回填共用。
+    static func clock(_ date: Date) -> String {
+        let c = utcCalendar.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// 解析手输的时分：`20:46` / `20:46:31`。越界（25 点、70 分）回 `nil`，
+    /// 由调用方提示 —— 不猜、不夹取。
+    static func parseClock(_ text: String) -> (hour: Int, minute: Int, second: Int)? {
+        let parts = text.trimmingCharacters(in: .whitespaces).split(separator: ":")
+        guard (2...3).contains(parts.count),
+              let h = Int(parts[0]), let m = Int(parts[1]),
+              (0...23).contains(h), (0...59).contains(m) else { return nil }
+        let s = parts.count == 3 ? (Int(parts[2]) ?? -1) : 0
+        guard (0...59).contains(s) else { return nil }
+        return (h, m, s)
+    }
+
     /// 文件大小：`1.3 MB`。照片信息栏与列表共用。
     static func bytes(_ value: Int) -> String {
         let formatter = ByteCountFormatter()

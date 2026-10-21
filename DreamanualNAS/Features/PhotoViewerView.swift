@@ -40,6 +40,9 @@ struct PhotoViewerView: View {
     /// 取消 / 保存。原先是手输一整行 `2026-10-18 20:46`，用户反馈不好用。
     @State private var isEditingTime = false
     @State private var timeDraftDate = Date()
+    /// 浮层里时分输入框的字（`20:46`）。有改动就并进 `timeDraftDate`，
+    /// 日历选日时才能带上最新时分。
+    @State private var timeText = ""
 
     // 视频
     @State private var player: AVPlayer?
@@ -634,11 +637,10 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 拍摄时间行。点铅笔弹日历浮层：图形日历选日期、下面一行选时分，
-    /// 浮层里取消 / 保存。时间按 UTC 墙钟显示（与 `PhotoDate` 同一口径），
-    /// 系统控件得显式吃这个时区，否则会按本机时区再偏 8 小时。
-    ///
-    /// 浮层点外面或按 Esc 自动收起，等同取消（草稿丢弃、不发请求）。
+    /// 拍摄时间行。点铅笔弹日历浮层：日期用自绘月历，时分是一枚 72 宽的
+    /// 自有小输入框（只填 `20:46`）—— 原生 `stepperField` 不吃宽度提案，
+    /// 加宽外壳只是留白，文字照样显示不全（2026-10-21 用户两轮截图）。
+    /// 浮层点外面或按 Esc 收起，等同取消（草稿丢弃、不发请求）。
     @ViewBuilder
     private func timeRow(_ item: PhotosAPI.Item) -> some View {
         if isEditingTime {
@@ -664,15 +666,14 @@ struct PhotoViewerView: View {
             editableRow(label: "时间", text: PhotoDate.stamp(item.time),
                         placeholder: "未设置") {
                 timeDraftDate = item.time
+                timeText = PhotoDate.clock(item.time)
                 isEditingTime = true
             }
         }
     }
 
-    /// 日历浮层。日期用自绘月历（原生 `.graphical` 档不吃宽度提案，格子锁在
-    /// 24px 上下，340 宽的浮层里也摊不开 —— 2026-10-21 用户两轮截图反馈）；
-    /// 时分另配一行 `stepperField`。两块都吃 UTC 时区，显示的时间才是条目上
-    /// 那个墙上时间。
+    /// 日历浮层。时分输入有改动就并进草稿（日历选日的「保留时分」才拿得到
+    /// 新值）；解析不了先不动 —— 提交时统一校验并提示。
     private func timePicker(_ item: PhotosAPI.Item) -> some View {
         VStack(alignment: .leading, spacing: DmSpace.s16) {
             TimeCalendarGrid(selection: $timeDraftDate)
@@ -681,12 +682,11 @@ struct PhotoViewerView: View {
                 Text("时间")
                     .font(.system(size: DmText.t12))
                     .foregroundColor(Color.dmInk2)
-                DatePicker("", selection: $timeDraftDate,
-                           displayedComponents: [.hourAndMinute])
-                    .datePickerStyle(.stepperField)
-                    .labelsHidden()
-                    .controlSize(.regular)
-                    .frame(width: 132)
+                TextField("20:46", text: $timeText)
+                    .formFieldRow()
+                    .frame(width: 72)
+                    .onSubmit { commitTime(item) }
+                    .onChange(of: timeText) { mergeTimeText() }
                 Spacer(minLength: 0)
                 Button("取消") { isEditingTime = false }
                     .buttonStyle(SecondaryButtonStyle())
@@ -696,19 +696,39 @@ struct PhotoViewerView: View {
         }
         .padding(DmSpace.s16)
         .frame(width: 336)
-        .environment(\.timeZone, PhotoDate.utcCalendar.timeZone)
-        .environment(\.calendar, PhotoDate.utcCalendar)
-        .environment(\.locale, Locale(identifier: "zh_CN"))
     }
 
-    /// 提交拍摄时间：跟原值同一秒就只收起浮层；改了就写回，成功后
-    /// `setPhotoTime` 会把它挪到新的日期。
+    /// 把时分输入框的值并进草稿日期。解析不动就不并 —— 输到一半的
+    /// 「2」不该把时间改成 02:00。
+    private func mergeTimeText() {
+        guard let clock = PhotoDate.parseClock(timeText) else { return }
+        var comps = PhotoDate.utcCalendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: timeDraftDate)
+        comps.hour = clock.hour
+        comps.minute = clock.minute
+        if let date = PhotoDate.utcCalendar.date(from: comps) {
+            timeDraftDate = date
+        }
+    }
+
+    /// 提交拍摄时间：时分校验不过就留在浮层里提示；改了才写回，成功后
+    /// `setPhotoTime` 会把它挪到新的日期。秒数沿用原值（输入只到分钟）。
     private func commitTime(_ item: PhotosAPI.Item) {
-        let changed = Int(timeDraftDate.timeIntervalSince1970)
-            != Int(item.time.timeIntervalSince1970)
+        guard let clock = PhotoDate.parseClock(timeText) else {
+            state.showToast("时分按「20:46」填", .err)
+            return
+        }
+        var comps = PhotoDate.utcCalendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: item.time)
+        comps.year = PhotoDate.utcCalendar.component(.year, from: timeDraftDate)
+        comps.month = PhotoDate.utcCalendar.component(.month, from: timeDraftDate)
+        comps.day = PhotoDate.utcCalendar.component(.day, from: timeDraftDate)
+        comps.hour = clock.hour
+        comps.minute = clock.minute
+        let final = PhotoDate.utcCalendar.date(from: comps) ?? timeDraftDate
         isEditingTime = false
-        guard changed else { return }
-        Task { await state.setPhotoTime(timeDraftDate) }
+        guard Int(final.timeIntervalSince1970) != Int(item.time.timeIntervalSince1970) else { return }
+        Task { await state.setPhotoTime(final) }
     }
 
     /// 提交描述：没改字就只退出、不发请求；空串按「清空」处理（写回通道：
