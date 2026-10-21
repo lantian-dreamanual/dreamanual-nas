@@ -686,7 +686,7 @@ struct PhotoViewerView: View {
                     .datePickerStyle(.stepperField)
                     .labelsHidden()
                     .controlSize(.regular)
-                    .frame(width: 104)
+                    .frame(width: 132)
                 Spacer(minLength: 0)
                 Button("取消") { isEditingTime = false }
                     .buttonStyle(SecondaryButtonStyle())
