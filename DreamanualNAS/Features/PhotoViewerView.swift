@@ -669,16 +669,13 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 日历浮层。图形日历只认日期，时分另配一行 `stepperField` —— 两块都吃
-    /// UTC 时区，显示的时间才是条目上那个墙上时间。宽 340：图形日历随宽摊开，
-    /// 300 的版本格子挤在一起（2026-10-21 用户截图反馈）。
+    /// 日历浮层。日期用自绘月历（原生 `.graphical` 档不吃宽度提案，格子锁在
+    /// 24px 上下，340 宽的浮层里也摊不开 —— 2026-10-21 用户两轮截图反馈）；
+    /// 时分另配一行 `stepperField`。两块都吃 UTC 时区，显示的时间才是条目上
+    /// 那个墙上时间。
     private func timePicker(_ item: PhotosAPI.Item) -> some View {
         VStack(alignment: .leading, spacing: DmSpace.s16) {
-            DatePicker("", selection: $timeDraftDate,
-                       displayedComponents: [.date])
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
+            TimeCalendarGrid(selection: $timeDraftDate)
 
             HStack(spacing: DmSpace.s8) {
                 Text("时间")
@@ -688,8 +685,8 @@ struct PhotoViewerView: View {
                            displayedComponents: [.hourAndMinute])
                     .datePickerStyle(.stepperField)
                     .labelsHidden()
-                    .controlSize(.small)
-                    .frame(width: 92)
+                    .controlSize(.regular)
+                    .frame(width: 104)
                 Spacer(minLength: 0)
                 Button("取消") { isEditingTime = false }
                     .buttonStyle(SecondaryButtonStyle())
@@ -698,7 +695,7 @@ struct PhotoViewerView: View {
             }
         }
         .padding(DmSpace.s16)
-        .frame(width: 340)
+        .frame(width: 336)
         .environment(\.timeZone, PhotoDate.utcCalendar.timeZone)
         .environment(\.calendar, PhotoDate.utcCalendar)
         .environment(\.locale, Locale(identifier: "zh_CN"))
@@ -914,4 +911,119 @@ private struct EditableValueRow: View {
     }
 
     private var hasText: Bool { !(text ?? "").isEmpty }
+}
+
+/// 月历网格：自绘。原生 `.graphical` 档的格子大小跟着内建字号走、不吃宽度
+/// 提案，信息栏的浮层里显得又小又挤（2026-10-21 用户截图两轮反馈）。
+///
+/// 口径与照片库同源：**UTC 墙钟**（`PhotoDate.utcCalendar`），选日期只动
+/// 年月日、时分秒原样保留。单元格 40 宽 / 30 高，选中 `accent-fill` +
+/// `on-accent`，悬停 `panel-3`，当月外的格子留白。
+private struct TimeCalendarGrid: View {
+    @Binding var selection: Date
+    @State private var visibleMonth: Date
+    @State private var hoveredDay: Date?
+
+    private let calendar = PhotoDate.utcCalendar
+
+    init(selection: Binding<Date>) {
+        _selection = selection
+        let comps = PhotoDate.utcCalendar.dateComponents([.year, .month],
+                                                         from: selection.wrappedValue)
+        _visibleMonth = State(initialValue:
+            PhotoDate.utcCalendar.date(from: comps) ?? selection.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(spacing: DmSpace.s10) {
+            HStack(spacing: DmSpace.s8) {
+                Text(header)
+                    .font(.system(size: DmText.t13, weight: .medium))
+                    .foregroundColor(Color.dmInk)
+                Spacer(minLength: 0)
+                IconButton(iconName: "chevron-left", compact: true, label: "上个月") {
+                    move(-1)
+                }
+                IconButton(iconName: "chevron-right", compact: true, label: "下个月") {
+                    move(1)
+                }
+            }
+
+            // 周日开头，与格子排布同序。
+            HStack(spacing: DmSpace.s2) {
+                ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { name in
+                    Text(name)
+                        .font(.system(size: DmText.t11))
+                        .foregroundColor(Color.dmInk3)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            let days = monthDays()
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(),
+                                                         spacing: DmSpace.s2), count: 7),
+                      spacing: DmSpace.s2) {
+                ForEach(days.indices, id: \.self) { index in
+                    if let date = days[index] {
+                        dayCell(date)
+                    } else {
+                        Color.clear.frame(minHeight: 30)
+                    }
+                }
+            }
+        }
+    }
+
+    private var header: String {
+        let c = calendar.dateComponents([.year, .month], from: visibleMonth)
+        return String(format: "%d年%d月", c.year ?? 0, c.month ?? 0)
+    }
+
+    /// 当月的日子序列，周日前面的空位给 `nil`（留白，不放邻月日期）。
+    private func monthDays() -> [Date?] {
+        guard let interval = calendar.dateInterval(of: .month, for: visibleMonth),
+              let count = calendar.range(of: .day, in: .month, for: interval.start)?.count
+        else { return [] }
+        let firstWeekday = calendar.component(.weekday, from: interval.start)
+        var cells: [Date?] = Array(repeating: nil, count: firstWeekday - 1)
+        for offset in 0..<count {
+            cells.append(calendar.date(byAdding: .day, value: offset, to: interval.start))
+        }
+        return cells
+    }
+
+    private func dayCell(_ date: Date) -> some View {
+        let isSelected = calendar.isDate(date, inSameDayAs: selection)
+        let isHovered = hoveredDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
+        return Text(String(calendar.component(.day, from: date)))
+            .font(.system(size: DmText.t12))
+            .monospacedDigit()
+            .foregroundColor(isSelected ? Color.dmOnAccent : Color.dmInk2)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(
+                RoundedRectangle(cornerRadius: DmRadius.r6)
+                    .fill(isSelected ? Color.dmAccentFill
+                          : isHovered ? Color.dmPanel3 : Color.clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { hoveredDay = $0 ? date : nil }
+            .onTapGesture { pick(date) }
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityLabel("\(header)\(calendar.component(.day, from: date))日")
+    }
+
+    /// 选中某天：只换年月日，时分秒从当前草稿原样带过来。
+    private func pick(_ date: Date) {
+        var comps = calendar.dateComponents([.year, .month, .day], from: date)
+        let time = calendar.dateComponents([.hour, .minute, .second], from: selection)
+        comps.hour = time.hour
+        comps.minute = time.minute
+        comps.second = time.second
+        selection = calendar.date(from: comps) ?? date
+    }
+
+    private func move(_ delta: Int) {
+        visibleMonth = calendar.date(byAdding: .month, value: delta,
+                                     to: visibleMonth) ?? visibleMonth
+    }
 }
