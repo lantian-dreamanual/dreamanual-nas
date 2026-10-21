@@ -670,9 +670,10 @@ struct PhotoViewerView: View {
     }
 
     /// 日历浮层。图形日历只认日期，时分另配一行 `stepperField` —— 两块都吃
-    /// UTC 时区，显示的时间才是条目上那个墙上时间。
+    /// UTC 时区，显示的时间才是条目上那个墙上时间。宽 340：图形日历随宽摊开，
+    /// 300 的版本格子挤在一起（2026-10-21 用户截图反馈）。
     private func timePicker(_ item: PhotosAPI.Item) -> some View {
-        VStack(alignment: .leading, spacing: DmSpace.s12) {
+        VStack(alignment: .leading, spacing: DmSpace.s16) {
             DatePicker("", selection: $timeDraftDate,
                        displayedComponents: [.date])
                 .datePickerStyle(.graphical)
@@ -688,7 +689,7 @@ struct PhotoViewerView: View {
                     .datePickerStyle(.stepperField)
                     .labelsHidden()
                     .controlSize(.small)
-                    .frame(width: 88)
+                    .frame(width: 92)
                 Spacer(minLength: 0)
                 Button("取消") { isEditingTime = false }
                     .buttonStyle(SecondaryButtonStyle())
@@ -696,8 +697,8 @@ struct PhotoViewerView: View {
                     .buttonStyle(PrimaryButtonStyle())
             }
         }
-        .padding(DmSpace.s14)
-        .frame(width: 300)
+        .padding(DmSpace.s16)
+        .frame(width: 340)
         .environment(\.timeZone, PhotoDate.utcCalendar.timeZone)
         .environment(\.calendar, PhotoDate.utcCalendar)
         .environment(\.locale, Locale(identifier: "zh_CN"))
