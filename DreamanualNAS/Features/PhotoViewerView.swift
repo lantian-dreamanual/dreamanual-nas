@@ -28,6 +28,10 @@ struct PhotoViewerView: View {
     @State private var isStepping = false
     /// `←` `→` 用本机事件监听：覆盖层里没有文本输入，全局拦这两个键不会误伤。
     @State private var keyMonitor: Any?
+    /// 大图区的悬停态：悬停时两侧浮出翻页箭头。
+    @State private var isStageHovered = false
+    /// 箭头自身的悬停态（悬停时底色提亮一档）。
+    @State private var isStageArrowHovered = false
     /// 描述行内编辑态（规划第四节 8：悬停出铅笔、点开变行内表单）。
     @State private var isEditingDescription = false
     /// 编辑中的草稿。进编辑态时从 `item.note` 复制，取消即弃。
@@ -167,8 +171,43 @@ struct PhotoViewerView: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            // 左右切换的可见入口（2026-10-21 用户定）：悬停画面两侧浮出箭头，
+            // 点一下翻一张。序列里照片视频同列 —— 不按类型分岔，翻到哪算哪。
+            .overlay(alignment: .leading) { stageArrow(-1, in: geo.size) }
+            .overlay(alignment: .trailing) { stageArrow(1, in: geo.size) }
+            .trackingHover($isStageHovered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 大图两侧的翻页箭头。序列走到头就禁掉（`neighbor` 回 nil 的方向）；
+    /// 只有一张时整块不摆。
+    @ViewBuilder
+    private func stageArrow(_ direction: Int, in size: CGSize) -> some View {
+        if isStageHovered, let current = item,
+           library.neighbor(of: current, step: direction) != nil,
+           library.viewSequence.count > 1 {
+            Button {
+                Task { await step(direction) }
+            } label: {
+                LucideIcon(direction < 0 ? "chevron-left" : "chevron-right",
+                           size: DmIcon.i16)
+                    .foregroundColor(Color.dmInk)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        Circle().fill(isStageArrowHovered
+                                      ? Color.dmPanel3 : Color.dmPanel2.opacity(0.85))
+                    )
+                    .overlay(
+                        Circle().strokeBorder(Color.dmLine2, lineWidth: DmLine.base)
+                    )
+            }
+            .buttonStyle(.plain)
+            .onHover { isStageArrowHovered = $0 }
+            .padding(.horizontal, DmSpace.s16)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .transition(.opacity)
+        }
     }
 
     // MARK: - 视频
