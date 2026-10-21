@@ -169,14 +169,14 @@ struct ImmersiveView: View {
     }
 
     private var closeButton: some View {
-        // 收起（2026-10-18 用户点名）：这一屏是「从底下滑上来」的覆盖层，
-        // 退出动作就是往下收 —— `arrow-down-to-line` 说的是那个动作，
-        // `x` 说的是「关掉一个东西」，在整窗覆盖层上语义对不上。
+        // 收起（2026-10-18 用户点名替掉 `x`；2026-10-22 再换 `panel-bottom-close`
+        // —— `arrow-down-to-line` 形似下载，误读率高。「从底下滑上来的覆盖层，
+        // 退出 = 把下面那格合上」，面板收合的画法两义都不沾）。
         //
         // 落位与照片查看器统一（同日）：按钮中线对齐窗口题头行 —— 28 高的钮
         // top 6 → 中线 20，与查看器 40 高顶栏的中线一致；右边距 16。图形 18：
         // 这一屏唯一的常驻控件，比工具条里的次级动作大一号。
-        IconButton(iconName: "arrow-down-to-line", iconSize: DmIcon.i18, label: "收起") { state.closeImmersive() }
+        IconButton(iconName: "panel-bottom-close", iconSize: DmIcon.i18, label: "收起") { state.closeImmersive() }
             .help("收起（Esc）")
             .padding(.top, DmSpace.s6)
             .padding(.trailing, DmSpace.s16)

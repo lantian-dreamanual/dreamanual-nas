@@ -188,13 +188,22 @@ struct PhotoViewerView: View {
             }
             .help("在文件夹中显示")
 
+            // 存原图 / 原视频（照片与视频都有）：复用批量选择那条下载链路
+            // （PhotoWriter.saveOriginal —— FileStation 流式 + 照片接口兜底），
+            // 取消保存面板不算失败。
+            IconButton(iconName: "download", label: "下载") {
+                guard let item else { return }
+                Task { await state.savePhotoOriginal(item) }
+            }
+            .help("保存原图到本机")
+
             IconButton(iconName: "panel-right",
                        label: showsInfo ? "收起信息栏" : "展开信息栏") {
                 withAnimation(.easeInOut(duration: DmMotion.base)) { showsInfo.toggle() }
             }
             .help(showsInfo ? "收起信息栏" : "展开信息栏")
 
-            IconButton(iconName: "arrow-down-to-line", iconSize: DmIcon.i18, label: "收起") {
+            IconButton(iconName: "panel-bottom-close", iconSize: DmIcon.i18, label: "收起") {
                 close()
             }
             .help("收起（Esc）")

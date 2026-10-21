@@ -218,9 +218,11 @@ struct LucideIcon: View {
         "circle-x": "xmark.circle",
         "info": "info.circle",
         "x": "xmark",
-        // 沉浸模式的收起钮（2026-10-18 用户点名，替掉 `x`）：那一屏是从底部滑上来的
-        // 覆盖层，退出动作是「往下收」，`arrow.down.to.line` 画的正是这个。
-        "arrow-down-to-line": "arrow.down.to.line",
+        // 沉浸模式 / 照片查看器的收起钮（2026-10-22 换 `panel-bottom-close`，替掉
+        // 形似下载的 `arrow-down-to-line`）：两屏都是从底滑上的覆盖层，退出 =
+        // 把下面那格合上。兜底取 SF 的下三分之一填充面板（语义同族，形态略异，
+        // 只在资产漏收时才上场）。
+        "panel-bottom-close": "rectangle.bottomthird.inset.filled",
         // 表头排序与字段配置这几枚（2026-10-13 补）。⚠️ `chevron-down` 是**补漏**：
         // 分页那一行早就用了它、表里却一直没有，真机上画的是问号 —— 门禁不管
         // 图标名，只有截图能抓到，所以加图标时顺手扫一遍「用过 vs 表里有」。
