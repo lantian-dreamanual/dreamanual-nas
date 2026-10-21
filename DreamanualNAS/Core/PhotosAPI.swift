@@ -394,6 +394,28 @@ enum PhotosAPI {
                             size: size, manager: manager)
     }
 
+    /// 人物卡的人脸裁切：同一条 `Thumbnail`，**`type=face`**。
+    ///
+    /// 2026-10-21 实测定案（`photosprobe32/33.py`）：同一组 `unit_id` +
+    /// `cache_key`（`Person.list` 的 `additional.thumbnail` 那两件），`type`
+    /// 换 `face` 就回**正方形人脸裁切** —— 群晖 Photos 人物列表用的正是它。
+    /// 🔴 `size` 对 face 档**无效**（固定按源图出，79–231px 不等）；部分人物
+    /// 的 cover 没有现成脸图（HTTP 404），调用方回退 `type=unit` 整图。
+    /// （`type=person` 只在个别人身上有回图，其余 404，不用；`type=cover`
+    /// 不存在。）
+    static func faceThumbnail(unitID: Int, cacheKey: String,
+                              manager: SessionManager) async throws -> Data {
+        try await manager.data(
+            kind: .file, api: "\(team).Thumbnail", version: 2, method: "get",
+            params: [
+                "id": String(unitID),
+                "cache_key": cacheKey,
+                "type": "face",
+                "size": ThumbSize.sm.rawValue,
+            ]
+        )
+    }
+
     /// 原图 / 原视频的字节。`unit_id` 必须是**方括号串**（裸数字回 117，2026-10-20
     /// 复核），`cache_key` 从条目的 `additional.thumbnail` 拿。
     static func originalData(_ item: Item, manager: SessionManager) async throws -> Data {

@@ -505,6 +505,24 @@ final class PhotoLibrary {
         }
     }
 
+    /// 人物卡头像：**先取人脸裁切（`type=face`），落空回退整图**。
+    ///
+    /// face 档对部分人物的 cover 回 404（服务端没有现成脸图），那种就沿用
+    /// 整张照片缩略图；成败都只发两发请求以内，缓存键与整图共用一个。
+    func personFaceImage(key: String, unitID: Int, cacheKey: String,
+                         manager: SessionManager?) async -> Data? {
+        if let cached = auxThumbs[key] { return cached }
+        guard let manager, unitID > 0, !cacheKey.isEmpty else { return nil }
+        if let face = try? await PhotosAPI.faceThumbnail(unitID: unitID, cacheKey: cacheKey,
+                                                         manager: manager),
+           face.starts(with: [0xFF, 0xD8]) {
+            auxThumbs[key] = face
+            return face
+        }
+        return await coverImage(key: key, unitID: unitID, cacheKey: cacheKey,
+                                manager: manager)
+    }
+
     // MARK: - 辅助
 
     /// 按文件名找已载入的条目。本机预览只有文件名这个键（条目里不带完整路径）。

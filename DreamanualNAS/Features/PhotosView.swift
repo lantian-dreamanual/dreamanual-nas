@@ -1312,10 +1312,10 @@ private struct PersonCard: View {
         .accessibilityAction(named: "打开") { onOpen() }
         .task(id: person.id) {
             guard image == nil else { return }
-            guard let data = await library.coverImage(key: "p:\(person.id)",
-                                                      unitID: person.coverUnitID,
-                                                      cacheKey: person.coverKey,
-                                                      manager: manager) else { return }
+            guard let data = await library.personFaceImage(key: "p:\(person.id)",
+                                                           unitID: person.coverUnitID,
+                                                           cacheKey: person.coverKey,
+                                                           manager: manager) else { return }
             image = NSImage(data: data)
         }
     }
