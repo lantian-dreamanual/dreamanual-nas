@@ -541,28 +541,6 @@ enum PhotoDate {
                       c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
     }
 
-    /// 解析手输的拍摄时间。接受界面自己的显示格式（`2026年10月18日 20:46`），
-    /// 也容忍 `2026-10-18 20:46` / `2026/10/18 20:46` 与带秒的写法；
-    /// 只填日期按当天零点。解析不了回 `nil` —— 由调用方提示，不猜。
-    static func parse(_ text: String) -> Date? {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return nil }
-        let patterns = [
-            "yyyy年M月d日 HH:mm:ss", "yyyy年M月d日 HH:mm", "yyyy年M月d日",
-            "yyyy-M-d HH:mm:ss", "yyyy-M-d HH:mm", "yyyy-M-d",
-            "yyyy/M/d HH:mm:ss", "yyyy/M/d HH:mm", "yyyy/M/d",
-        ]
-        let formatter = DateFormatter()
-        formatter.calendar = utcCalendar
-        formatter.timeZone = utcCalendar.timeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        for pattern in patterns {
-            formatter.dateFormat = pattern
-            if let date = formatter.date(from: cleaned) { return date }
-        }
-        return nil
-    }
-
     /// 文件大小：`1.3 MB`。照片信息栏与列表共用。
     static func bytes(_ value: Int) -> String {
         let formatter = ByteCountFormatter()

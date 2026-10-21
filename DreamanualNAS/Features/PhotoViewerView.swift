@@ -36,11 +36,10 @@ struct PhotoViewerView: View {
     @State private var descriptionOriginal = ""
     /// 编辑框焦点：进编辑态即聚焦，回车直接提交。
     @FocusState private var isDescriptionFieldFocused: Bool
-    /// 拍摄时间的行内编辑态（与描述同一套出口与脏检查）。
+    /// 拍摄时间的编辑态：点铅笔弹日历浮层（图形日历 + 时分），改完在浮层里
+    /// 取消 / 保存。原先是手输一整行 `2026-10-18 20:46`，用户反馈不好用。
     @State private var isEditingTime = false
-    @State private var timeDraft = ""
-    @State private var timeOriginal = ""
-    @FocusState private var isTimeFieldFocused: Bool
+    @State private var timeDraftDate = Date()
 
     // 视频
     @State private var player: AVPlayer?
@@ -635,49 +634,83 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 拍摄时间行。编辑态是一行文本（`2026年10月18日 20:46`），提交时解析；
-    /// 解析不了就留在编辑态并提示，不猜也不发请求。改完会挪到新的日期，
-    /// 时间轴上的位置跟着变（`PhotoLibrary.resettleItem`）。
+    /// 拍摄时间行。点铅笔弹日历浮层：图形日历选日期、下面一行选时分，
+    /// 浮层里取消 / 保存。时间按 UTC 墙钟显示（与 `PhotoDate` 同一口径），
+    /// 系统控件得显式吃这个时区，否则会按本机时区再偏 8 小时。
+    ///
+    /// 浮层点外面或按 Esc 自动收起，等同取消（草稿丢弃、不发请求）。
     @ViewBuilder
     private func timeRow(_ item: PhotosAPI.Item) -> some View {
         if isEditingTime {
-            inlineEditor(label: "时间", text: $timeDraft,
-                         focus: $isTimeFieldFocused,
-                         placeholder: "2026-10-18 20:46",
-                         isActive: { isEditingTime },
-                         onCommit: { commitTime(item) },
-                         onCancel: { cancelTime() })
+            HStack(spacing: DmSpace.s12) {
+                rowLabel("时间")
+                HStack(spacing: DmSpace.s8) {
+                    Text(PhotoDate.stamp(timeDraftDate))
+                        .font(.system(size: DmText.t13))
+                        .foregroundColor(Color.dmInk)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    LucideIcon("calendar-days", size: DmIcon.i14)
+                        .foregroundColor(Color.dmInk3)
+                }
+                .formFieldRow()
+                .frame(maxWidth: .infinity)
+                .popover(isPresented: $isEditingTime, arrowEdge: .bottom) {
+                    timePicker(item)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             editableRow(label: "时间", text: PhotoDate.stamp(item.time),
                         placeholder: "未设置") {
-                timeDraft = PhotoDate.stamp(item.time)
-                timeOriginal = timeDraft
+                timeDraftDate = item.time
                 isEditingTime = true
-                isTimeFieldFocused = true
             }
         }
     }
 
-    /// 提交拍摄时间：草稿跟原值逐字相同就只退出（秒数不会被白白抹掉，
-    /// 显示格式只到分钟）；解析不了留在编辑态提示格式。
-    private func commitTime(_ item: PhotosAPI.Item) {
-        guard timeDraft != timeOriginal else {
-            isEditingTime = false
-            isTimeFieldFocused = false
-            return
+    /// 日历浮层。图形日历只认日期，时分另配一行 `stepperField` —— 两块都吃
+    /// UTC 时区，显示的时间才是条目上那个墙上时间。
+    private func timePicker(_ item: PhotosAPI.Item) -> some View {
+        VStack(alignment: .leading, spacing: DmSpace.s12) {
+            DatePicker("", selection: $timeDraftDate,
+                       displayedComponents: [.date])
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: DmSpace.s8) {
+                Text("时间")
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk2)
+                DatePicker("", selection: $timeDraftDate,
+                           displayedComponents: [.hourAndMinute])
+                    .datePickerStyle(.stepperField)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(width: 88)
+                Spacer(minLength: 0)
+                Button("取消") { isEditingTime = false }
+                    .buttonStyle(SecondaryButtonStyle())
+                Button("保存") { commitTime(item) }
+                    .buttonStyle(PrimaryButtonStyle())
+            }
         }
-        guard let date = PhotoDate.parse(timeDraft) else {
-            state.showToast("时间看不懂，按「2026-10-18 20:46」填", .err)
-            return
-        }
-        isEditingTime = false
-        isTimeFieldFocused = false
-        Task { await state.setPhotoTime(date) }
+        .padding(DmSpace.s14)
+        .frame(width: 300)
+        .environment(\.timeZone, PhotoDate.utcCalendar.timeZone)
+        .environment(\.calendar, PhotoDate.utcCalendar)
+        .environment(\.locale, Locale(identifier: "zh_CN"))
     }
 
-    private func cancelTime() {
+    /// 提交拍摄时间：跟原值同一秒就只收起浮层；改了就写回，成功后
+    /// `setPhotoTime` 会把它挪到新的日期。
+    private func commitTime(_ item: PhotosAPI.Item) {
+        let changed = Int(timeDraftDate.timeIntervalSince1970)
+            != Int(item.time.timeIntervalSince1970)
         isEditingTime = false
-        isTimeFieldFocused = false
+        guard changed else { return }
+        Task { await state.setPhotoTime(timeDraftDate) }
     }
 
     /// 提交描述：没改字就只退出、不发请求；空串按「清空」处理（写回通道：
@@ -705,7 +738,6 @@ struct PhotoViewerView: View {
         }
         if isEditingTime {
             isEditingTime = false
-            isTimeFieldFocused = false
         }
     }
 
@@ -772,12 +804,12 @@ struct PhotoViewerView: View {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // 描述 / 时间编辑中：Esc 只取消当次编辑（其余键还给输入框 ——
-            // 方向键移光标、回车交给 onSubmit），不然按 Esc 会把整个查看器关掉。
+            // 描述 / 时间编辑中：Esc 只收起当次编辑（其余键照常交给输入框或
+            // 日历浮层），不然按 Esc 会把整个查看器关掉。
             if isEditingDescription || isEditingTime {
                 if event.keyCode == 53 {
                     cancelDescription()
-                    cancelTime()
+                    isEditingTime = false
                     return nil
                 }
                 return event
