@@ -198,6 +198,13 @@ final class PhotoShelf {
         people = (try? await PhotosAPI.persons(manager: manager)) ?? people
     }
 
+    /// 标签列表重拉。查看器里挂 / 摘标签会动 `item_count`，不重拉的话
+    /// 标签屏与侧栏的计数都停在旧数上。
+    func reloadTags(_ manager: SessionManager?) async {
+        guard let manager else { return }
+        tags = (try? await PhotosAPI.tags(manager: manager)) ?? tags
+    }
+
     private func recentlyAdded(_ manager: SessionManager) async throws -> [PhotosAPI.Item] {
         var out: [PhotosAPI.Item] = []
         var offset = 0

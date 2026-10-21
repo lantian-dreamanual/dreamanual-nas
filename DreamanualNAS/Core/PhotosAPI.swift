@@ -307,6 +307,14 @@ enum PhotosAPI {
         let id: Int
         let name: String
         let itemCount: Int
+
+        /// `get_tag` 回的条目没有 `item_count`（只有 id / name），补 0 占位 ——
+        /// 查看器标签区只显示名字，用不到计数。
+        init(id: Int, name: String, itemCount: Int = 0) {
+            self.id = id
+            self.name = name
+            self.itemCount = itemCount
+        }
     }
 
     /// 一个相册。共享空间的相册库与个人空间同一套接口，靠 `team_space` 切。
@@ -386,6 +394,58 @@ enum PhotosAPI {
     static func tags(manager: SessionManager) async throws -> [Tag] {
         try await paged(api: "\(team).Browse.GeneralTag", version: 1, manager: manager)
             .compactMap { Tag(json: $0) }
+    }
+
+    /// 一张照片当前挂的标签。`get_tag` 的 `id` **必须方括号数组**（裸数字回
+    /// `intersection` / `union` 全空 —— 2026-10-21 `photosprobe70` 实测）；单张
+    /// 时两个列表相同，取 `union`。多选批量取 `intersection`（共有标签）。
+    static func tags(itemID: Int, manager: SessionManager) async throws -> [Tag] {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "get_tag",
+            params: ["id": "[\(itemID)]"])
+        guard let root = raw as? [String: Any],
+              let union = ((root["data"] as? [String: Any]) ?? root)["union"] as? [[String: Any]] else {
+            return []
+        }
+        return union.compactMap { entry in
+            guard let id = intValue(entry["id"]) else { return nil }
+            return Tag(id: id, name: (entry["name"] as? String) ?? "")
+        }
+    }
+
+    /// 给照片加标签。🔴 `id` 与 `tag` 都是**方括号整数数组串**（`"[15705]"` /
+    /// `"[11]"`）—— 裸数字回 ok + `error_list` 空但**静默空转**（2026-10-21
+    /// `photosprobe69` 真机闭环：裸 id 计数不变，方括号生效），假成功族，
+    /// 成败只能回读（`tags(itemID:)` 或 `GeneralTag.list` 的 `item_count`）。
+    /// `id` 是数组所以天然支持批量（前端一次传多张）。
+    static func addTag(itemID: Int, tagIDs: [Int], manager: SessionManager) async throws {
+        _ = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "add_tag",
+            params: ["id": "[\(itemID)]",
+                     "tag": "[" + tagIDs.map(String.init).joined(separator: ",") + "]"])
+    }
+
+    /// 把标签从照片上摘掉。参数形状与 `add_tag` 相同（同款方括号 / 假成功族）。
+    static func removeTag(itemID: Int, tagIDs: [Int], manager: SessionManager) async throws {
+        _ = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "remove_tag",
+            params: ["id": "[\(itemID)]",
+                     "tag": "[" + tagIDs.map(String.init).joined(separator: ",") + "]"])
+    }
+
+    /// 新建标签。`GeneralTag.create` 回 `{"tag": {...}}`；🔴 **标签本体没有
+    /// 删除 / 改名方法**（66 号穷举全 103），建错了就是永久垃圾 —— 调用方要
+    /// 在确认键上拦空串与重名。写完回读按名对上才算成。
+    static func createTag(name: String, manager: SessionManager) async throws -> Tag? {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.GeneralTag", version: 1, method: "create",
+            params: ["name": name])
+        guard let root = raw as? [String: Any],
+              let tag = (root["tag"] as? [String: Any]) ?? (root["data"] as? [String: Any]),
+              let id = intValue(tag["id"]) else {
+            return nil
+        }
+        return Tag(id: id, name: (tag["name"] as? String) ?? name)
     }
 
     static func albums(manager: SessionManager) async throws -> [Album] {

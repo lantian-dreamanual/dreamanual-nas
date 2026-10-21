@@ -166,6 +166,9 @@ final class AppState {
     /// 冒烟口子：查看器一开就进圈脸编辑（`DM_UI=photoedit`）。编辑态里已有
     /// 脸框要真机拉一次接口才画得出来，冒烟只负责把这一屏摆出来截图。
     var photoSmokeFaceEdit = false
+    /// 冒烟口子：查看器一开就给这张挂第一枚标签（`DM_UI=phototagadd`）。
+    /// 挂的动作由查看器自己做（走信息栏同一条 attachTag，itemTags 才刷新）。
+    var photoSmokeTagAdd = false
     /// 正拖在照片页上方的这批文件的落点摘要（拖入遮罩上那两句话）。
     /// 由 `FileDropCatcher.onHover` 算、松手或拖走时清空。放在这里而不是视图的
     /// `@State`：冒烟通路要能把它摆出来截图（真拖拽 AI 发不出来）。
@@ -1074,6 +1077,78 @@ final class AppState {
         }
         photoSelection.clear()
         NSLog("[photos] 加到相册 %d：成功 %d / 失败 %d", albumID, result.done, result.failed)
+    }
+
+    // MARK: - 照片标签（查看器信息栏）
+
+    /// 写完后的统一回读（`get_tag` 单张取 `union`）。
+    private func readPhotoTags(_ item: PhotosAPI.Item,
+                               manager: SessionManager) async -> [PhotosAPI.Tag] {
+        (try? await PhotosAPI.tags(itemID: item.id, manager: manager)) ?? []
+    }
+
+    /// 挂标签。`add_tag` 是假成功族（回 ok 也可能没写上）：回读确认，读到
+    /// 才算成；成功顺手重拉标签列表（`item_count` 变了，标签屏与侧栏要跟上）。
+    /// 返回写完后的最新标签（含失败回读），nil = 请求本身没发出去。
+    func attachPhotoTag(_ item: PhotosAPI.Item, tag: PhotosAPI.Tag) async -> [PhotosAPI.Tag]? {
+        guard let manager = sessionManager else { return nil }
+        do {
+            try await PhotosAPI.addTag(itemID: item.id, tagIDs: [tag.id], manager: manager)
+        } catch {
+            showToast("「\(tag.name)」没有挂上，请重试", .err)
+            return nil
+        }
+        let fresh = await readPhotoTags(item, manager: manager)
+        if fresh.contains(where: { $0.id == tag.id }) {
+            showToast("已挂上「\(tag.name)」", .ok)
+            await photoShelf.reloadTags(manager)
+        } else {
+            showToast("「\(tag.name)」没有挂上，请重试", .err)
+        }
+        return fresh
+    }
+
+    /// 摘标签。参数形状与挂同款（假成功族），同样回读确认 + 重拉列表。
+    func detachPhotoTag(_ item: PhotosAPI.Item, tag: PhotosAPI.Tag) async -> [PhotosAPI.Tag]? {
+        guard let manager = sessionManager else { return nil }
+        do {
+            try await PhotosAPI.removeTag(itemID: item.id, tagIDs: [tag.id], manager: manager)
+        } catch {
+            showToast("「\(tag.name)」没有摘下来，请重试", .err)
+            return nil
+        }
+        let fresh = await readPhotoTags(item, manager: manager)
+        if !fresh.contains(where: { $0.id == tag.id }) {
+            showToast("已摘掉「\(tag.name)」", .ok)
+            await photoShelf.reloadTags(manager)
+        } else {
+            showToast("「\(tag.name)」没有摘下来，请重试", .err)
+        }
+        return fresh
+    }
+
+    /// 新建标签并挂上。🔴 标签本体没有删除 / 改名方法（建错即永久垃圾），
+    /// 空串与重名由信息栏的「新建」行拦（只在无匹配且不重名时出现），这里
+    /// 只兜一层：名字在服务端 trim 后撞上既有标签就复用那枚，不再建。
+    func createPhotoTag(_ item: PhotosAPI.Item, name draft: String) async -> [PhotosAPI.Tag]? {
+        guard let manager = sessionManager else { return nil }
+        let name = draft.trimmingCharacters(in: .whitespaces)
+        if let existing = photoShelf.tags.first(where: { $0.name == name }) {
+            return await attachPhotoTag(item, tag: existing)
+        }
+        let created: PhotosAPI.Tag?
+        do {
+            created = try await PhotosAPI.createTag(name: name, manager: manager)
+        } catch {
+            showToast("标签没有建出来，请重试", .err)
+            return nil
+        }
+        guard let created else {
+            showToast("标签没有建出来，请重试", .err)
+            return nil
+        }
+        await photoShelf.reloadTags(manager)
+        return await attachPhotoTag(item, tag: created)
     }
 
     /// 从相册移出（**只移容器、不删图**）。
@@ -3572,6 +3647,20 @@ final class AppState {
                 // 圈脸编辑：开查看器并直接进编辑模式 —— 已有脸框走一次真接口，
                 // 截图核对框位、标签与顶栏的编辑态。
                 await smokePhotoViewer(manager, advance: false, faceEdit: true)
+            } else if token == "phototags" {
+                // 信息栏标签段：开探针挂过标签的那张（photosprobe69 给 15705
+                // 挂过一枚），截图核对已挂行 × 与「添加标签」行。挑不到就落回
+                // 第一张，只能核「还没有标签」空态。
+                await smokePhotoViewer(manager, advance: false, itemID: 15705)
+            } else if token == "phototagadd" {
+                // 标签写回链路：开 15705、侧栏清单就绪，挂标签这件事让查看器
+                // 自己做（钩子走信息栏同一条 attachTag，itemTags 才会刷新）。
+                // 截图核对已挂行与 ×；截完在外部用探针摘掉恢复原状。
+                if photoShelf.listsPhase != .ready {
+                    await photoShelf.bootstrap(manager)
+                }
+                photoSmokeTagAdd = true
+                await smokePhotoViewer(manager, advance: false, itemID: 15705)
             } else if token == "photodrop" {
                 // 拖入遮罩：真拖拽 AI 发不出来，把高亮态与一份跨月摘要摆出来核形态
                 // （摘要两态：同月给路径、跨月给分月计数，这里挑跨月那份）。
@@ -3628,8 +3717,17 @@ final class AppState {
     /// 真机上没人点，取流链路就只证明到「海报出来了」这一步。
     private func smokePhotoViewer(_ manager: SessionManager, advance: Bool,
                                  video: Bool = false, mute: Bool = false,
-                                 faceEdit: Bool = false) async {
+                                 faceEdit: Bool = false, itemID: Int = 0) async {
         if !photos.isReady { await photos.load(manager, force: true) }
+        if itemID != 0 {
+            if let known = photos.loadedItems.first(where: { $0.id == itemID }) {
+                photos.openViewer(known)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                NSLog("[photos] 标签冒烟：已开 %@（id %d）", known.filename, known.id)
+                return
+            }
+            NSLog("[photos] 标签冒烟：库里没有 id %d，落回第一张", itemID)
+        }
         if faceEdit {
             photoSmokeFaceEdit = true
             // 圈脸冒烟要挑一张**有脸**的：15560 是探针（photosprobe58/59）反复

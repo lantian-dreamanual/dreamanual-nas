@@ -65,6 +65,16 @@ struct PhotoViewerView: View {
     /// 悬停中的已有脸框（悬停才出 ×）。
     @State private var hoveredFaceID: Int?
 
+    // 标签编辑（2026-10-21）。信息栏「标签」段：当前照片挂的标签逐行出 × 摘除，
+    // 「添加」展开内联表单 —— 输入即时筛现有标签（点行挂上），没有的就地新建。
+    // 写回通道 `Item.add_tag` / `remove_tag`（🔴 id 与 tag 都是方括号整数数组串，
+    // 裸数字静默空转）；成败回读 `get_tag`，假成功族。
+    @State private var itemTags: [PhotosAPI.Tag] = []
+    @State private var isAddingTag = false
+    @State private var tagDraft = ""
+    @State private var isWritingTag = false
+    @FocusState private var isTagFieldFocused: Bool
+
     // 视频
     @State private var player: AVPlayer?
     @State private var videoLoader: StreamLoader?
@@ -113,6 +123,14 @@ struct PhotoViewerView: View {
                 if !isVideo {
                     isEditingFaces = true
                     await loadFaces()
+                }
+            }
+            // 冒烟通路（`DM_UI=phototagadd`）：查看器一开就给这张挂第一枚标签，
+            // 走信息栏同一条 attachTag（API 写回 + 回读 + 刷 itemTags）。
+            if state.photoSmokeTagAdd {
+                state.photoSmokeTagAdd = false
+                if let tag = state.photoShelf.tags.first {
+                    attachTag(tag)
                 }
             }
             // 冒烟通路（`DM_UI=photovideo`）：查看器一开就播，省掉「点一下海报」
@@ -866,7 +884,7 @@ struct PhotoViewerView: View {
 
     // MARK: - 信息栏
 
-    /// 五段：文件 / 拍摄 / 相机 / 位置 / 内容。
+    /// 六段：文件 / 拍摄 / 相机 / 位置 / 内容 / 标签。
     ///
     /// **位置一段这版不渲染**：条目上没有现成的地点值，要走 `Geocoding` v1 查，
     /// 而那个接口还没实测（规划第六节第 4 条）。取不到就整段不占位 —— 留一个
@@ -908,6 +926,10 @@ struct PhotoViewerView: View {
                                         })
                         }
                         descriptionRow(item)
+                    }
+
+                    section("标签") {
+                        tagSection(item)
                     }
                 }
             }
@@ -1114,7 +1136,7 @@ struct PhotoViewerView: View {
         isDescriptionFieldFocused = false
     }
 
-    /// 编辑中切了照片：两处编辑都退出、弃草稿（不替用户把半句话写到另一张上）。
+    /// 编辑中切了照片：各处编辑都退出、弃草稿（不替用户把半句话写到另一张上）。
     private func exitEditingIfNeeded(_ newID: Int) {
         if isEditingDescription {
             isEditingDescription = false
@@ -1122,6 +1144,9 @@ struct PhotoViewerView: View {
         }
         if isEditingTime {
             isEditingTime = false
+        }
+        if isAddingTag {
+            closeTagAddForm()
         }
         if isEditingFaces {
             exitFaceEditing()
@@ -1155,6 +1180,169 @@ struct PhotoViewerView: View {
         }
     }
 
+    // MARK: - 标签
+
+    private func loadItemTags() async {
+        guard let item, let manager = state.sessionManager else { return }
+        itemTags = (try? await PhotosAPI.tags(itemID: item.id, manager: manager)) ?? []
+    }
+
+    /// 草稿筛出的可挂标签：排除已挂的，名字含草稿（大小写不敏感）。
+    private var tagMatches: [PhotosAPI.Tag] {
+        let word = tagDraft.trimmingCharacters(in: .whitespaces)
+        guard !word.isEmpty else { return [] }
+        let attached = Set(itemTags.map(\.id))
+        return state.photoShelf.tags.filter {
+            !attached.contains($0.id) && $0.name.localizedStandardContains(word)
+        }
+    }
+
+    /// 草稿是否与既有标签重名（trim 后逐字比）。重名的挂法是「点行挂上」，
+    /// 「新建」行不出现 —— 标签没有删除方法，建重了就是永久垃圾。
+    private var tagDraftIsDuplicate: Bool {
+        let word = tagDraft.trimmingCharacters(in: .whitespaces)
+        guard !word.isEmpty else { return false }
+        return state.photoShelf.tags.contains { $0.name == word }
+    }
+
+    private func attachTag(_ tag: PhotosAPI.Tag) {
+        guard let item, !isWritingTag else { return }
+        isWritingTag = true
+        Task {
+            defer { isWritingTag = false }
+            if let fresh = await state.attachPhotoTag(item, tag: tag) {
+                itemTags = fresh
+                tagDraft = ""
+            }
+        }
+    }
+
+    private func detachTag(_ tag: PhotosAPI.Tag) {
+        guard let item, !isWritingTag else { return }
+        isWritingTag = true
+        Task {
+            defer { isWritingTag = false }
+            if let fresh = await state.detachPhotoTag(item, tag: tag) {
+                itemTags = fresh
+            }
+        }
+    }
+
+    private func submitNewTag() {
+        let word = tagDraft.trimmingCharacters(in: .whitespaces)
+        guard let item, !word.isEmpty, !tagDraftIsDuplicate, !isWritingTag else { return }
+        isWritingTag = true
+        Task {
+            defer { isWritingTag = false }
+            if let fresh = await state.createPhotoTag(item, name: word) {
+                itemTags = fresh
+                tagDraft = ""
+            }
+        }
+    }
+
+    private func closeTagAddForm() {
+        isAddingTag = false
+        isTagFieldFocused = false
+        tagDraft = ""
+    }
+
+    /// 「标签」段：已挂的逐行出 ×；「添加」展开内联表单 —— 输入即时筛现有
+    /// 标签，没有匹配且不重名时给「新建」行。
+    @ViewBuilder
+    private func tagSection(_ item: PhotosAPI.Item) -> some View {
+        VStack(alignment: .leading, spacing: DmSpace.s6) {
+            if itemTags.isEmpty && !isAddingTag {
+                Text("还没有标签")
+                    .font(.system(size: DmText.t12))
+                    .foregroundColor(Color.dmInk3)
+            }
+            ForEach(itemTags) { tag in
+                HStack(spacing: DmSpace.s6) {
+                    LucideIcon("tag", size: DmIcon.i12)
+                        .foregroundColor(Color.dmAccent)
+                    Text(tag.name)
+                        .font(.system(size: DmText.t12))
+                        .foregroundColor(Color.dmInk)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    IconButton(iconName: "x", compact: true,
+                               label: "摘掉「\(tag.name)」") {
+                        detachTag(tag)
+                    }
+                }
+            }
+            if isAddingTag {
+                tagAddForm
+            } else {
+                Button {
+                    isAddingTag = true
+                    tagDraft = ""
+                    isTagFieldFocused = true
+                } label: {
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("plus", size: DmIcon.i12)
+                        Text("添加标签")
+                            .font(.system(size: DmText.t12))
+                    }
+                    .foregroundColor(Color.dmInk3)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// 添加表单：输入框 + 候选行（点行挂上）+ 新建行。挂完表单收着（草稿
+    /// 清空），连挂多枚再点一次「添加」。
+    private var tagAddForm: some View {
+        let word = tagDraft.trimmingCharacters(in: .whitespaces)
+        return VStack(alignment: .leading, spacing: DmSpace.s4) {
+            TextField("筛现有标签，没有的就地新建", text: $tagDraft)
+                .focused($isTagFieldFocused)
+                .formFieldRow()
+                .onSubmit { submitNewTag() }
+            ForEach(tagMatches.prefix(5)) { tag in
+                Button {
+                    attachTag(tag)
+                } label: {
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("tag", size: DmIcon.i12)
+                            .foregroundColor(Color.dmInk3)
+                        Text(tag.name)
+                            .font(.system(size: DmText.t12))
+                            .foregroundColor(Color.dmInk)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text("\(tag.itemCount) 张")
+                            .font(.system(size: DmText.t11))
+                            .foregroundColor(Color.dmInk3)
+                    }
+                    .padding(.horizontal, DmSpace.s8)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if !word.isEmpty && !tagDraftIsDuplicate {
+                Button {
+                    submitNewTag()
+                } label: {
+                    HStack(spacing: DmSpace.s6) {
+                        LucideIcon("plus", size: DmIcon.i12)
+                            .foregroundColor(Color.dmAccent)
+                        Text("新建“\(word)”")
+                            .font(.system(size: DmText.t12))
+                            .foregroundColor(Color.dmAccent)
+                    }
+                    .padding(.horizontal, DmSpace.s8)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     // MARK: - 取图
 
     private func load() async {
@@ -1166,6 +1354,8 @@ struct PhotoViewerView: View {
            let image = NSImage(data: data) {
             preview = image
         }
+        // 标签是条目级的，视频也有 —— 在视频提前返回之前拉。
+        await loadItemTags()
         // 视频不预取原片：`Download` 会把整段几十 MB 拉进内存，只为铺一张海报
         // 不划算 —— 海报就是缩略图（MOV 的首帧），播放按需取流。
         guard !item.isVideo else { return }
@@ -1202,8 +1392,15 @@ struct PhotoViewerView: View {
                 }
                 return nil
             }
-            // 描述 / 时间编辑中：Esc 只收起当次编辑（其余键照常交给输入框或
-            // 日历浮层），不然按 Esc 会把整个查看器关掉。
+            // 描述 / 时间 / 标签添加编辑中：Esc 只收起当次编辑（其余键照常交给
+            // 输入框或日历浮层），不然按 Esc 会把整个查看器关掉。
+            if isAddingTag {
+                if event.keyCode == 53 {
+                    closeTagAddForm()
+                    return nil
+                }
+                return event
+            }
             if isEditingDescription || isEditingTime {
                 if event.keyCode == 53 {
                     cancelDescription()
