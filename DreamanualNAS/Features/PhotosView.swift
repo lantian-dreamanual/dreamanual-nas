@@ -800,30 +800,34 @@ struct PhotosView: View {
     /// 地点屏：搜索框 + 按市分组。搜索词即时筛（本地 291 条），命中的是乡镇 /
     /// 县区 / 市 / 省 —— 「衢州」能把龙游县下全部乡镇带出来（`ChinaDivisions`）。
     /// 搜索态平铺结果；非搜索态按市分组，组头可点「看全部」聚合该市照片。
+    /// 🔴 搜索框**钉在面板上不随列表滚**（2026-10-21 用户定，与网格屏工具条同款
+    /// 固定法）—— 卷进去之后往下翻就没法搜索了。
     private var placesContent: some View {
         Group {
             if shelf.places.isEmpty {
                 PhotosNotice(icon: "circle-x", title: "还没有地点信息",
                              note: "照片带 GPS 时 NAS 会按拍摄地归类。")
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        DmSearchField(text: Binding(
-                            get: { shelf.placeQuery },
-                            set: { shelf.setPlaceQuery($0) }
-                        ), placeholder: "搜乡镇 / 县市 / 省")
-                        .frame(width: 280)
-                        .padding(.horizontal, DmSpace.s24)
-                        .padding(.top, DmSpace.s8)
-                        .padding(.bottom, DmSpace.s12)
+                VStack(alignment: .leading, spacing: 0) {
+                    DmSearchField(text: Binding(
+                        get: { shelf.placeQuery },
+                        set: { shelf.setPlaceQuery($0) }
+                    ), placeholder: "搜乡镇 / 县市 / 省")
+                    .frame(width: 280)
+                    .padding(.horizontal, DmSpace.s24)
+                    .padding(.top, DmSpace.s8)
+                    .padding(.bottom, DmSpace.s12)
 
-                        if shelf.placeQuery.isEmpty {
-                            placeGroups
-                        } else {
-                            placeSearchResults
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if shelf.placeQuery.isEmpty {
+                                placeGroups
+                            } else {
+                                placeSearchResults
+                            }
                         }
+                        .padding(.bottom, DmSpace.s24)
                     }
-                    .padding(.bottom, DmSpace.s24)
                 }
             }
         }
