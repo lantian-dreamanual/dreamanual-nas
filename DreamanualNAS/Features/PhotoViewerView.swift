@@ -32,6 +32,8 @@ struct PhotoViewerView: View {
     @State private var isEditingDescription = false
     /// 编辑中的草稿。进编辑态时从 `item.note` 复制，取消即弃。
     @State private var descriptionDraft = ""
+    /// 进编辑态时的原值：失焦提交走脏检查，没改字就不发请求。
+    @State private var descriptionOriginal = ""
     /// 编辑框焦点：进编辑态即聚焦，回车直接提交。
     @FocusState private var isDescriptionFieldFocused: Bool
 
@@ -565,17 +567,48 @@ struct PhotoViewerView: View {
     /// 与标签列断开，2026-10-21 用户截图指出）。输入框用行内嵌档
     /// `formFieldRow()`（32 / `panel-3`，与设置页「直连地址」同一档），
     /// 不用弹窗档的 38 高。
+    ///
+    /// **出口四条**（2026-10-21 用户反馈「没有按钮点不了」后补）：
+    /// 回车 / 失焦 / ✓ 提交，Esc / ✗ 取消。失焦提交要脏检查 —— 点一下别处
+    /// 没改字就发请求等于白写一次库，也白白刷一次回读。
     @ViewBuilder
     private func descriptionRow(_ item: PhotosAPI.Item) -> some View {
         row("描述") {
             if isEditingDescription {
-                TextField("给这张写点什么", text: $descriptionDraft)
-                    .focused($isDescriptionFieldFocused)
-                    .formFieldRow()
-                    .onSubmit { commitDescription() }
+                HStack(spacing: DmSpace.s8) {
+                    TextField("给这张写点什么", text: $descriptionDraft)
+                        .focused($isDescriptionFieldFocused)
+                        .onSubmit { commitDescription() }
+                        // 失焦提交：先让一拍再判断 —— 点 ✗ / ✓ 也是先失焦后跑
+                        // 按钮动作，不等这一拍就会「点了取消照样写回去」。
+                        .onChange(of: isDescriptionFieldFocused) { _, focused in
+                            guard !focused else { return }
+                            Task {
+                                try? await Task.sleep(for: .milliseconds(120))
+                                guard isEditingDescription,
+                                      !isDescriptionFieldFocused else { return }
+                                commitDescription()
+                            }
+                        }
+                    // 尾端两枚图标，形态照搜索框的清除钮（14 号、贴字段内边距）。
+                    Button { cancelDescription() } label: {
+                        LucideIcon("x", size: DmIcon.i14)
+                            .foregroundColor(Color.dmInk3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("取消")
+                    Button { commitDescription() } label: {
+                        LucideIcon("check", size: DmIcon.i14)
+                            .foregroundColor(Color.dmAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("保存")
+                }
+                .formFieldRow()
             } else {
                 DescriptionValueRow(note: item.note) {
                     descriptionDraft = item.note ?? ""
+                    descriptionOriginal = item.note ?? ""
                     isEditingDescription = true
                     isDescriptionFieldFocused = true
                 }
@@ -583,12 +616,21 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 提交描述：空串按「清空」处理（写回通道：JSON 编码空串）。
+    /// 提交描述：没改字就只退出、不发请求；空串按「清空」处理（写回通道：
+    /// JSON 编码空串）。
     private func commitDescription() {
+        let draft = descriptionDraft
+        let changed = draft != descriptionOriginal
         isEditingDescription = false
         isDescriptionFieldFocused = false
-        let draft = descriptionDraft
+        guard changed else { return }
         Task { await state.setPhotoDescription(draft) }
+    }
+
+    /// 取消：弃草稿，不发请求。
+    private func cancelDescription() {
+        isEditingDescription = false
+        isDescriptionFieldFocused = false
     }
 
     /// 编辑中切了照片：退出编辑、弃草稿（不替用户把半句话写到另一张上）。
@@ -659,7 +701,7 @@ struct PhotoViewerView: View {
             // 回车交给 onSubmit），不然按 Esc 会把整个查看器关掉。
             if isEditingDescription {
                 if event.keyCode == 53 {
-                    isEditingDescription = false
+                    cancelDescription()
                     return nil
                 }
                 return event
