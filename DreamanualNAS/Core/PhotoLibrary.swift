@@ -283,6 +283,16 @@ final class PhotoLibrary {
         return false
     }
 
+    /// 从人物里移除照片后的查看序列摘除：**时间轴分组不动**（照片还在库里），
+    /// 只把当前这份序列里的它摘掉 —— 从人物详情打开的查看器不该再翻到一张
+    /// 已经不属于这个人物的照片。正在看的正是它就把查看器收了。
+    func forgetInViewSequence(ids: Set<Int>) {
+        guard !ids.isEmpty else { return }
+        viewSequence = viewSequence.filter { !ids.contains($0.id) }
+        if let viewing = viewingID, ids.contains(viewing) { viewingID = nil }
+        positionCache = nil
+    }
+
     /// 本地剔除。删除请求发出去之后先按这个把界面改掉 —— 删没删掉由随后的
     /// 静默重拉校正（这张接口对不存在的 id 也回 `success`，「回了 ok」不算证据）。
     func forget(ids: Set<Int>) {

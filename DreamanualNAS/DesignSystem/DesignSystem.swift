@@ -315,6 +315,7 @@ struct LucideIcon: View {
         "images": "photo.on.rectangle",
         "users": "person.2",
         "user": "person",
+        "user-minus": "person.crop.circle.badge.minus",
         "map-pin": "mappin",
         "tag": "tag",
         "chevron-left": "chevron.left",

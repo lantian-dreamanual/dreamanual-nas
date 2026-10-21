@@ -853,8 +853,10 @@ final class AppState {
 
         /// 右键打在哪一类东西上。照片块与相册卡是两份动作，同一个浮层容器。
         enum Target {
-            /// 照片 / 视频块。`albumID` 非空表示当前在相册详情里（根级那条换「移出相册」）。
-            case items(item: PhotosAPI.Item, targets: [PhotosAPI.Item], albumID: Int?)
+            /// 照片 / 视频块。`albumID` 非空表示当前在相册详情里（根级那条换「移出相册」）；
+            /// `personID` 非空表示当前在人物详情里（根级多一条「从这个人物移除」）。
+            case items(item: PhotosAPI.Item, targets: [PhotosAPI.Item],
+                       albumID: Int?, personID: Int?)
             /// 相册卡（或相册详情页头的 ⋯）：改名 / 删除相册。
             case album(PhotosAPI.Album)
             /// 人物卡（或人物详情页头的 ⋯）：改名 / 归并到…。
@@ -869,9 +871,11 @@ final class AppState {
     }
 
     func openPhotoMenu(_ item: PhotosAPI.Item, at point: CGPoint,
-                       targets: [PhotosAPI.Item], albumID: Int?) {
+                       targets: [PhotosAPI.Item], albumID: Int?,
+                       personID: Int? = nil) {
         photoMenu = PhotoMenuRequest(target: .items(item: item, targets: targets,
-                                                    albumID: albumID),
+                                                    albumID: albumID,
+                                                    personID: personID),
                                      point: point)
     }
 
@@ -909,6 +913,8 @@ final class AppState {
         case renamePerson(PhotosAPI.Person)
         /// 人物归并：先选目标人物（已命名里挑），确认后并进去。
         case mergePerson(PhotosAPI.Person)
+        /// 从人物里移除这一张（人物详情右键）。照片本身不受影响。
+        case removeFromPerson(PhotosAPI.Item)
 
         var id: String {
             switch self {
@@ -919,6 +925,7 @@ final class AppState {
             case .addToAlbum(let items): return "addtoalbum:\(items.count)"
             case .renamePerson(let person): return "renameperson:\(person.id)"
             case .mergePerson(let person): return "mergeperson:\(person.id)"
+            case .removeFromPerson(let item): return "removefromperson:\(item.id)"
             }
         }
     }
@@ -1005,6 +1012,22 @@ final class AppState {
         }
         photos.resettleItem(id: item.id, time: saved)
         showToast("拍摄时间已改，照片挪到了新的日期", .ok)
+    }
+
+    /// 把这张照片从当前人物里移除。弹窗确认后走这；成功就地校正人物详情
+    /// （条目摘掉、计数减一）与查看器序列。
+    func removePhotoFromPerson(_ item: PhotosAPI.Item) async {
+        guard let manager = sessionManager,
+              let person = photoShelf.person else { return }
+        let ok = await PhotoWriter.removeFromPerson(item.id, personID: person.id,
+                                                    manager: manager)
+        if ok {
+            photoShelf.notePersonItemRemoved(item.id, personID: person.id)
+            photos.forgetInViewSequence(ids: [item.id])
+            showToast("已从这个人物移除，照片保留在照片库里", .ok)
+        } else {
+            showToast("没有移除成功，请重试", .err)
+        }
     }
 
     /// 加到相册。加完把相册计数补上（相册卡与详情页头都用 `item_count` 报数）。
@@ -3722,13 +3745,24 @@ final class AppState {
                 } else {
                     NSLog("[photos] 没有人物，人物菜单跳过")
                 }
-            case "renameperson", "mergeperson":
+            case "renameperson", "mergeperson", "removeperson":
                 if let person = photoShelf.person ?? photoShelf.people.first(where: { !$0.isNamed }) {
-                    let dialog: PhotoDialog = action == "renameperson"
-                        ? .renamePerson(person) : .mergePerson(person)
+                    let dialog: PhotoDialog
+                    switch action {
+                    case "renameperson": dialog = .renamePerson(person)
+                    case "mergeperson": dialog = .mergePerson(person)
+                    default:
+                        // 从人物移除要走一张真照片：拿人物详情的第一条。
+                        guard let item = photoShelf.items.first else {
+                            NSLog("[photos] 人物详情没有条目，移除弹窗跳过")
+                            return
+                        }
+                        dialog = .removeFromPerson(item)
+                    }
                     openPhotoDialog(dialog)
                     NSLog("[photos] 人物%@弹窗：%@（id %d）",
-                          action == "renameperson" ? "命名" : "归并",
+                          action == "renameperson" ? "命名"
+                          : action == "mergeperson" ? "归并" : "移除",
                           person.displayName, person.id)
                 } else {
                     NSLog("[photos] 没有人物，人物弹窗跳过")

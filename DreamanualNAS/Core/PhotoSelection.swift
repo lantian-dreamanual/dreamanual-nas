@@ -277,6 +277,37 @@ enum PhotoWriter {
         return date
     }
 
+    /// 把照片从人物里去掉：列出这张里该人物的脸（同张同脸可多枚），逐个摘，
+    /// 回读确认清空。回 `true` 才算成 —— `delete_face` 对假 id 也回 ok。
+    ///
+    /// 通道 2026-10-21 实测定案（`photosprobe29`）：`Browse.Item.list_face`
+    /// （`id_item` + `person_id`）拿脸 id → `Browse.Person.delete_face`
+    /// （`person_id` + `face_id` 明文）逐枚摘。
+    static func removeFromPerson(_ itemID: Int, personID: Int,
+                                 manager: SessionManager) async -> Bool {
+        let faceIDs: [Int]
+        do {
+            faceIDs = try await PhotosAPI.faceIDs(itemID: itemID, personID: personID,
+                                                  manager: manager)
+        } catch {
+            NSLog("[photos] 列人脸失败：%@", Self.describe(error))
+            return false
+        }
+        guard !faceIDs.isEmpty else { return false }
+        do {
+            for faceID in faceIDs {
+                try await PhotosAPI.deleteFace(personID: personID, faceID: faceID,
+                                               manager: manager)
+            }
+        } catch {
+            NSLog("[photos] 摘脸失败：%@", Self.describe(error))
+            return false
+        }
+        let rest = (try? await PhotosAPI.faceIDs(itemID: itemID, personID: personID,
+                                                 manager: manager)) ?? []
+        return rest.isEmpty
+    }
+
     // MARK: - 人物
 
     /// 人物命名 / 改名。写完回读列表确认新名字落库了。

@@ -338,6 +338,20 @@ final class PhotoShelf {
         }
     }
 
+    /// 从人物里移除照片后的就地校正：人物详情这一屏把该条摘掉、计数减一。
+    /// 序列摘除走 `PhotoLibrary.forgetInViewSequence`（不归这管）。
+    func notePersonItemRemoved(_ itemID: Int, personID: Int) {
+        guard person?.id == personID,
+              items.contains(where: { $0.id == itemID }) else { return }
+        items.removeAll { $0.id == itemID }
+        if let current = person {
+            person = PhotosAPI.Person(id: current.id, name: current.name,
+                                      itemCount: max(0, current.itemCount - 1),
+                                      coverKey: current.coverKey,
+                                      coverUnitID: current.coverUnitID)
+        }
+    }
+
     /// 相册里加减了照片之后校正计数：相册详情页与相册卡都拿 `item_count` 报数，
     /// 不重拉整份列表也得让数字对得上。
     func noteAlbumCount(_ albumID: Int, delta: Int) {

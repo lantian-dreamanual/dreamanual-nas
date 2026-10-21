@@ -245,7 +245,8 @@ enum PhotosAPI {
     struct Person: Identifiable, Hashable {
         let id: Int
         let name: String
-        let itemCount: Int
+        /// 张数。`var`：从人物里移除照片后就地减一（`PhotoShelf` 重建一份）。
+        var itemCount: Int
         /// 封面走 `Thumbnail` 的两件：`cache_key` 的前缀就是 `unit_id`。
         let coverKey: String
         let coverUnitID: Int
@@ -473,6 +474,37 @@ enum PhotosAPI {
               let list = root["list"] as? [[String: Any]],
               let first = list.first else { return nil }
         return Item(json: first)
+    }
+
+    /// 某张照片里的人物脸框。`list_face` 回这张照片里**所有人物**的脸
+    /// （face_id / person_id / 名字 / 边界框），这里按 `personID` 过滤后只回
+    /// 脸 id —— 从人物里移除照片用的就是这些 id。
+    ///
+    /// 通道 2026-10-21 实测（`photosprobe29`）：参数名 `id_item` + `person_id`
+    /// 都是 120 逐轮报出来的。
+    static func faceIDs(itemID: Int, personID: Int,
+                        manager: SessionManager) async throws -> [Int] {
+        let raw = try await manager.call(
+            kind: .file, api: "\(team).Browse.Item", version: 7, method: "list_face",
+            params: ["id_item": String(itemID), "person_id": String(personID)])
+        guard let root = raw as? [String: Any],
+              let list = root["list"] as? [[String: Any]] else { return [] }
+        return list.compactMap { entry in
+            guard let pid = entry["person_id"] as? Int, pid == personID,
+                  let faceID = entry["face_id"] as? Int else { return nil }
+            return faceID
+        }
+    }
+
+    /// 把一枚脸从人物里摘掉（= 这张照片不再属于该人物）。
+    ///
+    /// 🔴 假 `face_id` 也回 ok + 空 `list`（与 delete / set 同一族假成功）——
+    /// 成败只能回读，见 `PhotoWriter.removeFromPerson`。
+    static func deleteFace(personID: Int, faceID: Int,
+                           manager: SessionManager) async throws {
+        _ = try await manager.call(
+            kind: .file, api: "\(team).Browse.Person", version: 3, method: "delete_face",
+            params: ["person_id": String(personID), "face_id": String(faceID)])
     }
 
     /// 新建相册。**`Album` 族没有 `create`** —— 它在 `Browse.NormalAlbum` 上

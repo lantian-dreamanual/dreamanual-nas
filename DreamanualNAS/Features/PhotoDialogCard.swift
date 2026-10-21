@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 照片的七张写操作弹窗：新建相册 / 相册改名 / 删除照片 / 删除相册 / 选一个相册 /
-/// 人物命名改名 / 人物归并。
+/// 照片的八张写操作弹窗：新建相册 / 相册改名 / 删除照片 / 删除相册 / 选一个相册 /
+/// 人物命名改名 / 人物归并 / 从人物移除照片。
 ///
 /// 挂在根视图（`RootView` 的 `.dmModal`），遮罩盖住整个窗口 —— 与文件写操作弹窗
 /// 同一挂法、同一层序。请求挂在 `AppState.photoDialog` 上，冒烟通路能在视图之外
@@ -27,7 +27,7 @@ struct PhotoDialogCard: View {
             _name = State(initialValue: album.name)
         case .renamePerson(let person):
             _name = State(initialValue: person.isNamed ? person.name : "")
-        case .delete, .addToAlbum, .deleteAlbum, .mergePerson:
+        case .delete, .addToAlbum, .deleteAlbum, .mergePerson, .removeFromPerson:
             _name = State(initialValue: "")
         }
     }
@@ -56,6 +56,8 @@ struct PhotoDialogCard: View {
             albumPicker(items)
         case .mergePerson(let person):
             personPicker(person)
+        case .removeFromPerson(let item):
+            removeFromPersonDialog(item)
         }
     }
 
@@ -158,6 +160,29 @@ struct PhotoDialogCard: View {
             Button("删除相册") {
                 state.closePhotoDialog()
                 Task { await state.deletePhotoAlbum(album) }
+            }
+            .buttonStyle(DangerButtonStyle())
+        }
+    }
+
+    // MARK: - 从人物移除
+
+    /// 从人物移除单张：照片本体不动，只摘这个人物的脸（`Person.delete_face`）。
+    /// 不可逆的是「归回人物」这一步 —— 摘掉后 app 里没有再把脸加回去的通道。
+    private func removeFromPersonDialog(_ item: PhotosAPI.Item) -> some View {
+        DmModalCard(title: "把“\(item.filename)”从这个人物移除？",
+                    onClose: { state.closePhotoDialog() }) {
+            DmDangerNote(text: "这个人物下不再显示这张照片，不能撤销。")
+            Text("照片本体仍在照片库里，相册与其他人物不受影响。")
+                .font(.system(size: DmText.t12))
+                .foregroundColor(Color.dmInk2)
+                .fixedSize(horizontal: false, vertical: true)
+        } foot: {
+            Button("取消") { state.closePhotoDialog() }
+                .buttonStyle(SecondaryButtonStyle())
+            Button("移除") {
+                state.closePhotoDialog()
+                Task { await state.removePhotoFromPerson(item) }
             }
             .buttonStyle(DangerButtonStyle())
         }

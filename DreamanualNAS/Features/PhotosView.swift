@@ -323,6 +323,12 @@ struct PhotosView: View {
         return nil
     }
 
+    /// 正在看的人物 id（详情页右键多一条「从这个人物移除」）。
+    private var currentPersonID: Int? {
+        if case .person(let id) = shelf.route { return id }
+        return nil
+    }
+
     /// 选中项按当前屏的顺序排（下载 / 删除的批次顺序稳定，日志也读得懂）。
     private var selectedItems: [PhotosAPI.Item] {
         currentItems.filter { selection.contains($0.id) }
@@ -630,9 +636,11 @@ struct PhotosView: View {
                         density: density,
                         countNote: nil,
                         albumID: nil,
+                        personID: nil,
                         onOpen: { item, sequence in library.openViewer(item, in: sequence) },
                         onContext: { item, point, targets in
-                            state.openPhotoMenu(item, at: point, targets: targets, albumID: nil)
+                            state.openPhotoMenu(item, at: point, targets: targets,
+                                                albumID: nil, personID: nil)
                         }
                     )
                 }
@@ -668,9 +676,11 @@ struct PhotosView: View {
                         density: density,
                         countNote: nil,
                         albumID: nil,
+                        personID: nil,
                         onOpen: { item, sequence in library.openViewer(item, in: sequence) },
                         onContext: { item, point, targets in
-                            state.openPhotoMenu(item, at: point, targets: targets, albumID: nil)
+                            state.openPhotoMenu(item, at: point, targets: targets,
+                                                albumID: nil, personID: nil)
                         }
                     )
                 }
@@ -702,10 +712,12 @@ struct PhotosView: View {
                         density: density,
                         countNote: shelf.groupsByIndexed ? "进库" : nil,
                         albumID: currentAlbumID,
+                        personID: currentPersonID,
                         onOpen: { item, sequence in library.openViewer(item, in: sequence) },
                         onContext: { item, point, targets in
                             state.openPhotoMenu(item, at: point, targets: targets,
-                                                albumID: currentAlbumID)
+                                                albumID: currentAlbumID,
+                                                personID: currentPersonID)
                         }
                     )
                 }
@@ -1036,6 +1048,8 @@ private struct PhotoDayGrid: View {
     let countNote: String?
     /// 正在看的相册（详情页右键换「移出相册」）。
     let albumID: Int?
+    /// 正在看的人物（详情页右键多「从这个人物移除」）。
+    let personID: Int?
     let onOpen: (PhotosAPI.Item, [PhotosAPI.Item]) -> Void
     let onContext: (PhotosAPI.Item, CGPoint, [PhotosAPI.Item]) -> Void
 

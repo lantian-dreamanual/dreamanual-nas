@@ -420,9 +420,10 @@ struct RootView: View {
                                 state.closePhotoMenu()
                                 state.openPhotoDialog(.mergePerson(person))
                             }
-                        case .items(let item, let targets, let albumID):
+                        case .items(let item, let targets, let albumID, let personID):
                             if request.phase == .root {
-                                itemRows(item: item, targets: targets, albumID: albumID)
+                                itemRows(item: item, targets: targets,
+                                         albumID: albumID, personID: personID)
                             } else {
                                 albumPickerRows(targets: targets)
                             }
@@ -439,10 +440,11 @@ struct RootView: View {
         .ignoresSafeArea()
     }
 
-    /// 照片 / 视频块的根级五项。
+    /// 照片 / 视频块的根级动作。人物详情里（`personID` 非空）多一条危险项
+    /// 「从这个人物移除」—— 照片本体不动，只摘这个人物的脸。
     @ViewBuilder
     private func itemRows(item: PhotosAPI.Item, targets: [PhotosAPI.Item],
-                          albumID: Int?) -> some View {
+                          albumID: Int?, personID: Int?) -> some View {
         let single = targets.count == 1
         DmMenuRow(title: "打开", icon: "image") {
             state.closePhotoMenu()
@@ -474,6 +476,12 @@ struct RootView: View {
         DmMenuRow(title: PhotoMenu.deleteTitle(targets), icon: "trash") {
             state.closePhotoMenu()
             state.openPhotoDialog(.delete(targets))
+        }
+        if personID != nil {
+            DmMenuRow(title: "从这个人物移除", icon: "user-minus") {
+                state.closePhotoMenu()
+                state.openPhotoDialog(.removeFromPerson(item))
+            }
         }
     }
 
@@ -572,7 +580,8 @@ enum FileMenu {
 /// 照片右键菜单的摆位与行数。宽与项高与歌曲 / 文件菜单同档。
 ///
 /// 根级：打开 / 在文件夹中显示 / 下载原图 / 添加到相册（相册详情里是「移出相册」）
-/// / 删除，恒 5 行、2 条分隔线；二级面板是「新建相册…」+ 每个相册一行。
+/// / 删除，恒 5 行、2 条分隔线（人物详情里多一条「从这个人物移除」，6 行）；
+/// 二级面板是「新建相册…」+ 每个相册一行。
 enum PhotoMenu {
     static let width: CGFloat = 196
     static let itemHeight: CGFloat = 30
@@ -582,9 +591,10 @@ enum PhotoMenu {
         switch request.target {
         // 相册卡 / 人物卡与各自详情页头的 ⋯：两条动作（一条分隔线）。
         case .album, .person: return 2
-        case .items:
+        case .items(_, _, _, let personID):
             switch request.phase {
-            case .root: return 5
+            // 人物详情里多一条「从这个人物移除」。
+            case .root: return personID != nil ? 6 : 5
             case .albumPicker: return 1 + max(albums, 0)
             }
         }
