@@ -151,7 +151,10 @@ struct PlayerBarView: View {
 
     // MARK: 正在播
 
-    /// 左侧「正在播」：封面 + 歌名 + 歌手/专辑，末尾跟一颗星。
+    /// 左侧「正在播」：封面 + 歌名 + 歌手/专辑，星星**紧跟歌名**（2026-10-22 用户
+    /// 点名：先前歌名区用 `maxWidth: .infinity` 撑满 300 的栏，星星被钉到栏右沿、
+    /// 歌名一短就隔着老远）。末尾 `Spacer` 吸收余量 —— 长歌名照旧截断，星星位置
+    /// 只跟文字走。星星在进入沉浸的按钮**外面**：进出沉浸是封面与歌名，评分不是。
     ///
     /// 封面与歌名是一颗按钮 —— **点它进出沉浸模式**（原型：「点播放条的封面或歌名
     /// 进来，再点退出」）。没有正在播的歌时按钮禁用，点不动也不会进那一屏。
@@ -169,7 +172,6 @@ struct PlayerBarView: View {
                     )
                     trackLabels
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -180,6 +182,9 @@ struct PlayerBarView: View {
             if let song = engine?.currentSong {
                 ratingButton(for: song)
             }
+
+            // 余量吸收在最后：歌名短时星星贴着文字，长时由它把行压回栏宽。
+            Spacer(minLength: 0)
         }
         .frame(width: 300, alignment: .leading)
     }
@@ -190,9 +195,13 @@ struct PlayerBarView: View {
                 Text(song.title)
                     .font(.system(size: DmText.t13, weight: .semibold))
                     .foregroundColor(Color.dmInk)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text([song.artist, song.album].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.system(size: DmText.t12))
                     .foregroundColor(Color.dmInk3)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             } else {
                 Text("未在播放")
                     .font(.system(size: DmText.t13, weight: .medium))
@@ -208,7 +217,6 @@ struct PlayerBarView: View {
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func ratingButton(for song: AudioSong) -> some View {

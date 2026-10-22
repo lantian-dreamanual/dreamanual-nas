@@ -89,6 +89,7 @@ enum DmText {
     static let t20: CGFloat = 20
     static let t28: CGFloat = 28
     static let t34: CGFloat = 34
+    static let t44: CGFloat = 44
 }
 
 /// 图标尺寸。用法：LucideIcon("play", size: DmIcon.i16)
