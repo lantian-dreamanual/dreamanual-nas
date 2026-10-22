@@ -268,6 +268,23 @@ final class AppState {
         lastMethod ?? (DirectAddress.parse(directAddress) != nil ? .direct : .quickconnect)
     }
 
+    /// 自动连失败后的换路判定。首把永远按 `resumeMethod`（上次成功的方式），
+    /// 但上一把若是**网络级失败**（非密码被拒）就换另一条路 —— 家里直连成功
+    /// 过一次落盘成 direct，人带着电脑出门后直连永远到不了 NAS，原地重试
+    /// 五把全是白费（2026-10-22 用户卡在连接页）。密码被拒不换：换端点再送
+    /// 一把等于把账号多喂一次 DSM 自动封锁，而且凭据按端点键存，另一条路
+    /// 的口令未必对 —— 那种失败让用户回连接页接方向盘。连上后 `connect`
+    /// 会把成功的方式落盘，下回自动连自然跟上。
+    private func nextAutoMethod(after tried: ConnectMethod) -> ConnectMethod {
+        guard let err = lastConnectError, !Self.isAuthRejection(err) else { return tried }
+        let flipped: ConnectMethod = tried == .direct ? .quickconnect : .direct
+        NSLog("[connect] %@ 到不了 NAS（%@），换%@再试",
+              tried == .direct ? "直连" : "QuickConnect",
+              err.localizedDescription,
+              flipped == .direct ? "直连" : "QuickConnect")
+        return flipped
+    }
+
     /// 设置页「重新连接」按**当前配置**走：直连地址填了就走直连。
     ///
     /// 与 `resumeMethod` 的差别就是用户报的那个 bug —— 上次成功走的是中继
@@ -593,6 +610,7 @@ final class AppState {
         rebootReconnectTask?.cancel()
         rebootReconnectTask = Task { [weak self] in
             guard let self else { return }
+            var method = self.resumeMethod
             for attempt in 1...15 {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
                 if Task.isCancelled { return }
@@ -604,14 +622,18 @@ final class AppState {
                     NSLog("[connect] 重启等待：拿不到凭据，收手")
                     return
                 }
-                NSLog("[connect] 重启等待第 %d 把", attempt)
-                await self.connect(password: password, method: self.resumeMethod, auto: true)
+                NSLog("[connect] 重启等待第 %d 把（%@）",
+                      attempt, method == .direct ? "直连" : "QuickConnect")
+                await self.connect(password: password, method: method, auto: true)
                 if self.isConnected {
                     NSLog("[connect] 重启完成，已自动重连")
                     return
                 }
                 // 等待期间对用户也是「连接中」，探测次数只进日志。
+                // 网络级失败换条路（见 `nextAutoMethod`）：重启等待多发生在
+                // 远程，落盘方式是直连时这里不换就永远等不到。
                 self.phase = .retrying
+                method = self.nextAutoMethod(after: method)
             }
             NSLog("[connect] 重启等待超时（5 分钟），等手动重连")
             if let err = self.lastConnectError {
@@ -1893,6 +1915,7 @@ final class AppState {
         autoConnectTask?.cancel()
         autoConnectTask = Task { [weak self] in
             guard let self else { return }
+            var method = self.resumeMethod
             let waits: [Double] = [0.0, 5.0, 15.0, 30.0, 60.0]
             for (n, wait) in zip([1, 2, 3, 4, 5], waits) {
                 if Task.isCancelled {
@@ -1904,7 +1927,8 @@ final class AppState {
                     NSLog("[connect] 上一次是密码被拒（%@），不重试", err.localizedDescription)
                     return
                 }
-                NSLog("[connect] 自动连接第 %d 把", n)
+                NSLog("[connect] 自动连接第 %d 把（%@）",
+                      n, method == .direct ? "直连" : "QuickConnect")
                 if wait > 0 {
                     NSLog("[connect] 未连上（%@），%d 秒后再试",
                           self.lastConnectError?.localizedDescription ?? "未知",
@@ -1913,11 +1937,13 @@ final class AppState {
                     if Task.isCancelled { return }
                     if self.isConnected || self.phase.isBusy { return }
                 }
-                await self.connect(password: password, method: self.resumeMethod, auto: true)
+                await self.connect(password: password, method: method, auto: true)
                 if self.isConnected { return }
                 // 中间失败对用户只是「还在连接中」：次数与倒计时进日志，界面
-                // 保持一个连接中的状态就够了。
+                // 保持一个连接中的状态就够了。网络级失败换条路（见
+                // `nextAutoMethod`），密码被拒不换、下一把开头就会收手。
                 if n < 5 { self.phase = .retrying }
+                method = self.nextAutoMethod(after: method)
             }
             NSLog("[connect] 自动连接五把都没成，等网络恢复或手动连")
             if let err = self.lastConnectError {
