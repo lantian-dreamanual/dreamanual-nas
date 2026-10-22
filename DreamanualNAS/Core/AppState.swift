@@ -2735,6 +2735,13 @@ final class AppState {
             await confirmPower(.reboot)
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             dumpStatus()
+        } else if token == "powershutdown" {
+            // 真关机 —— NAS 不会自己回来，等待重连会一直挂着，直到手动开机。
+            // 只该在真机验证时用（验证点：NAS 真断电 + app 转等待重连不崩）。
+            NSLog("[power] 冒烟：确认框之外直接发关机指令")
+            await confirmPower(.shutdown)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            dumpStatus()
         } else if isOfflineToken(token) {
             runOffline(token)
         } else {
