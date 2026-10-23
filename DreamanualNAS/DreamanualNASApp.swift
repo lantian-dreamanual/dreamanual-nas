@@ -28,11 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    /// Dock 点图标唤起：有窗（藏着）就取出来置前；窗口真没了就交回 SwiftUI
-    /// 重建 WindowGroup（返回 true 让 SwiftUI 的恢复机制接着跑）。
+    /// Dock 点图标唤起：有窗（藏着）就取出来置前，**返回 false** —— 返回 true 会
+    /// 让 SwiftUI 的 WindowGroup 恢复机制再造一个新窗，藏窗取出来 + 新窗 =
+    /// 两个面板（2026-10-23 用户抓到）。窗口真没了（⌘W 走了 SwiftUI 的销毁路径）
+    /// 才返回 true 交回 SwiftUI 重建（重建安全，见 AppShellController 的注释）。
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard shell.hasMainWindow else { return true }
         shell.showMainWindow()
-        return true
+        return false
     }
 
     /// Dock 右键菜单：不开 app 界面也能唤起主窗。

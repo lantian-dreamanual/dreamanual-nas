@@ -297,6 +297,10 @@ final class AppShellController: NSObject {
         mainWindow?.orderOut(nil)
     }
 
+    /// 有没有可唤起的主窗（藏着的也算）。Dock reopen 判「取出来置前」还是
+    /// 「交回 SwiftUI 重建」用。
+    var hasMainWindow: Bool { mainWindow != nil }
+
     /// 唤起主窗。窗口被真销毁的兜底路径交给 SwiftUI 自己的 reopen 重建
     /// （`restoreAndAutoConnect` / `installKeyMonitor` 都有幂等守卫，重建安全）。
     func showMainWindow() {
