@@ -592,7 +592,7 @@ final class AppState {
         // 会话马上就没用了：本地先断干净（停保活、清快照），面板转离线。
         await disconnect()
         if kind == .shutdown {
-            showToast("关机指令已发出，NAS 正在下电", .ok)
+            showToast("关机指令已发出，NAS 即将关机", .ok)
         } else {
             showToast("重启指令已发出，NAS 回来就自动重连", .ok)
             startRebootReconnect(endpoint: endpoint, user: user)
@@ -601,7 +601,7 @@ final class AppState {
 
     private var rebootReconnectTask: Task<Void, Never>?
 
-    /// 低频等待重连。两条路走它：app 内点重启 / 重启等待（NAS 下电到回来约
+    /// 低频等待重连。两条路走它：app 内点重启 / 重启等待（NAS 关机到回来约
     /// 2 分钟，常规自动连五把（0/5/15/30/60 秒）撑不过这个窗口）；以及心跳
     /// 判死链路（`handleLinkLost`）与手动重连失败（NAS 还没起来）—— 同样是
     /// 「等机器回来」。每 20 秒探一把、最多 5 分钟；到点收手留给手动。用户
@@ -4534,7 +4534,7 @@ final class AppState {
         }
     }
 
-    /// 链路失联自愈：NAS 下电（定时关机落在 app 开着的时候就是这条路）或
+    /// 链路失联自愈：NAS 关机（定时关机落在 app 开着的时候就是这条路）或
     /// 中继端口重分配后，旧会话发的每个请求都打在死端点上 —— 网络错误触发
     /// 不了会话重登（那只认业务层的会话失效），链路监控也只认本机网络的
     /// 断→通跳变。唯一出路是重新解析端点，心跳连败判死后走到这里：
@@ -4552,7 +4552,7 @@ final class AppState {
         widgetPushTask = nil
         if let manager = sessionManager {
             await manager.stopKeepAlive()
-            // 不 logout：NAS 多半已下电，logout 只会白等一个超时
+            // 不 logout：NAS 多半已关机，logout 只会白等一个超时
         }
         sessionManager = nil
         endpointLabel = ""

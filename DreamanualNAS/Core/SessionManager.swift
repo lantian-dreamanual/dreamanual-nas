@@ -34,7 +34,7 @@ actor SessionManager {
     /// 最近一次心跳成功的时间，界面上要看「连接还活着吗」。
     private(set) var lastHeartbeat: Date?
     private(set) var heartbeatFailure: String?
-    /// 连续失败计数：连着两拍没探通才判链路死亡（NAS 下电 / 中继端口重分配），
+    /// 连续失败计数：连着两拍没探通才判链路死亡（NAS 关机 / 中继端口重分配），
     /// 单次失败多半是链路抖一下，不劳师动众。
     private var heartbeatFailures = 0
     /// 链路判死时调用（在 actor 里触发；AppState 收到后自己切主线程处理）。

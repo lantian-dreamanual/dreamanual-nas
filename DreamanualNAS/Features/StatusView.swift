@@ -293,7 +293,7 @@ private struct PowerActionRow: View {
 ///
 /// 影响清单按动作给：共通一条「传输会中断」，关机加「无法远程唤醒」
 /// （硬约束走 `DmDangerNote`），重启加「约 2 分钟回来、会自动重连」。
-/// 执行中两颗按钮都锁 —— 指令发出去 NAS 就下电了，重复点没有意义。
+/// 执行中两颗按钮都锁 —— 指令发出去 NAS 就关机了，重复点没有意义。
 struct PowerConfirmCard: View {
     @Environment(AppState.self) private var state
     @State private var isExecuting = false

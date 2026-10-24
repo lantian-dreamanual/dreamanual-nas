@@ -291,6 +291,10 @@ struct LucideIcon: View {
         "memory-stick": "memorychip",
         "clock": "clock",
         "hard-drive": "internaldrive",
+        // 关机 / 重启确认弹窗「传输会中断」那条（2026-10-25）。这枚曾缺席兜底表
+        // —— 资产、SF 名两头落空，LucideIcon 退默认 `questionmark`，弹窗里画出一个
+        // 问号（用户截图抓到）。`arrow.up.arrow.down` 问过 `NSImage` 存在。
+        "arrow-down-up": "arrow.up.arrow.down",
         // 开关机计划那一批（2026-10-17）。`calendar.badge.clock` 问过
         // `NSImage(systemSymbolName:)` 确实存在（`calendar.day.timeline.left` 也在，
         // 但它画的是时间轴，取的是另一件事的意象）。
